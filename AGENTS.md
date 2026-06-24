@@ -21,26 +21,26 @@ is canonical; narrower tool configs defer to it.
 
 ## Backlog layout
 
-- `docs/tasks/active/PLxxxx.md` — open work. Front-matter: `id`, `title`,
+- `docs/tasks/active/TRLxxxx.md` — open work. Front-matter: `id`, `title`,
   `status: active`, `milestone`, `priority`, `effort`, `depends_on`, `summary`.
-- `docs/tasks/completed/tasks/PLxxxx.md` — finished work, history preserved.
+- `docs/tasks/completed/tasks/TRLxxxx.md` — finished work, history preserved.
   Front-matter: `id`, `title`, `status: completed`, `completed_on`; carry over
   `priority`/`effort`/`depends_on`. Indexed in `completed/index.md`.
-- `docs/tasks/removed/PLxxxx.md` — work deliberately not pursued. Front-matter:
+- `docs/tasks/removed/TRLxxxx.md` — work deliberately not pursued. Front-matter:
   `status: removed`, `removed_on`, `removed_reason`; no `milestone`. Archived,
   never deleted; the id is never reused. Indexed in `removed/index.md`.
 - `docs/tasks/README.md` — generated index. Never hand-edit between the
   `BEGIN/END GENERATED` markers.
 - `docs/tasks/backlog.json` — generated machine index. Never hand-edit.
 
-IDs are `PL` + 4 digits (`PL0001`), taken from the **Next task ID** line in the
+IDs are `TRL` + 4 digits (`TRL0001`), taken from the **Next task ID** line in the
 generated README. Never reuse an id.
 
 ## Front-matter schema
 
 | field | required | rule |
 | --- | --- | --- |
-| `id` | yes | matches the filename (`PL0007`) |
+| `id` | yes | matches the filename (`TRL0007`) |
 | `title` | yes | one line |
 | `status` | yes | `active` \| `completed` \| `removed` |
 | `milestone` | active only | one of the configured milestones |
@@ -82,12 +82,12 @@ After adding, moving, or editing any item, run `npm run backlog:readme` (or
 README tables and `backlog.json`. CI runs `npm run backlog:check` (`--check`),
 which fails if either is stale or any item is invalid.
 
-**Closing a task:** move `active/PLxxxx.md` → `completed/tasks/PLxxxx.md`, set
+**Closing a task:** move `active/TRLxxxx.md` → `completed/tasks/TRLxxxx.md`, set
 `status: completed` with a real `completed_on` (ISO date), drop `milestone` and
 `summary`, carry `priority`/`effort`/`depends_on`, add a row to
 `completed/index.md`, and regenerate — in the same change that ships the work.
 
-**Removing a task:** move to `removed/PLxxxx.md`, set `status: removed` with
+**Removing a task:** move to `removed/TRLxxxx.md`, set `status: removed` with
 `removed_on`/`removed_reason`, add to `removed/index.md`, and regenerate.
 
 ## Roadmap

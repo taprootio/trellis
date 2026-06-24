@@ -1,5 +1,5 @@
 {
-  "idPrefix": "PL",
+  "idPrefix": "TRL",
   "idWidth": 4,
   "milestones": ["Alpha", "Beta", "v1", "Future"],
   "priorities": ["High", "Medium", "Low"],
