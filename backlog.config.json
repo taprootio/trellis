@@ -1,0 +1,7 @@
+{
+  "idPrefix": "PL",
+  "idWidth": 4,
+  "milestones": ["Alpha", "Beta", "v1", "Future"],
+  "priorities": ["High", "Medium", "Low"],
+  "effort": [1, 2, 3, 5, 8, 13, 21]
+}

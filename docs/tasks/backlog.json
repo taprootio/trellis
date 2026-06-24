@@ -1,0 +1,173 @@
+{
+  "prefix": "PL",
+  "milestones": [
+    "Alpha",
+    "Beta",
+    "v1",
+    "Future"
+  ],
+  "nextId": "PL0014",
+  "counts": {
+    "active": 13,
+    "completed": 0,
+    "removed": 0
+  },
+  "tasks": [
+    {
+      "id": "PL0001",
+      "title": "Define the Trellis backlog spec (v1)",
+      "status": "active",
+      "milestone": "Alpha",
+      "priority": "High",
+      "effort": 3,
+      "depends_on": [],
+      "summary": "Write the canonical, repo-agnostic spec for the file-based backlog — layout, front-matter schema, vocab, and generator contract."
+    },
+    {
+      "id": "PL0002",
+      "title": "Build the config-driven generator core",
+      "status": "active",
+      "milestone": "Alpha",
+      "priority": "High",
+      "effort": 5,
+      "depends_on": [
+        "PL0001"
+      ],
+      "summary": "Generalize the backlog generator into the reusable Trellis core — validate, regenerate README + backlog.json, compute next id, support --check."
+    },
+    {
+      "id": "PL0003",
+      "title": "Build the `trellis init` scaffolder",
+      "status": "active",
+      "milestone": "Alpha",
+      "priority": "High",
+      "effort": 5,
+      "depends_on": [
+        "PL0002"
+      ],
+      "summary": "One command that onboards any new or existing repo to the Trellis backlog — drops the layout, config, generator, CI check, and an AGENTS.md section."
+    },
+    {
+      "id": "PL0004",
+      "title": "Build the MCP server (operations as tools)",
+      "status": "active",
+      "milestone": "Alpha",
+      "priority": "High",
+      "effort": 8,
+      "depends_on": [
+        "PL0002"
+      ],
+      "summary": "Expose the backlog operations over MCP so any MCP-aware tool can list, read, create, move, validate, and regenerate tasks in any repo."
+    },
+    {
+      "id": "PL0005",
+      "title": "Build the local viewer (`trellis serve`)",
+      "status": "active",
+      "milestone": "Alpha",
+      "priority": "Medium",
+      "effort": 5,
+      "depends_on": [
+        "PL0001"
+      ],
+      "summary": "A local dev server that renders the backlog from backlog.json and hot-reloads when the task files change — no deploy, no auth."
+    },
+    {
+      "id": "PL0006",
+      "title": "Ship the process as MCP prompts + resources",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "High",
+      "effort": 5,
+      "depends_on": [
+        "PL0004"
+      ],
+      "summary": "Carry the \"work a task\" and \"review\" loops as MCP prompts and the spec as MCP resources, so the process travels to any MCP client, not just Claude."
+    },
+    {
+      "id": "PL0007",
+      "title": "Separate the universal loop from per-repo conventions",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "High",
+      "effort": 3,
+      "depends_on": [
+        "PL0001"
+      ],
+      "summary": "Cleanly split the portable orchestration shape from repo-specific tech rules so the same skills work in any repo by reading its AGENTS.md."
+    },
+    {
+      "id": "PL0008",
+      "title": "Viewer — dependency graph and filters",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 5,
+      "depends_on": [
+        "PL0005"
+      ],
+      "summary": "Add a dependency graph and filtering by milestone, priority, and effort to the local viewer."
+    },
+    {
+      "id": "PL0009",
+      "title": "Dogfood — onboard an existing repo end-to-end",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 3,
+      "depends_on": [
+        "PL0003"
+      ],
+      "summary": "Run `trellis init` against a second, non-trivial repo and work a real task through the loop to prove the formula travels."
+    },
+    {
+      "id": "PL0010",
+      "title": "Packaging, versioned spec, and docs",
+      "status": "active",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 5,
+      "depends_on": [
+        "PL0003",
+        "PL0006"
+      ],
+      "summary": "Publish Trellis as an installable package (npx trellis), version the spec, and write the getting-started and reference docs."
+    },
+    {
+      "id": "PL0011",
+      "title": "Test suite and CI for CLI and MCP server",
+      "status": "active",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 5,
+      "depends_on": [
+        "PL0002",
+        "PL0004"
+      ],
+      "summary": "Unit and integration tests for the generator core, the init scaffolder, and the MCP tools, wired into CI."
+    },
+    {
+      "id": "PL0012",
+      "title": "Static-site deploy of the viewer",
+      "status": "active",
+      "milestone": "Future",
+      "priority": "Low",
+      "effort": 8,
+      "depends_on": [
+        "PL0008"
+      ],
+      "summary": "Optionally publish the read-only viewer as a static site (Pages) built from backlog.json, for teams who want a shared URL."
+    },
+    {
+      "id": "PL0013",
+      "title": "Access control / SSO for the deployed viewer",
+      "status": "active",
+      "milestone": "Future",
+      "priority": "Low",
+      "effort": 5,
+      "depends_on": [
+        "PL0012"
+      ],
+      "summary": "Gate the deployed viewer behind SSO without building auth — an access proxy (Cloudflare Access) or publishing through an already-gated host."
+    }
+  ]
+}
