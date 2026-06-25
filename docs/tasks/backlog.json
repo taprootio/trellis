@@ -6,9 +6,9 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0015",
+  "nextId": "TRL0016",
   "counts": {
-    "active": 14,
+    "active": 15,
     "completed": 0,
     "removed": 0
   },
@@ -181,6 +181,19 @@
         "TRL0003"
       ],
       "summary": "Make a protected main with a required backlog-check gate part of standard Trellis onboarding — defined in the spec, set up by init, and documented for consumers (including non-GitHub forges)."
+    },
+    {
+      "id": "TRL0015",
+      "title": "Optional custom effort scales (labels, emoji, images)",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "Low",
+      "effort": 5,
+      "depends_on": [
+        "TRL0001",
+        "TRL0002"
+      ],
+      "summary": "Let teams skin the Fibonacci effort scale with custom labels (e.g. fish sizes), emoji, and optional images — mapped 1:1 to the canonical numbers, which stay the stored contract."
     }
   ]
 }
