@@ -8,21 +8,11 @@
   ],
   "nextId": "TRL0015",
   "counts": {
-    "active": 14,
-    "completed": 0,
+    "active": 13,
+    "completed": 1,
     "removed": 0
   },
   "tasks": [
-    {
-      "id": "TRL0001",
-      "title": "Define the Trellis backlog spec (v1)",
-      "status": "active",
-      "milestone": "Alpha",
-      "priority": "High",
-      "effort": 3,
-      "depends_on": [],
-      "summary": "Write the canonical, repo-agnostic spec for the file-based backlog — layout, front-matter schema, vocab, and generator contract."
-    },
     {
       "id": "TRL0002",
       "title": "Build the config-driven generator core",
@@ -181,6 +171,17 @@
         "TRL0003"
       ],
       "summary": "Make a protected main with a required backlog-check gate part of standard Trellis onboarding — defined in the spec, set up by init, and documented for consumers (including non-GitHub forges)."
+    },
+    {
+      "id": "TRL0001",
+      "title": "Define the Trellis backlog spec (v1)",
+      "status": "completed",
+      "milestone": "Alpha",
+      "priority": "High",
+      "effort": 3,
+      "depends_on": [],
+      "summary": "Write the canonical, repo-agnostic spec for the file-based backlog — layout, front-matter schema, vocab, and generator contract.",
+      "completed_on": "2026-06-25"
     }
   ]
 }

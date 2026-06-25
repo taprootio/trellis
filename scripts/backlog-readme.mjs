@@ -25,6 +25,8 @@ const completedDir = join(tasksDir, "completed", "tasks");
 const removedDir = join(tasksDir, "removed");
 const readmePath = join(tasksDir, "README.md");
 const backlogJsonPath = join(tasksDir, "backlog.json");
+const completedIndexPath = join(tasksDir, "completed", "index.md");
+const removedIndexPath = join(tasksDir, "removed", "index.md");
 
 const MILESTONES = cfg.milestones;
 const PRIORITIES = cfg.priorities;
@@ -35,6 +37,10 @@ const ID_RE = new RegExp(`^${cfg.idPrefix}\\d{${cfg.idWidth}}$`);
 
 const BEGIN = "<!-- BEGIN GENERATED:MILESTONES -->";
 const END = "<!-- END GENERATED:MILESTONES -->";
+const C_BEGIN = "<!-- BEGIN GENERATED:COMPLETED -->";
+const C_END = "<!-- END GENERATED:COMPLETED -->";
+const R_BEGIN = "<!-- BEGIN GENERATED:REMOVED -->";
+const R_END = "<!-- END GENERATED:REMOVED -->";
 
 const errors = [];
 const isCheck = process.argv.includes("--check");
@@ -146,6 +152,30 @@ function table(items) {
   return ["| ID | Title | Priority | Effort |", "| --- | --- | --- | --- |", ...rows].join("\n");
 }
 
+function cell(s) {
+  return String(s ?? "").replace(/\|/g, "\\|");
+}
+
+function fillMarkers(text, begin, end, body) {
+  return text.replace(new RegExp(`${begin}[\\s\\S]*?${end}`), `${begin}\n${body}\n${end}`);
+}
+
+function completedTable(items) {
+  if (!items.length) return "_No completed items yet._";
+  const rows = items.slice()
+    .sort((a, b) => String(b.completed_on ?? "").localeCompare(String(a.completed_on ?? "")) || a.id.localeCompare(b.id))
+    .map((it) => `| [${it.id}](tasks/${it.id}.md) | ${cell(it.title)} | ${cell(it.summary)} | ${cell(it.completed_on)} |`);
+  return ["| ID | Title | Summary | Completed |", "| --- | --- | --- | --- |", ...rows].join("\n");
+}
+
+function removedTable(items) {
+  if (!items.length) return "_No removed items yet._";
+  const rows = items.slice()
+    .sort((a, b) => String(b.removed_on ?? "").localeCompare(String(a.removed_on ?? "")) || a.id.localeCompare(b.id))
+    .map((it) => `| [${it.id}](${it.id}.md) | ${cell(it.title)} | ${cell(it.summary)} | ${cell(it.removed_on)} | ${cell(it.removed_reason)} |`);
+  return ["| ID | Title | Summary | Removed | Reason |", "| --- | --- | --- | --- | --- |", ...rows].join("\n");
+}
+
 const ids = knownIds();
 const active = readActive(ids);
 const completed = readClosed(completedDir);
@@ -168,6 +198,11 @@ const generated = `${BEGIN}\n${block}\n## Next task ID\n\n\`${next}\`\n${END}`;
 const readme = readFileSync(readmePath, "utf8");
 const newReadme = readme.replace(new RegExp(`${BEGIN}[\\s\\S]*?${END}`), generated);
 
+const completedIndex = readFileSync(completedIndexPath, "utf8");
+const newCompletedIndex = fillMarkers(completedIndex, C_BEGIN, C_END, completedTable(completed));
+const removedIndex = readFileSync(removedIndexPath, "utf8");
+const newRemovedIndex = fillMarkers(removedIndex, R_BEGIN, R_END, removedTable(removed));
+
 const backlog = {
   prefix: cfg.idPrefix,
   milestones: MILESTONES,
@@ -175,22 +210,28 @@ const backlog = {
   counts: { active: active.length, completed: completed.length, removed: removed.length },
   tasks: [
     ...active.map((a) => ({ id: a.id, title: a.title, status: "active", milestone: a.milestone, priority: a.priority, effort: a.effort, depends_on: a.depends_on, summary: a.summary })),
-    ...completed.map((a) => ({ id: a.id, title: a.title, status: "completed", completed_on: a.completed_on ?? null, priority: a.priority ?? null, effort: a.effort ?? null, depends_on: a.depends_on })),
-    ...removed.map((a) => ({ id: a.id, title: a.title, status: "removed", removed_on: a.removed_on ?? null, removed_reason: a.removed_reason ?? null, depends_on: a.depends_on })),
+    ...completed.map((a) => ({ id: a.id, title: a.title, status: "completed", milestone: a.milestone ?? null, priority: a.priority ?? null, effort: a.effort ?? null, depends_on: a.depends_on, summary: a.summary ?? null, completed_on: a.completed_on ?? null })),
+    ...removed.map((a) => ({ id: a.id, title: a.title, status: "removed", milestone: a.milestone ?? null, priority: a.priority ?? null, effort: a.effort ?? null, depends_on: a.depends_on, summary: a.summary ?? null, removed_on: a.removed_on ?? null, removed_reason: a.removed_reason ?? null })),
   ],
 };
 const backlogStr = JSON.stringify(backlog, null, 2) + "\n";
 
 if (isCheck) {
   let stale = false;
-  if (readme !== newReadme) { console.error("docs/tasks/README.md is stale - run: npm run backlog:readme"); stale = true; }
-  const cur = existsSync(backlogJsonPath) ? readFileSync(backlogJsonPath, "utf8") : "";
-  if (cur !== backlogStr) { console.error("docs/tasks/backlog.json is stale - run: npm run backlog:readme"); stale = true; }
+  const drift = (cur, want, path) => {
+    if (cur !== want) { console.error(`${path} is stale - run: npm run backlog:readme`); stale = true; }
+  };
+  drift(readme, newReadme, "docs/tasks/README.md");
+  drift(completedIndex, newCompletedIndex, "docs/tasks/completed/index.md");
+  drift(removedIndex, newRemovedIndex, "docs/tasks/removed/index.md");
+  drift(existsSync(backlogJsonPath) ? readFileSync(backlogJsonPath, "utf8") : "", backlogStr, "docs/tasks/backlog.json");
   if (stale) process.exit(1);
   console.log("Backlog check OK.");
   process.exit(0);
 }
 
 writeFileSync(readmePath, newReadme);
+writeFileSync(completedIndexPath, newCompletedIndex);
+writeFileSync(removedIndexPath, newRemovedIndex);
 writeFileSync(backlogJsonPath, backlogStr);
 console.log(`Backlog OK: ${active.length} active, ${completed.length} completed, ${removed.length} removed. Next id: ${next}`);

@@ -12,7 +12,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 | ID | Title | Priority | Effort |
 | --- | --- | --- | --- |
-| [TRL0001](active/TRL0001.md) | Define the Trellis backlog spec (v1) | High | 3 |
 | [TRL0002](active/TRL0002.md) | Build the config-driven generator core | High | 5 |
 | [TRL0003](active/TRL0003.md) | Build the `trellis init` scaffolder | High | 5 |
 | [TRL0004](active/TRL0004.md) | Build the MCP server (operations as tools) | High | 8 |
