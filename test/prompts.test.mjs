@@ -6,7 +6,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +63,21 @@ test("served prompt/resource/tool metadata carries no repo-specific id prefix ex
   }
   for (const s of strings) {
     assert.doesNotMatch(s, /TRL(xxxx|\d)/, `served metadata leaks the Trellis id prefix: "${s}"`);
+  }
+});
+
+test("the MCP entrypoint boots when launched through a symlink (bin-style)", () => {
+  // Regression guard: import.meta.url is already symlink-resolved, so the run-as-main
+  // check must realpath argv[1] — otherwise an npx / node_modules/.bin launch (a
+  // symlink) misses the guard and the server silently never boots.
+  const dir = mkdtempSync(join(tmpdir(), "trellis-bin-"));
+  const link = join(dir, "trellis-mcp");
+  try {
+    symlinkSync(join(sourceRoot, "scripts/trellis-mcp.mjs"), link);
+    const out = execFileSync(process.execPath, [link, "--help"], { encoding: "utf8" });
+    assert.match(out, /trellis-mcp — serve the Trellis backlog operations/, "a symlinked launch prints help, i.e. it booted");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

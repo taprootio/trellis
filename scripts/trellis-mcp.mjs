@@ -16,6 +16,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
 import { OPS, TrellisError } from "../src/mcp.mjs";
 import { RESOURCES, PROMPTS, listResources, readResource, buildPrompt } from "../src/prompts.mjs";
 
@@ -162,9 +163,22 @@ function registerPrompts(server, defaultRoot) {
   }
 }
 
-// Boot only when run as the entry point — guarded so importing this module (e.g.
-// from a test that inspects TOOLS) does not parse argv or open the stdio transport.
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+// True when this module is the process entry point. Resolve argv[1] through
+// realpath first: `import.meta.url` is already symlink-resolved, so a bin-style /
+// symlinked launch (npx, node_modules/.bin) would otherwise miss and the server
+// would silently never boot. Guarded so a plain import (e.g. a test inspecting
+// TOOLS) neither parses argv nor opens the stdio transport.
+function isEntryPoint() {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(argv1)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint()) {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
     process.stdout.write(HELP);
