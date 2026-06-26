@@ -331,6 +331,14 @@ test("the conventions contract travels into an onboarded repo without leaking Tr
     assert.match(wt, /`regenerate`/, "work-task names the regenerate seam");
     assert.match(wt, /`branch-naming`/, "work-task names the branch-naming seam");
     assert.match(wt, /see\s+AGENTS\.md/, "work-task defers to AGENTS.md for the seam value");
+
+    // The copied PR template is a COPY_FILES artifact too: no Trellis id prefix,
+    // author branch prefix, or hard-coded npm command may ride along into a foreign
+    // repo (the standard itself is TRL0016; this is just copy hygiene).
+    const prTemplate = readFileSync(join(root, ".github/pull_request_template.md"), "utf8");
+    assert.doesNotMatch(prTemplate, /TRL(xxxx|\d)/, "PR template must not bake in the Trellis id prefix");
+    assert.doesNotMatch(prTemplate, /\bje\//, "PR template must not carry the author branch prefix");
+    assert.doesNotMatch(prTemplate, /npm run/, "PR template must not bake in Trellis's npm commands");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
