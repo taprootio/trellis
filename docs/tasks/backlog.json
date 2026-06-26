@@ -6,10 +6,10 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0018",
+  "nextId": "TRL0019",
   "counts": {
     "active": 14,
-    "completed": 3,
+    "completed": 4,
     "removed": 0
   },
   "tasks": [
@@ -216,6 +216,19 @@
       "effort": 3,
       "depends_on": [],
       "summary": "Add a repository code-review standard — a review shortcut that grounds in the repo's conventions and emits the canonical JSON findings format (file/line/severity/suggestion), scaffolded by init and graduating to an MCP prompt.",
+      "completed_on": "2026-06-25"
+    },
+    {
+      "id": "TRL0018",
+      "title": "Work-a-task playbook (end-to-end task loop)",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "High",
+      "effort": 3,
+      "depends_on": [
+        "TRL0017"
+      ],
+      "summary": "Add the work-a-task shortcut — a fixed loop that refines a task with the user, plans with checkpoints, branches from clean main, works it end-to-end, runs the code-review playbook, fixes findings, and hands off for review.",
       "completed_on": "2026-06-25"
     }
   ]
