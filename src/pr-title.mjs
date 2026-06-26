@@ -19,8 +19,11 @@ export function lintPrTitle(title, cfg) {
   }
 
   const errors = [];
-  // The real title, untrimmed: stray leading/trailing whitespace is a defect the
-  // anchored pattern and the length check should both see.
+  // Lint the real, untrimmed title: stray leading/trailing whitespace is itself a
+  // defect (the start-anchored id pattern below only catches the leading case).
+  if (title !== title.trim()) {
+    errors.push("title has leading or trailing whitespace");
+  }
   if (title.length > MAX_TITLE_LENGTH) {
     errors.push(`title is ${title.length} chars; must be ≤ ${MAX_TITLE_LENGTH}`);
   }

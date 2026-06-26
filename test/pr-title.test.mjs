@@ -43,6 +43,11 @@ test("rejects an empty summary", () => {
   assert.equal(lintPrTitle("TRL0016:", cfg).ok, false);
 });
 
+test("rejects leading or trailing whitespace", () => {
+  assert.equal(lintPrTitle(" TRL0016: add the lint", cfg).ok, false);
+  assert.equal(lintPrTitle("TRL0016: add the lint ", cfg).ok, false);
+});
+
 test("rejects an empty or whitespace title", () => {
   assert.equal(lintPrTitle("", cfg).ok, false);
   assert.equal(lintPrTitle("   ", cfg).ok, false);
