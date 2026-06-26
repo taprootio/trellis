@@ -11,20 +11,23 @@ standard.
 
 1. **Ground in the repo's conventions first.** Read AGENTS.md (canonical) and any
    SPEC.md / docs the change touches. You cannot judge work against rules you
-   have not read.
-2. **Identify the task.** Determine the `TRLxxxx` this work belongs to (branch
-   name, commits, the added/moved file under `docs/tasks/`). Review against its
-   stated intent, not just the diff in isolation.
+   have not read. Seam points named in code font (`check`, `gates`) read their
+   value from AGENTS.md — see [`conventions.md`](conventions.md).
+2. **Identify the task.** Determine the backlog id this work belongs to — the
+   repo's configured id (branch name, commits, the added/moved file under
+   `docs/tasks/`). Review against its stated intent, not just the diff in isolation.
 3. **Verify closeout** when the work claims to finish a task: the item moved to
    `completed/tasks/` with `status: completed` + `completed_on`, the generated
-   artifacts are current (`npm run backlog:check` passes), and links hold. Flag
-   any miss as a `blocker`.
+   artifacts are current (the repo's `check` command passes — e.g.
+   `npm run backlog:check`; see AGENTS.md), and links hold. Flag any miss as a
+   `blocker`.
 4. **Review thoroughly, twice.** First pass for the obvious; second pass for what
    you rationalized away — data and control flow across seams, behavior under
    failure / edge / hostile input, and what *should* have changed but didn't
    (missing tests, a stale doc, an un-updated snapshot).
-5. **Run the gates you can** (`npm run backlog:check` and the repo's tests). A
-   failing gate is a `blocker`.
+5. **Run the gates you can** — the repo's `check` command and its `gates`
+   (tests/lint; e.g. `npm run backlog:check` + `node --test`; see AGENTS.md).
+   A failing gate is a `blocker`.
 
 ## Output format (the standard)
 

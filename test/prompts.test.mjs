@@ -6,13 +6,15 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
 import { listResources, readResource, buildPrompt, RESOURCES, PROMPTS } from "../src/prompts.mjs";
 import { TrellisError } from "../src/mcp.mjs";
+import { TOOLS } from "../scripts/trellis-mcp.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -36,6 +38,60 @@ test("listResources marks the catalog: playbooks/config/conventions/template ava
     assert.equal(byUri["trellis://template/pull-request"], true);
     assert.equal(byUri["trellis://spec"], false, "SPEC.md does not travel via init (TRL0010)");
     assert.equal(Object.keys(byUri).length, RESOURCES.length, "every catalog entry is listed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("served prompt/resource/tool metadata carries no repo-specific id prefix example", () => {
+  // TRL0007: this catalog metadata is shown verbatim by MCP clients
+  // (list_prompts/list_resources/list_tools) BEFORE buildPrompt injects the repo's
+  // vocabulary, so it must not advertise the Trellis id prefix to an onboarded
+  // repo's users. Covers prompts, resources, AND tool schemas (the surfaces three
+  // review passes each found a leak in).
+  const strings = [];
+  for (const p of PROMPTS) {
+    strings.push(p.name, p.title, p.description);
+    for (const a of p.arguments) strings.push(a.name, a.description);
+  }
+  for (const r of RESOURCES) strings.push(r.name, r.title, r.description);
+  for (const [name, def] of Object.entries(TOOLS)) {
+    strings.push(name, def.description);
+    for (const field of Object.values(def.inputSchema)) {
+      if (field && typeof field.description === "string") strings.push(field.description);
+    }
+  }
+  for (const s of strings) {
+    assert.doesNotMatch(s, /TRL(xxxx|\d)/, `served metadata leaks the Trellis id prefix: "${s}"`);
+  }
+});
+
+test("the MCP entrypoint boots when launched through a symlink (bin-style)", () => {
+  // Regression guard: import.meta.url is already symlink-resolved, so the run-as-main
+  // check must realpath argv[1] — otherwise an npx / node_modules/.bin launch (a
+  // symlink) misses the guard and the server silently never boots.
+  const dir = mkdtempSync(join(tmpdir(), "trellis-bin-"));
+  const link = join(dir, "trellis-mcp");
+  try {
+    symlinkSync(join(sourceRoot, "scripts/trellis-mcp.mjs"), link);
+    const out = execFileSync(process.execPath, [link, "--help"], { encoding: "utf8" });
+    assert.match(out, /trellis-mcp — serve the Trellis backlog operations/, "a symlinked launch prints help, i.e. it booted");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the conventions contract is an available resource and serves its content", () => {
+  // TRL0007: the contract definition is exposed as its own trellis:// resource and
+  // travels via init, so an MCP client can read the seam points behind the loop.
+  const root = freshRepo();
+  try {
+    const byUri = Object.fromEntries(listResources(root).map((r) => [r.uri, r.available]));
+    assert.equal(byUri["trellis://playbook/conventions"], true, "the conventions contract travels via init");
+    const doc = readResource(root, "trellis://playbook/conventions");
+    assert.equal(doc.mimeType, "text/markdown");
+    assert.match(doc.text, /per-repo conventions contract/i);
+    assert.match(doc.text, /`branch-naming`/, "enumerates the seam points");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

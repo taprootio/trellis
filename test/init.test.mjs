@@ -295,3 +295,67 @@ test("renders the AGENTS block from a kept existing config, not the supplied fla
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// TRL0007 smoke test: the per-repo conventions contract must travel intact into a
+// non-Trellis repo — the universal playbooks copied verbatim, but the authoritative
+// seam values (in AGENTS.md) reflecting the onboarded repo, not Trellis's own.
+test("the conventions contract travels into an onboarded repo without leaking Trellis specifics", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+
+    // The contract definition travels verbatim alongside the playbooks.
+    assert.ok(existsSync(join(root, "docs/playbooks/conventions.md")), "conventions.md should be scaffolded");
+
+    // The onboarded AGENTS.md is the *authoritative* per-repo contract: it declares
+    // the seam points with this repo's package commands — never Trellis's own npm
+    // scripts or author branch prefix.
+    const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
+    assert.match(agents, /Loop contract/, "AGENTS declares a Loop contract block");
+    assert.match(agents, /`branch-naming`/, "declares the branch-naming seam the playbooks read");
+    assert.match(agents, /npx trellis generate/, "regenerate value is the package command");
+    assert.match(agents, /npx trellis check/, "check value is the package command");
+    assert.doesNotMatch(agents, /npm run backlog:/, "Trellis's own npm scripts must not leak into an onboarded contract");
+    assert.doesNotMatch(agents, /\bje\//, "Trellis's author branch prefix must not leak");
+
+    // The copied playbooks are universal: they name seam points and defer to
+    // AGENTS.md, and never mis-attribute Trellis's value to the reader's repo via
+    // an indexical "this repo:" claim (which the verbatim copy would carry along).
+    for (const rel of ["work-task.md", "code-review.md", "pr-draft.md", "conventions.md"]) {
+      const body = readFileSync(join(root, "docs/playbooks", rel), "utf8");
+      assert.doesNotMatch(body, /this repo:/, `${rel} must not claim Trellis's value as the reader's ("this repo:")`);
+      assert.doesNotMatch(body, /\bje\//, `${rel} must not carry Trellis's author branch prefix`);
+      assert.doesNotMatch(body, /TRL(xxxx|\d)/, `${rel} must not bake in the Trellis id prefix as an example`);
+    }
+    const wt = readFileSync(join(root, "docs/playbooks/work-task.md"), "utf8");
+    assert.match(wt, /`regenerate`/, "work-task names the regenerate seam");
+    assert.match(wt, /`branch-naming`/, "work-task names the branch-naming seam");
+    assert.match(wt, /see\s+AGENTS\.md/, "work-task defers to AGENTS.md for the seam value");
+
+    // The copied PR template is a COPY_FILES artifact too: no Trellis id prefix,
+    // author branch prefix, or hard-coded npm command may ride along into a foreign
+    // repo (the standard itself is TRL0016; this is just copy hygiene).
+    const prTemplate = readFileSync(join(root, ".github/pull_request_template.md"), "utf8");
+    assert.doesNotMatch(prTemplate, /TRL(xxxx|\d)/, "PR template must not bake in the Trellis id prefix");
+    assert.doesNotMatch(prTemplate, /\bje\//, "PR template must not carry the author branch prefix");
+    assert.doesNotMatch(prTemplate, /npm run/, "PR template must not bake in Trellis's npm commands");
+    // Attribution is a default-with-override seam (default none, repos may opt in):
+    // the copied template keeps the no-attribution default but defers to AGENTS.md so
+    // a repo can change it without editing the template.
+    assert.match(prTemplate, /attribution policy \(AGENTS\.md\)/i, "PR template defers attribution to the repo's policy (override seam present)");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the onboarded branch example respects the repo's configured id width", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO", idWidth: 2 }, {}, sourceRoot);
+    const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
+    assert.match(agents, /demo01\//, "the branch example pads the sample id to the repo's width");
+    assert.doesNotMatch(agents, /demo0001/, "no hard-coded 4-digit id when idWidth is 2");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

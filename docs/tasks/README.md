@@ -12,7 +12,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 | ID | Title | Priority | Effort |
 | --- | --- | --- | --- |
-| [TRL0007](active/TRL0007.md) | Separate the universal loop from per-repo conventions | High | 3 |
 | [TRL0014](active/TRL0014.md) | Bake branch protection + required backlog check into the recipe | High | 3 |
 | [TRL0009](active/TRL0009.md) | Dogfood — onboard an existing repo end-to-end | Medium | 3 |
 | [TRL0016](active/TRL0016.md) | PR title/description standard, template, and draft shortcut | Medium | 3 |

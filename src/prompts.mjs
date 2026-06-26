@@ -38,6 +38,11 @@ export const RESOURCES = [
     rel: "backlog.config.json", mimeType: "application/json",
   },
   {
+    uri: "trellis://playbook/conventions", name: "playbook-conventions", title: "Conventions contract",
+    description: "The per-repo conventions contract — the named seam points the universal loop reads from a repo's AGENTS.md.",
+    rel: "docs/playbooks/conventions.md", mimeType: "text/markdown",
+  },
+  {
     uri: "trellis://playbook/work-task", name: "playbook-work-task", title: "Playbook: work a task",
     description: "The work-a-task loop, as Markdown.",
     rel: "docs/playbooks/work-task.md", mimeType: "text/markdown",
@@ -94,7 +99,7 @@ export const PROMPTS = [
     name: "work-task", title: "Work a task",
     description: "Take a Trellis task from active/ to ready-for-review by following the work-a-task loop.",
     playbook: "docs/playbooks/work-task.md",
-    arguments: [{ name: "id", description: "task id to work, e.g. TRL0007", required: true }],
+    arguments: [{ name: "id", description: "task id to work, using this repo's configured id prefix and width", required: true }],
   },
   {
     name: "code-review", title: "Code review",

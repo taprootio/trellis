@@ -17,21 +17,23 @@ prompt (served from this file by the Trellis MCP server) so any tool can run it.
 > Generate a pull-request **title** and **description** for the current branch,
 > based only on its actual commits and diff (do not invent changes).
 >
-> - **Title:** `TRLxxxx — <imperative summary>`, ≤ 72 characters. Lead with the
->   primary backlog id; if the branch spans several items, name the primary and
->   mention the others in the body.
+> - **Title:** `<ID> — <imperative summary>`, ≤ 72 characters, where `<ID>` is the
+>   repo's backlog id (its configured prefix + number). Lead with the primary
+>   backlog id; if the branch spans several items, name the primary and mention
+>   the others in the body.
 > - **Description:** fill every section of `.github/pull_request_template.md`
 >   (Summary, Task, Changes, Verification, Follow-ups). Tick a checklist item
 >   only when the evidence supports it; otherwise leave it unchecked and say why.
-> - **No attribution:** never add `Co-Authored-By:` trailers or AI "Generated
->   with …" footers to the title or description (see AGENTS.md).
+> - **Attribution:** follow the repo's `attribution` policy (AGENTS.md); the
+>   default is none — no `Co-Authored-By:` trailers or AI "Generated with …"
+>   footers in the title or description.
 > - **Output:** a single fenced `markdown` block whose first line is the title as
->   `# TRLxxxx — …`, followed by the completed template body — so it copies in one
+>   `# <ID> — …`, followed by the completed template body — so it copies in one
 >   click.
 
 ## Output shape
 
 One copy-ready Markdown block:
 
-- first line: `# TRLxxxx — <summary>` (the title)
+- first line: `# <ID> — <summary>` (the title)
 - then the filled template (Summary, Task, Changes, Verification, Follow-ups)

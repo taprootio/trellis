@@ -31,6 +31,7 @@ const AGENTS_MARKERS = ["<!-- BEGIN TRELLIS -->", "<!-- END TRELLIS -->"];
 // value is the loop, not the exact command names; the AGENTS block below carries
 // the authoritative `npx trellis` commands for the onboarded repo.
 const COPY_FILES = [
+  "docs/playbooks/conventions.md",
   "docs/playbooks/work-task.md",
   "docs/playbooks/code-review.md",
   "docs/playbooks/pr-draft.md",
@@ -225,6 +226,9 @@ jobs:
 
 export function agentsBlock(o) {
   const [begin, end] = AGENTS_MARKERS;
+  // A sample id (number 1, zero-padded to the repo's width) so the branch example
+  // matches this repo's actual id format, not a hard-coded 4-digit one.
+  const idExample = `${o.prefix.toLowerCase()}${String(1).padStart(o.idWidth, "0")}`;
   return `${begin}
 ## Backlog (Trellis)
 
@@ -242,6 +246,20 @@ Markdown files with YAML front-matter; ids are \`${o.prefix}\` + ${o.idWidth} di
   gate the merge.
 - Commit messages and PR descriptions carry no AI/co-author attribution — never
   add \`Co-Authored-By:\` trailers or "Generated with …" footers.
+
+### Loop contract
+
+The playbooks in \`docs/playbooks/\` are universal; they name **seam points** and
+read this repo's values from here. See \`docs/playbooks/conventions.md\` for the
+contract, then set these to match your tooling:
+
+| seam point | this repo's value |
+| --- | --- |
+| \`regenerate\` | \`npx trellis generate\` |
+| \`check\` | \`npx trellis check\` |
+| \`branch-naming\` | \`<initials>/<id-lowercase>/<slug>\` (e.g. \`ab/${idExample}/short-slug\`) |
+| \`gates\` | \`npx trellis check\` (plus this repo's tests/lint) |
+| \`attribution\` | none — no \`Co-Authored-By:\` trailers or "Generated with …" footers |
 
 See \`docs/playbooks/\` for the work-a-task and code-review loops.
 ${end}

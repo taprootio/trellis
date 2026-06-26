@@ -15,6 +15,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
 import { OPS, TrellisError } from "../src/mcp.mjs";
 import { RESOURCES, PROMPTS, listResources, readResource, buildPrompt } from "../src/prompts.mjs";
 
@@ -52,8 +54,9 @@ Resources: ${RESOURCES.map((r) => r.uri).join(", ")}
 const repoRootArg = { repoRoot: z.string().optional().describe("repo root to operate on; defaults to the server's --repo / cwd") };
 
 // name → { description, inputSchema (a zod raw shape) }. The handler for each is
-// OPS[name]; every tool also accepts the shared optional `repoRoot`.
-const TOOLS = {
+// OPS[name]; every tool also accepts the shared optional `repoRoot`. Exported so a
+// test can assert the served metadata stays repo-agnostic without booting the server.
+export const TOOLS = {
   list_tasks: {
     description: "List backlog tasks (the backlog.json shape), optionally filtered by status or milestone.",
     inputSchema: {
@@ -64,7 +67,7 @@ const TOOLS = {
   },
   get_task: {
     description: "Get one task by id: its structured entry plus the raw Markdown body and file path.",
-    inputSchema: { ...repoRootArg, id: z.string().describe("task id, e.g. TRL0004") },
+    inputSchema: { ...repoRootArg, id: z.string().describe("task id using this repo's configured id prefix and width") },
   },
   next_id: {
     description: "The id a newly created task would receive.",
@@ -160,16 +163,33 @@ function registerPrompts(server, defaultRoot) {
   }
 }
 
-const opts = parseArgs(process.argv.slice(2));
-if (opts.help) {
-  process.stdout.write(HELP);
-  process.exit(0);
+// True when this module is the process entry point. Resolve argv[1] through
+// realpath first: `import.meta.url` is already symlink-resolved, so a bin-style /
+// symlinked launch (npx, node_modules/.bin) would otherwise miss and the server
+// would silently never boot. Guarded so a plain import (e.g. a test inspecting
+// TOOLS) neither parses argv nor opens the stdio transport.
+function isEntryPoint() {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(argv1)).href;
+  } catch {
+    return false;
+  }
 }
 
-const server = new McpServer({ name: "trellis", version: SERVER_VERSION });
-registerTools(server, opts.repo);
-const resourceCount = registerResources(server, opts.repo);
-registerPrompts(server, opts.repo);
+if (isEntryPoint()) {
+  const opts = parseArgs(process.argv.slice(2));
+  if (opts.help) {
+    process.stdout.write(HELP);
+    process.exit(0);
+  }
 
-await server.connect(new StdioServerTransport());
-console.error(`trellis-mcp ready (repo: ${opts.repo}; ${Object.keys(OPS).length} tools, ${PROMPTS.length} prompts, ${resourceCount} resources)`);
+  const server = new McpServer({ name: "trellis", version: SERVER_VERSION });
+  registerTools(server, opts.repo);
+  const resourceCount = registerResources(server, opts.repo);
+  registerPrompts(server, opts.repo);
+
+  await server.connect(new StdioServerTransport());
+  console.error(`trellis-mcp ready (repo: ${opts.repo}; ${Object.keys(OPS).length} tools, ${PROMPTS.length} prompts, ${resourceCount} resources)`);
+}
