@@ -4,7 +4,8 @@ backlog id (its configured prefix + number, per backlog.config.json).
 For a branch spanning several items, lead with the primary id and name the rest
 in the body. Generate a conforming title + description with the shortcut at
 docs/playbooks/pr-draft.md.
-No AI/co-author attribution: no Co-Authored-By trailers or "Generated with" footers.
+Attribution: follow the repo's attribution policy (AGENTS.md). Default: none — no
+Co-Authored-By trailers or "Generated with" footers.
 -->
 
 ## Summary

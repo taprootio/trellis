@@ -24,9 +24,9 @@ prompt (served from this file by the Trellis MCP server) so any tool can run it.
 > - **Description:** fill every section of `.github/pull_request_template.md`
 >   (Summary, Task, Changes, Verification, Follow-ups). Tick a checklist item
 >   only when the evidence supports it; otherwise leave it unchecked and say why.
-> - **Attribution:** follow the repo's `attribution` policy (e.g. no
->   `Co-Authored-By:` trailers or AI "Generated with …" footers in the title or
->   description; see AGENTS.md).
+> - **Attribution:** follow the repo's `attribution` policy (AGENTS.md); the
+>   default is none — no `Co-Authored-By:` trailers or AI "Generated with …"
+>   footers in the title or description.
 > - **Output:** a single fenced `markdown` block whose first line is the title as
 >   `# <ID> — …`, followed by the completed template body — so it copies in one
 >   click.

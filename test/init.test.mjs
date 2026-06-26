@@ -339,6 +339,10 @@ test("the conventions contract travels into an onboarded repo without leaking Tr
     assert.doesNotMatch(prTemplate, /TRL(xxxx|\d)/, "PR template must not bake in the Trellis id prefix");
     assert.doesNotMatch(prTemplate, /\bje\//, "PR template must not carry the author branch prefix");
     assert.doesNotMatch(prTemplate, /npm run/, "PR template must not bake in Trellis's npm commands");
+    // Attribution is a default-with-override seam (default none, repos may opt in):
+    // the copied template keeps the no-attribution default but defers to AGENTS.md so
+    // a repo can change it without editing the template.
+    assert.match(prTemplate, /attribution policy \(AGENTS\.md\)/i, "PR template defers attribution to the repo's policy (override seam present)");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
