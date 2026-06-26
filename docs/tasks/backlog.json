@@ -35,7 +35,7 @@
       "depends_on": [
         "TRL0001"
       ],
-      "summary": "Cleanly split the portable orchestration shape from repo-specific tech rules so the same skills work in any repo by reading its AGENTS.md."
+      "summary": "Cleanly split the portable orchestration shape from repo-specific tech rules so the same loop works in any repo by reading a named conventions contract from its AGENTS.md."
     },
     {
       "id": "TRL0008",
