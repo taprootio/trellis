@@ -35,7 +35,7 @@
       "depends_on": [
         "TRL0004"
       ],
-      "summary": "Carry the \"work a task\" and \"review\" loops as MCP prompts and the spec as MCP resources, so the process travels to any MCP client, not just Claude."
+      "summary": "Carry the \"work a task\" and \"review\" loops as MCP prompts and the spec/playbooks/templates as MCP resources, so the process travels to any MCP client, not just Claude."
     },
     {
       "id": "TRL0007",
