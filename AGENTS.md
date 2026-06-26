@@ -40,6 +40,20 @@ For the front-matter schema, status lifecycle, effort scales, the generator /
   ground in these conventions first, then report findings as the canonical JSON
   array (`file` / `line` / `severity` blocker·warning·nit / `suggestion`).
 
+### Loop contract
+
+The universal playbooks name **seam points**; this block is where Trellis (the
+reference instance) declares their values. See
+[`docs/playbooks/conventions.md`](docs/playbooks/conventions.md) for the contract.
+
+| seam point | this repo's value |
+| --- | --- |
+| `regenerate` | `npm run backlog:readme` |
+| `check` | `npm run backlog:check` |
+| `branch-naming` | `je/<id-lowercase>/<slug>` (e.g. `je/trl0007/portable-loop`) |
+| `gates` | `npm run backlog:check` + `node --test` |
+| `attribution` | none — no `Co-Authored-By:` trailers or "Generated with …" footers |
+
 ## Roadmap
 
 The work to build Trellis is tracked in `docs/tasks/README.md`. The backlog

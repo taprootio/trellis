@@ -244,6 +244,20 @@ Markdown files with YAML front-matter; ids are \`${o.prefix}\` + ${o.idWidth} di
 - Commit messages and PR descriptions carry no AI/co-author attribution — never
   add \`Co-Authored-By:\` trailers or "Generated with …" footers.
 
+### Loop contract
+
+The playbooks in \`docs/playbooks/\` are universal; they name **seam points** and
+read this repo's values from here. See \`docs/playbooks/conventions.md\` for the
+contract, then set these to match your tooling:
+
+| seam point | this repo's value |
+| --- | --- |
+| \`regenerate\` | \`npx trellis generate\` |
+| \`check\` | \`npx trellis check\` |
+| \`branch-naming\` | \`<initials>/<id-lowercase>/<slug>\` (e.g. \`ab/${o.prefix.toLowerCase()}0001/short-slug\`) |
+| \`gates\` | \`npx trellis check\` (plus this repo's tests/lint) |
+| \`attribution\` | none — no \`Co-Authored-By:\` trailers or "Generated with …" footers |
+
 See \`docs/playbooks/\` for the work-a-task and code-review loops.
 ${end}
 `;

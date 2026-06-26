@@ -14,7 +14,10 @@ so `main` stays clean.
 
 1. **Ground in the repo's conventions.** Read AGENTS.md (canonical) and the
    SPEC / docs relevant to what the task will touch. The *what* and *how* of this
-   repo live there; this playbook is only the orchestration.
+   repo live there; this playbook is only the orchestration. Where a step names a
+   seam point in code font (`regenerate`, `check`, `branch-naming`, `gates`,
+   `attribution`), it reads that repo's value from AGENTS.md — see
+   [`conventions.md`](conventions.md) for the contract.
 2. **Read the task.** Open `docs/tasks/active/<ID>.md` in full — front-matter
    (milestone, priority, effort, depends_on) and body (Scope, Notes, Risks). If
    it isn't in `active/`, stop and say where it actually is. Confirm every
@@ -30,17 +33,21 @@ so `main` stays clean.
    checkpoints**. **Confirm the plan with the user** before touching anything.
 6. **Start clean, then branch.** Confirm the working tree is clean and `main` is
    current (`git fetch`, fast-forward `main`); if not, stop and surface it. Create
-   `je/<id-lowercase>/<slug>` from local `main` (e.g. `je/trl0007/portable-loop`)
-   — from local `main`, not `origin/main`, so the upstream isn't mis-set.
-   Everything from here lands on the branch, never on `main`.
+   the task branch using the repo's `branch-naming` convention —
+   `<initials>/<id-lowercase>/<slug>` (this repo: `je/trl0007/portable-loop`; see
+   AGENTS.md). Branch from local `main`, not `origin/main`, so the upstream isn't
+   mis-set. Everything from here lands on the branch, never on `main`.
 7. **Rewrite the task on the branch.** Fold the user's refinements into
-   `docs/tasks/active/<ID>.md` (Scope / Notes / Risks), run
-   `npm run backlog:readme`, and commit it as the first checkpoint. This refined
-   file is the source of truth for the rest of the loop.
+   `docs/tasks/active/<ID>.md` (Scope / Notes / Risks), **regenerate the backlog**
+   (the repo's `regenerate` command — this repo: `npm run backlog:readme`; see
+   AGENTS.md), and commit it as the first checkpoint. This refined file is the
+   source of truth for the rest of the loop.
 8. **Work the task end-to-end.** Implement against the refined Scope, committing
-   at the checkpoints from step 5 and keeping the repo's gates green (`npm run backlog:check` plus its tests/lint). When
-   the work lands, close the task out: move it to `completed/tasks/`, set
-   `status: completed` + `completed_on`, regenerate (SPEC §4–§5).
+   at the checkpoints from step 5 and keeping the repo's `gates` green (its `check`
+   command plus tests/lint — this repo: `npm run backlog:check` + `node --test`;
+   see AGENTS.md). When the work lands, close the task out: move it to
+   `completed/tasks/`, set `status: completed` + `completed_on`, regenerate
+   (SPEC §4–§5).
 9. **Request a review.** Run `docs/playbooks/code-review.md` over the branch and
    capture its canonical JSON findings. Make it an **independent** pass — ideally a
    separate agent or session, or at minimum re-ground from scratch — since author
@@ -61,5 +68,6 @@ so `main` stays clean.
   requirement always holds and `main` is never dirtied.
 - Branch protection means work never lands on `main` directly; it always goes
   through a PR with the required backlog check.
-- Commits and PRs carry **no AI/co-author attribution** — never add
-  `Co-Authored-By:` trailers or "Generated with …" footers (see AGENTS.md).
+- Commits and PRs follow the repo's `attribution` policy (this repo: **no
+  AI/co-author attribution** — never add `Co-Authored-By:` trailers or "Generated
+  with …" footers; see AGENTS.md).
