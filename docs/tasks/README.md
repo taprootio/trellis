@@ -23,6 +23,7 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | [TRL0006](active/TRL0006.md) | Ship the process as MCP prompts + resources | High | 5 |
 | [TRL0007](active/TRL0007.md) | Separate the universal loop from per-repo conventions | High | 3 |
 | [TRL0014](active/TRL0014.md) | Bake branch protection + required backlog check into the recipe | High | 3 |
+| [TRL0018](active/TRL0018.md) | Work-a-task playbook (end-to-end task loop) | High | 3 |
 | [TRL0008](active/TRL0008.md) | Viewer — dependency graph and filters | Medium | 5 |
 | [TRL0009](active/TRL0009.md) | Dogfood — onboard an existing repo end-to-end | Medium | 3 |
 | [TRL0016](active/TRL0016.md) | PR title/description standard, template, and draft shortcut | Medium | 3 |
@@ -44,5 +45,5 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 ## Next task ID
 
-`TRL0018`
+`TRL0019`
 <!-- END GENERATED:MILESTONES -->
