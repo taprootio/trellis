@@ -6,10 +6,10 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0017",
+  "nextId": "TRL0018",
   "counts": {
     "active": 14,
-    "completed": 2,
+    "completed": 3,
     "removed": 0
   },
   "tasks": [
@@ -205,6 +205,17 @@
         "TRL0001"
       ],
       "summary": "Generalize the backlog generator into the reusable Trellis core — validate, regenerate README + backlog.json, compute next id, support --check.",
+      "completed_on": "2026-06-25"
+    },
+    {
+      "id": "TRL0017",
+      "title": "Code review standard and review shortcut",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 3,
+      "depends_on": [],
+      "summary": "Add a repository code-review standard — a review shortcut that grounds in the repo's conventions and emits the canonical JSON findings format (file/line/severity/suggestion), scaffolded by init and graduating to an MCP prompt.",
       "completed_on": "2026-06-25"
     }
   ]
