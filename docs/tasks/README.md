@@ -18,7 +18,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 | ID | Title | Priority | Effort |
 | --- | --- | --- | --- |
-| [TRL0006](active/TRL0006.md) | Ship the process as MCP prompts + resources | High | 5 |
 | [TRL0007](active/TRL0007.md) | Separate the universal loop from per-repo conventions | High | 3 |
 | [TRL0014](active/TRL0014.md) | Bake branch protection + required backlog check into the recipe | High | 3 |
 | [TRL0008](active/TRL0008.md) | Viewer — dependency graph and filters | Medium | 5 |
