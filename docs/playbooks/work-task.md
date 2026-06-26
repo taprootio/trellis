@@ -1,7 +1,8 @@
 # Playbook: work a task
 
 A ready-to-use shortcut for taking a Trellis task from `docs/tasks/active/` all
-the way to "ready for your review." Invoke it with a task id (e.g. `TRL0007`).
+the way to "ready for your review." Invoke it with a backlog id — the repo's id
+prefix + number, per `backlog.config.json`.
 Point any AI assistant at this file, or invoke the equivalent `work-task` MCP
 prompt (served from this file by the Trellis MCP server — see AGENTS.md §Roadmap).
 
@@ -34,8 +35,8 @@ so `main` stays clean.
 6. **Start clean, then branch.** Confirm the working tree is clean and `main` is
    current (`git fetch`, fast-forward `main`); if not, stop and surface it. Create
    the task branch using the repo's `branch-naming` convention —
-   `<initials>/<id-lowercase>/<slug>` (e.g. `je/trl0007/portable-loop`; see
-   AGENTS.md). Branch from local `main`, not `origin/main`, so the upstream isn't
+   `<initials>/<id-lowercase>/<slug>` (see AGENTS.md for the repo's pattern and an
+   example). Branch from local `main`, not `origin/main`, so the upstream isn't
    mis-set. Everything from here lands on the branch, never on `main`.
 7. **Rewrite the task on the branch.** Fold the user's refinements into
    `docs/tasks/active/<ID>.md` (Scope / Notes / Risks), **regenerate the backlog**

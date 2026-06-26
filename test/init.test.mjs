@@ -324,11 +324,25 @@ test("the conventions contract travels into an onboarded repo without leaking Tr
     for (const rel of ["work-task.md", "code-review.md", "pr-draft.md", "conventions.md"]) {
       const body = readFileSync(join(root, "docs/playbooks", rel), "utf8");
       assert.doesNotMatch(body, /this repo:/, `${rel} must not claim Trellis's value as the reader's ("this repo:")`);
+      assert.doesNotMatch(body, /\bje\//, `${rel} must not carry Trellis's author branch prefix`);
+      assert.doesNotMatch(body, /TRL(xxxx|\d)/, `${rel} must not bake in the Trellis id prefix as an example`);
     }
     const wt = readFileSync(join(root, "docs/playbooks/work-task.md"), "utf8");
     assert.match(wt, /`regenerate`/, "work-task names the regenerate seam");
     assert.match(wt, /`branch-naming`/, "work-task names the branch-naming seam");
     assert.match(wt, /see\s+AGENTS\.md/, "work-task defers to AGENTS.md for the seam value");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the onboarded branch example respects the repo's configured id width", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO", idWidth: 2 }, {}, sourceRoot);
+    const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
+    assert.match(agents, /demo01\//, "the branch example pads the sample id to the repo's width");
+    assert.doesNotMatch(agents, /demo0001/, "no hard-coded 4-digit id when idWidth is 2");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

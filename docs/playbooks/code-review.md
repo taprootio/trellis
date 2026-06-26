@@ -13,9 +13,9 @@ standard.
    SPEC.md / docs the change touches. You cannot judge work against rules you
    have not read. Seam points named in code font (`check`, `gates`) read their
    value from AGENTS.md — see [`conventions.md`](conventions.md).
-2. **Identify the task.** Determine the `TRLxxxx` this work belongs to (branch
-   name, commits, the added/moved file under `docs/tasks/`). Review against its
-   stated intent, not just the diff in isolation.
+2. **Identify the task.** Determine the backlog id this work belongs to — the
+   repo's configured id (branch name, commits, the added/moved file under
+   `docs/tasks/`). Review against its stated intent, not just the diff in isolation.
 3. **Verify closeout** when the work claims to finish a task: the item moved to
    `completed/tasks/` with `status: completed` + `completed_on`, the generated
    artifacts are current (the repo's `check` command passes — e.g.

@@ -226,6 +226,9 @@ jobs:
 
 export function agentsBlock(o) {
   const [begin, end] = AGENTS_MARKERS;
+  // A sample id (number 1, zero-padded to the repo's width) so the branch example
+  // matches this repo's actual id format, not a hard-coded 4-digit one.
+  const idExample = `${o.prefix.toLowerCase()}${String(1).padStart(o.idWidth, "0")}`;
   return `${begin}
 ## Backlog (Trellis)
 
@@ -254,7 +257,7 @@ contract, then set these to match your tooling:
 | --- | --- |
 | \`regenerate\` | \`npx trellis generate\` |
 | \`check\` | \`npx trellis check\` |
-| \`branch-naming\` | \`<initials>/<id-lowercase>/<slug>\` (e.g. \`ab/${o.prefix.toLowerCase()}0001/short-slug\`) |
+| \`branch-naming\` | \`<initials>/<id-lowercase>/<slug>\` (e.g. \`ab/${idExample}/short-slug\`) |
 | \`gates\` | \`npx trellis check\` (plus this repo's tests/lint) |
 | \`attribution\` | none — no \`Co-Authored-By:\` trailers or "Generated with …" footers |
 
