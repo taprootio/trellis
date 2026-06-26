@@ -41,6 +41,22 @@ test("listResources marks the catalog: playbooks/config/conventions/template ava
   }
 });
 
+test("the conventions contract is an available resource and serves its content", () => {
+  // TRL0007: the contract definition is exposed as its own trellis:// resource and
+  // travels via init, so an MCP client can read the seam points behind the loop.
+  const root = freshRepo();
+  try {
+    const byUri = Object.fromEntries(listResources(root).map((r) => [r.uri, r.available]));
+    assert.equal(byUri["trellis://playbook/conventions"], true, "the conventions contract travels via init");
+    const doc = readResource(root, "trellis://playbook/conventions");
+    assert.equal(doc.mimeType, "text/markdown");
+    assert.match(doc.text, /per-repo conventions contract/i);
+    assert.match(doc.text, /`branch-naming`/, "enumerates the seam points");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("readResource returns a file's content with its mimeType", () => {
   const root = freshRepo();
   try {
