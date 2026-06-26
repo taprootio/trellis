@@ -28,6 +28,8 @@ For the front-matter schema, status lifecycle, effort scales, the generator /
 - `main` is **protected** — do not commit to it directly. Work on a branch
   (`je/<id>/<slug>` for task work), open a PR, and let the required backlog check
   gate the merge.
+- Commit messages and PR descriptions carry **no AI/co-author attribution** —
+  never add `Co-Authored-By:` trailers or "Generated with …" footers.
 - Closing a task: move it to `completed/tasks/`, set `status: completed` +
   `completed_on`, and regenerate (the completed index is generated) — in the same
   change. Full rules in SPEC.md §4–§5.

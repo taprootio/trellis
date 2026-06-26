@@ -14,7 +14,7 @@ import { join } from "node:path";
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
 export const SPEC_VERSION = "1.0";
 
-const MARKERS = {
+export const MARKERS = {
   milestones: ["<!-- BEGIN GENERATED:MILESTONES -->", "<!-- END GENERATED:MILESTONES -->"],
   completed: ["<!-- BEGIN GENERATED:COMPLETED -->", "<!-- END GENERATED:COMPLETED -->"],
   removed: ["<!-- BEGIN GENERATED:REMOVED -->", "<!-- END GENERATED:REMOVED -->"],

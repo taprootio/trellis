@@ -8,23 +8,11 @@
   ],
   "nextId": "TRL0019",
   "counts": {
-    "active": 14,
-    "completed": 4,
+    "active": 13,
+    "completed": 5,
     "removed": 0
   },
   "tasks": [
-    {
-      "id": "TRL0003",
-      "title": "Build the `trellis init` scaffolder",
-      "status": "active",
-      "milestone": "Alpha",
-      "priority": "High",
-      "effort": 5,
-      "depends_on": [
-        "TRL0002"
-      ],
-      "summary": "One command that onboards any new or existing repo to the Trellis backlog — drops the layout, config, generator, CI check, and an AGENTS.md section."
-    },
     {
       "id": "TRL0004",
       "title": "Build the MCP server (operations as tools)",
@@ -206,6 +194,19 @@
       ],
       "summary": "Generalize the backlog generator into the reusable Trellis core — validate, regenerate README + backlog.json, compute next id, support --check.",
       "completed_on": "2026-06-25"
+    },
+    {
+      "id": "TRL0003",
+      "title": "Build the `trellis init` scaffolder",
+      "status": "completed",
+      "milestone": "Alpha",
+      "priority": "High",
+      "effort": 5,
+      "depends_on": [
+        "TRL0002"
+      ],
+      "summary": "One command that onboards any repo to the Trellis backlog — scaffolds the layout, config, generated index, CI check, AGENTS section, and process playbooks, idempotently and without clobbering.",
+      "completed_on": "2026-06-26"
     },
     {
       "id": "TRL0017",

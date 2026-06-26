@@ -23,6 +23,8 @@ TRL0006 so any tool can invoke it directly.
 > - **Description:** fill every section of `.github/pull_request_template.md`
 >   (Summary, Task, Changes, Verification, Follow-ups). Tick a checklist item
 >   only when the evidence supports it; otherwise leave it unchecked and say why.
+> - **No attribution:** never add `Co-Authored-By:` trailers or AI "Generated
+>   with …" footers to the title or description (see AGENTS.md).
 > - **Output:** a single fenced `markdown` block whose first line is the title as
 >   `# TRLxxxx — …`, followed by the completed template body — so it copies in one
 >   click.

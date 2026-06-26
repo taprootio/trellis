@@ -5,6 +5,8 @@
   "description": "Trellis — a tool-agnostic toolkit for file-based backlogs; dogfoods its own conventions.",
   "scripts": {
     "backlog:readme": "node scripts/backlog-readme.mjs",
-    "backlog:check": "node scripts/backlog-readme.mjs --check"
+    "backlog:check": "node scripts/backlog-readme.mjs --check",
+    "trellis:init": "node scripts/trellis-init.mjs",
+    "test": "node --test"
   }
 }

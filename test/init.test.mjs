@@ -1,0 +1,297 @@
+// Smoke/behavior tests for the `trellis init` scaffolder (zero-dependency,
+// run via `node --test`). Scope is the init contract; the broader CLI/MCP suite
+// is TRL0011. Each test scaffolds into a throwaway temp repo and cleans up.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { applyScaffold } from "../src/init.mjs";
+import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
+
+const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const tempRepo = () => mkdtempSync(join(tmpdir(), "trellis-init-"));
+
+// Assert the scaffolded repo is --check-green: every generated artifact on disk
+// matches what the core would regenerate from the item files + config.
+function assertCheckClean(root) {
+  const { cfg, errors } = loadConfig(root);
+  assert.deepEqual(errors, [], "config should load without errors");
+  const data = readBacklog(root, cfg);
+  assert.deepEqual(data.errors, [], "backlog should read without errors");
+  const { files, errors: gerr } = generateArtifacts(root, cfg, data);
+  assert.deepEqual(gerr, [], "generate should have no errors");
+  const stale = files.filter((f) => (existsSync(f.path) ? readFileSync(f.path, "utf8") : "") !== f.content);
+  assert.deepEqual(stale.map((f) => f.path), [], "no generated artifact should be stale");
+}
+
+test("scaffolds a fresh repo that the core validates clean", () => {
+  const root = tempRepo();
+  try {
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    for (const rel of [
+      "backlog.config.json",
+      "docs/tasks/active/.gitkeep",
+      "docs/tasks/completed/tasks/.gitkeep",
+      "docs/tasks/README.md",
+      "docs/tasks/backlog.json",
+      ".github/workflows/backlog.yml",
+      ".github/pull_request_template.md",
+      "docs/playbooks/work-task.md",
+      "AGENTS.md",
+    ]) assert.ok(existsSync(join(root, rel)), `${rel} should exist`);
+    assert.deepEqual(summary.warnings, [], "a fresh scaffold should produce no warnings");
+    assert.deepEqual(summary.errors, [], "a fresh scaffold should produce no errors");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("respects --prefix in config, next id, and the AGENTS block", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "ACME" }, {}, sourceRoot);
+    const cfg = JSON.parse(readFileSync(join(root, "backlog.config.json"), "utf8"));
+    assert.equal(cfg.idPrefix, "ACME");
+    assert.equal(cfg.specVersion, "1.0");
+    const backlog = JSON.parse(readFileSync(join(root, "docs/tasks/backlog.json"), "utf8"));
+    assert.equal(backlog.prefix, "ACME");
+    assert.equal(backlog.nextId, "ACME0001");
+    assert.match(readFileSync(join(root, "AGENTS.md"), "utf8"), /ids are `ACME`/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("is idempotent — a re-run skips every template file and stays clean", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.deepEqual(summary.created, [], "nothing new should be created on re-run");
+    assert.deepEqual(summary.appended, [], "nothing should be appended on re-run");
+    assert.ok(summary.skipped.includes("backlog.config.json"));
+    assert.ok(summary.skipped.includes("AGENTS.md"));
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("appends the Trellis block to an existing AGENTS.md without markers", () => {
+  const root = tempRepo();
+  try {
+    writeFileSync(join(root, "AGENTS.md"), "# My Repo\n\nExisting guidance.\n");
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.deepEqual(summary.appended, ["AGENTS.md"]);
+    const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
+    assert.match(agents, /Existing guidance\./, "existing content is preserved");
+    assert.match(agents, /<!-- BEGIN TRELLIS -->/, "the marked block is appended");
+    const second = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.ok(second.summary.skipped.includes("AGENTS.md"), "re-run leaves AGENTS.md untouched");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--dry-run reports a plan but writes nothing", () => {
+  const root = tempRepo();
+  try {
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, { dryRun: true }, sourceRoot);
+    assert.ok(summary.created.length > 0, "dry-run still reports planned files");
+    assert.equal(existsSync(join(root, "backlog.config.json")), false);
+    assert.equal(existsSync(join(root, "docs/tasks/README.md")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--force overwrites a tampered template but leaves the AGENTS block intact", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    writeFileSync(join(root, "backlog.config.json"), "{}\n"); // tamper
+    const { summary } = applyScaffold(root, { prefix: "DEMO", force: true }, {}, sourceRoot);
+    assert.ok(summary.created.includes("backlog.config.json"), "force re-creates templates");
+    assert.equal(JSON.parse(readFileSync(join(root, "backlog.config.json"), "utf8")).idPrefix, "DEMO");
+    assert.ok(summary.skipped.includes("AGENTS.md"), "the marked AGENTS block is never clobbered, even under --force");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("leaves an AGENTS.md that already contains the Trellis block untouched", () => {
+  const root = tempRepo();
+  try {
+    writeFileSync(join(root, "AGENTS.md"), "# Repo\n\n<!-- BEGIN TRELLIS -->\nLOCAL EDIT\n<!-- END TRELLIS -->\n");
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.ok(summary.skipped.includes("AGENTS.md"));
+    assert.match(readFileSync(join(root, "AGENTS.md"), "utf8"), /LOCAL EDIT/, "local edits inside the block survive");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects an invalid resolved config and leaves the target untouched", () => {
+  const root = tempRepo();
+  try {
+    const { summary } = applyScaffold(root, { prefix: "DEMO", idWidth: 0 }, {}, sourceRoot);
+    assert.ok(summary.errors.some((e) => /id-width/.test(e)), "an option error is reported");
+    assert.deepEqual(summary.created, [], "nothing is created on an invalid config");
+    assert.equal(existsSync(join(root, "backlog.config.json")), false, "no file is written");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a provided-but-empty list flag is rejected, not masked by the default", () => {
+  // `--effort abc` parses to []; that must reach validateOptions, not silently
+  // fall back to the default effort scale.
+  const root = tempRepo();
+  try {
+    const { summary } = applyScaffold(root, { prefix: "DEMO", effort: [] }, {}, sourceRoot);
+    assert.ok(summary.errors.some((e) => /effort/.test(e)), "an empty effort list is rejected");
+    assert.deepEqual(summary.created, []);
+    assert.equal(existsSync(join(root, "backlog.config.json")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a partially-invalid effort list (a NaN token) is rejected", () => {
+  // `--effort 1,abc,3` parses to [1, NaN, 3]; the typo must surface, not be dropped.
+  const root = tempRepo();
+  try {
+    const { summary } = applyScaffold(root, { prefix: "DEMO", effort: [1, NaN, 3] }, {}, sourceRoot);
+    assert.ok(summary.errors.some((e) => /effort/.test(e)));
+    assert.deepEqual(summary.created, []);
+    assert.equal(existsSync(join(root, "backlog.config.json")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("refuses to scaffold over a target whose existing backlog has errors", () => {
+  // A pre-existing malformed item would make the core-generate step fail; init
+  // must refuse up front and leave the target untouched (no half-scaffold).
+  const root = tempRepo();
+  try {
+    mkdirSync(join(root, "docs/tasks/active"), { recursive: true });
+    writeFileSync(join(root, "docs/tasks/active/DEMO0001.md"), "no front-matter here\n");
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.ok(summary.errors.some((e) => /backlog has errors/.test(e)), "the broken item is surfaced");
+    assert.deepEqual(summary.created, [], "nothing is scaffolded");
+    assert.equal(existsSync(join(root, "backlog.config.json")), false, "no config is written");
+    assert.equal(existsSync(join(root, "docs/tasks/README.md")), false, "no skeleton is written");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a missing copy source is a benign warning, not a refusal", () => {
+  // With a sourceRoot lacking the playbooks/PR template, init warns but still
+  // scaffolds a --check-green backlog — so the CLI must not treat it as a failure.
+  const root = tempRepo();
+  const emptySource = tempRepo();
+  try {
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, emptySource);
+    assert.ok(summary.warnings.some((w) => /source not found/.test(w)), "missing copies are warned");
+    assert.ok(summary.created.includes("backlog.config.json"), "the scaffold still proceeds");
+    assert.ok(summary.generated.length > 0, "artifacts are still generated");
+    assert.ok(existsSync(join(root, "docs/tasks/backlog.json")), "the backlog is produced");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(emptySource, { recursive: true, force: true });
+  }
+});
+
+test("refuses (no partial write) when an existing generated file lost its markers", () => {
+  // Valid config but a corrupted README skeleton (markers stripped) + a missing
+  // template: a naive impl would write the template then fail generate. Preflight
+  // must refuse before any write so the target is left as-is.
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot); // full valid scaffold
+    writeFileSync(join(root, "docs/tasks/README.md"), "# Backlog\n\nno markers here\n");
+    rmSync(join(root, ".github/workflows/backlog.yml")); // a now-missing template
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.ok(summary.errors.some((e) => /markers/.test(e)), "the markerless file is a fatal error");
+    assert.deepEqual(summary.created, [], "nothing new is written");
+    assert.equal(existsSync(join(root, ".github/workflows/backlog.yml")), false, "no partial write — the missing template stays missing");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("refuses (no partial write) when a generated index has wrong-section markers", () => {
+  // README carrying the COMPLETED markers instead of MILESTONES passed the old
+  // substring check, then the core failed to fill it after writes. Preflight must
+  // require the exact begin/end pair and refuse before writing.
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot); // valid scaffold
+    writeFileSync(join(root, "docs/tasks/README.md"), "# Backlog\n\n<!-- BEGIN GENERATED:COMPLETED -->\n<!-- END GENERATED:COMPLETED -->\n");
+    rmSync(join(root, ".github/workflows/backlog.yml")); // a now-missing template
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.ok(summary.errors.some((e) => /markers/.test(e)), "wrong-section markers are caught in preflight");
+    assert.equal(existsSync(join(root, ".github/workflows/backlog.yml")), false, "no partial write");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("refuses (no partial write) when a generated index has out-of-order markers", () => {
+  // END before BEGIN: both substrings are present (the old includes check passed),
+  // but fillMarkers needs begin→end, so generate would fail after writes.
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    writeFileSync(join(root, "docs/tasks/README.md"), "# Backlog\n\n<!-- END GENERATED:MILESTONES -->\n<!-- BEGIN GENERATED:MILESTONES -->\n");
+    rmSync(join(root, ".github/workflows/backlog.yml"));
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.ok(summary.errors.some((e) => /markers/.test(e)), "out-of-order markers are caught");
+    assert.equal(existsSync(join(root, ".github/workflows/backlog.yml")), false, "no partial write");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--force repairs a corrupted generated index instead of refusing", () => {
+  // --force overwrites the index with a fresh skeleton, so a markerless README
+  // must NOT block the run — preflight skips the marker check under --force.
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    writeFileSync(join(root, "docs/tasks/README.md"), "# Backlog\n\nno markers here\n");
+    const { summary } = applyScaffold(root, { prefix: "DEMO", force: true }, {}, sourceRoot);
+    assert.deepEqual(summary.errors, [], "--force does not refuse a corrupted index");
+    assert.ok(summary.generated.includes("docs/tasks/README.md"), "the index is regenerated");
+    assert.match(readFileSync(join(root, "docs/tasks/README.md"), "utf8"), /<!-- BEGIN GENERATED:MILESTONES -->/, "markers restored");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("renders the AGENTS block from a kept existing config, not the supplied flags", () => {
+  // A repo already configured with idPrefix DEMO must not get an AGENTS block that
+  // claims ids are ACME just because --prefix ACME was passed; the kept config wins.
+  const root = tempRepo();
+  try {
+    writeFileSync(
+      join(root, "backlog.config.json"),
+      JSON.stringify({ specVersion: "1.0", idPrefix: "DEMO", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1, 2, 3] }, null, 2) + "\n",
+    );
+    writeFileSync(join(root, "AGENTS.md"), "# Repo\n"); // no Trellis block yet
+    const { summary } = applyScaffold(root, { prefix: "ACME" }, {}, sourceRoot);
+    const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
+    assert.match(agents, /ids are `DEMO`/, "AGENTS reflects the kept config");
+    assert.doesNotMatch(agents, /ids are `ACME`/, "the supplied --prefix is not used");
+    assert.ok(summary.warnings.some((w) => /governs/.test(w)), "the ignored flag is warned");
+    assert.equal(JSON.parse(readFileSync(join(root, "backlog.config.json"), "utf8")).idPrefix, "DEMO", "the kept config is unchanged");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -60,3 +60,5 @@ so `main` stays clean.
   requirement always holds and `main` is never dirtied.
 - Branch protection means work never lands on `main` directly; it always goes
   through a PR with the required backlog check.
+- Commits and PRs carry **no AI/co-author attribution** — never add
+  `Co-Authored-By:` trailers or "Generated with …" footers (see AGENTS.md).
