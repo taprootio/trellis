@@ -1,5 +1,5 @@
 <!--
-Title format: <ID> — imperative summary (<= 72 chars), where <ID> is this repo's
+Title format: <ID>: imperative summary (<= 72 chars), where <ID> is this repo's
 backlog id (its configured prefix + number, per backlog.config.json).
 For a branch spanning several items, lead with the primary id and name the rest
 in the body. Generate a conforming title + description with the shortcut at

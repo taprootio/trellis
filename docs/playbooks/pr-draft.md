@@ -17,7 +17,7 @@ prompt (served from this file by the Trellis MCP server) so any tool can run it.
 > Generate a pull-request **title** and **description** for the current branch,
 > based only on its actual commits and diff (do not invent changes).
 >
-> - **Title:** `<ID> — <imperative summary>`, ≤ 72 characters, where `<ID>` is the
+> - **Title:** `<ID>: <imperative summary>`, ≤ 72 characters, where `<ID>` is the
 >   repo's backlog id (its configured prefix + number). Lead with the primary
 >   backlog id; if the branch spans several items, name the primary and mention
 >   the others in the body.
@@ -28,12 +28,12 @@ prompt (served from this file by the Trellis MCP server) so any tool can run it.
 >   default is none — no `Co-Authored-By:` trailers or AI "Generated with …"
 >   footers in the title or description.
 > - **Output:** a single fenced `markdown` block whose first line is the title as
->   `# <ID> — …`, followed by the completed template body — so it copies in one
+>   `# <ID>: …`, followed by the completed template body — so it copies in one
 >   click.
 
 ## Output shape
 
 One copy-ready Markdown block:
 
-- first line: `# <ID> — <summary>` (the title)
+- first line: `# <ID>: <summary>` (the title)
 - then the filled template (Summary, Task, Changes, Verification, Follow-ups)
