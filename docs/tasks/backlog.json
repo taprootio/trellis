@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0020",
   "counts": {
-    "active": 11,
-    "completed": 8,
+    "active": 10,
+    "completed": 9,
     "removed": 0
   },
   "tasks": [
@@ -126,16 +126,6 @@
       "summary": "Let teams skin the Fibonacci effort scale with custom labels (e.g. fish sizes), emoji, and optional images — mapped 1:1 to the canonical numbers, which stay the stored contract."
     },
     {
-      "id": "TRL0016",
-      "title": "PR title/description standard, template, and draft shortcut",
-      "status": "active",
-      "milestone": "Beta",
-      "priority": "Medium",
-      "effort": 3,
-      "depends_on": [],
-      "summary": "Enforce the shared PR title standard in CI with a config-driven, prefix-agnostic title lint; the template, draft shortcut, and MCP prompt already shipped."
-    },
-    {
       "id": "TRL0019",
       "title": "MCP server HTTP transport (port/host) + per-repo resource addressing",
       "status": "active",
@@ -221,6 +211,17 @@
         "TRL0001"
       ],
       "summary": "Cleanly split the portable orchestration shape from repo-specific tech rules so the same loop works in any repo by reading a named conventions contract from its AGENTS.md.",
+      "completed_on": "2026-06-26"
+    },
+    {
+      "id": "TRL0016",
+      "title": "PR title/description standard, template, and draft shortcut",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 3,
+      "depends_on": [],
+      "summary": "Enforce the shared PR title standard in CI with a config-driven, prefix-agnostic title lint; the template, draft shortcut, and MCP prompt already shipped.",
       "completed_on": "2026-06-26"
     },
     {
