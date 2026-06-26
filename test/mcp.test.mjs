@@ -191,3 +191,32 @@ test("regenerate rewrites a stale artifact and reports what changed", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("create_task keeps a numeric-looking title as a string (round-trip)", () => {
+  // The front-matter writer must quote an all-digit title so the core parser does
+  // not coerce it to a number, which would violate the backlog.json string contract.
+  const root = freshRepo();
+  try {
+    const { created } = createTask(root, { ...VALID, title: "2024" });
+    assert.equal(typeof created.title, "string", "title stays a string in the result");
+    assert.equal(created.title, "2024");
+    const onDisk = JSON.parse(readFileSync(join(root, "docs/tasks/backlog.json"), "utf8"));
+    assert.strictEqual(onDisk.tasks[0].title, "2024", "backlog.json carries the string, not 2024");
+    assert.equal(getTask(root, { id: "DEMO0001" }).title, "2024");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("create_task dedupes depends_on", () => {
+  const root = freshRepo();
+  try {
+    createTask(root, VALID); // DEMO0001
+    const { created } = createTask(root, { ...VALID, depends_on: ["DEMO0001", "DEMO0001"] });
+    assert.deepEqual(created.depends_on, ["DEMO0001"], "duplicate dependency ids are collapsed");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

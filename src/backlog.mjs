@@ -9,7 +9,7 @@
 // on purpose so Trellis stays drop-in with no install step.
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
 export const SPEC_VERSION = "1.0";
@@ -105,8 +105,12 @@ export function parseFrontMatter(text, where, errors = []) {
       }
       continue;
     }
+    const quoted = /^"[\s\S]*"$/.test(val) || /^'[\s\S]*'$/.test(val);
     const v = unquote(val);
-    fm[key] = /^-?\d+$/.test(v) ? Number(v) : v;
+    // Coerce only *unquoted* all-digit values to numbers, so a quoted "404" round-
+    // trips as the string "404" — how the MCP writer preserves a numeric-looking
+    // title/summary (src/mcp.mjs serializeFrontMatter) against the string contract.
+    fm[key] = !quoted && /^-?\d+$/.test(v) ? Number(v) : v;
   }
   return fm;
 }
@@ -266,7 +270,7 @@ export function generateArtifacts(repoRoot, cfg, data) {
 
   const readText = (path) => {
     if (existsSync(path)) return readFileSync(path, "utf8");
-    errors.push(`missing ${path}`);
+    errors.push(`missing ${relative(repoRoot, path)}`);
     return "";
   };
 

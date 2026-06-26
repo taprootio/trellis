@@ -76,14 +76,26 @@ function oneLine(value, field) {
   return value.trim();
 }
 
+// Quote a value the core parser would otherwise misread on the way back in: an
+// all-digit string (coerced to a number), one already wrapped in a quote (stripped
+// by `unquote`), or the empty string. The parser's unquote is greedy and anchored
+// and does not unescape, so a bare wrap with `"` round-trips for any single-line
+// value. Numbers (e.g. effort) pass through bare.
+function emitScalar(v) {
+  if (typeof v === "number") return String(v);
+  const s = String(v);
+  if (s === "" || /^-?\d+$/.test(s) || /^["']/.test(s) || /["']$/.test(s)) return `"${s}"`;
+  return s;
+}
+
 // Emit the YAML-subset front-matter the core's parser reads back: depends_on as an
-// inline array, everything else verbatim. Unknown keys are preserved after the
-// known ones so nothing is silently dropped.
+// inline array, everything else as a (possibly quoted) scalar. Unknown keys are
+// preserved after the known ones so nothing is silently dropped.
 function serializeFrontMatter(fm) {
   const emit = (key) => {
     const v = fm[key];
     if (key === "depends_on") return `depends_on: [${(v ?? []).join(", ")}]`;
-    return `${key}: ${v}`;
+    return `${key}: ${emitScalar(v)}`;
   };
   const keys = [...FM_ORDER.filter((k) => fm[k] !== undefined), ...Object.keys(fm).filter((k) => !FM_ORDER.includes(k))];
   return keys.map(emit).join("\n");
@@ -136,15 +148,28 @@ function todayISO() {
 function writeArtifacts(repoRoot, cfg, data) {
   const { files, nextId: next, errors } = generateArtifacts(repoRoot, cfg, data);
   if (errors.length) throw new TrellisError(`generate failed: ${errors.join("; ")}`, "generate_failed");
-  const changed = [];
-  for (const f of files) {
-    const before = existsSync(f.path) ? readFileSync(f.path, "utf8") : null;
-    if (before !== f.content) {
-      writeFileSync(f.path, f.content);
-      changed.push(relative(repoRoot, f.path));
+  // Snapshot prior bytes first so a mid-loop write failure (ENOSPC/EACCES) restores
+  // every artifact — honouring the Risk's "never left … with stale generated files."
+  const prior = files.map((f) => ({ path: f.path, before: existsSync(f.path) ? readFileSync(f.path, "utf8") : null }));
+  const done = [];
+  try {
+    const changed = [];
+    for (const f of files) {
+      const { before } = prior.find((p) => p.path === f.path);
+      if (before !== f.content) {
+        writeFileSync(f.path, f.content);
+        done.push(f.path);
+        changed.push(relative(repoRoot, f.path));
+      }
     }
+    return { changed, nextId: next };
+  } catch (e) {
+    for (const p of prior) {
+      if (!done.includes(p.path)) continue;
+      try { p.before === null ? rmSync(p.path, { force: true }) : writeFileSync(p.path, p.before); } catch { /* best-effort restore */ }
+    }
+    throw e;
   }
-  return { changed, nextId: next };
 }
 
 // ================================================================= tools
@@ -211,10 +236,11 @@ export function createTask(repoRoot, args = {}) {
   if (typeof args.effort !== "number" || !Number.isFinite(args.effort)) {
     throw new TrellisError("`effort` must be a number (label resolution is TRL0015)");
   }
-  const depends_on = args.depends_on ?? [];
-  if (!Array.isArray(depends_on) || depends_on.some((d) => typeof d !== "string")) {
+  const rawDeps = args.depends_on ?? [];
+  if (!Array.isArray(rawDeps) || rawDeps.some((d) => typeof d !== "string")) {
     throw new TrellisError("`depends_on` must be a list of task ids");
   }
+  const depends_on = [...new Set(rawDeps)];
 
   const { cfg, data } = loadClean(repoRoot);
   const id = nextId(data.ids, cfg);
