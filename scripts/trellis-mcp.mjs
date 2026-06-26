@@ -1,0 +1,128 @@
+#!/usr/bin/env node
+// Trellis MCP server — exposes the backlog operations as MCP tools over stdio.
+//
+//   node scripts/trellis-mcp.mjs [--repo <path>]
+//
+// The seven tools are thin adapters over src/mcp.mjs (which is dependency-free and
+// unit-tested); the @modelcontextprotocol SDK and the transport live only in this
+// entry point. Each tool resolves a repo root — the per-call `repoRoot` arg, else
+// the server's default (`--repo`, else cwd) — so one server can serve any repo the
+// client points at.
+//
+// stdout is the JSON-RPC channel: all diagnostics go to stderr.
+
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import { resolve } from "node:path";
+import { OPS, TrellisError } from "../src/mcp.mjs";
+
+// Server implementation version (distinct from the spec version; packaging and
+// real versioning are TRL0010).
+const SERVER_VERSION = "0.1.0";
+
+function parseArgs(argv) {
+  let repo = process.cwd();
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--repo") repo = argv[++i];
+    else if (a.startsWith("--repo=")) repo = a.slice("--repo=".length);
+    else if (a === "-h" || a === "--help") return { help: true };
+    else { console.error(`Unknown argument: ${a}`); process.exit(2); }
+  }
+  return { repo: resolve(repo) };
+}
+
+const HELP = `trellis-mcp — serve the Trellis backlog operations over MCP (stdio)
+
+Usage:
+  node scripts/trellis-mcp.mjs [--repo <path>]
+
+Options:
+  --repo <path>   default repo root for tools that omit \`repoRoot\` (default: cwd)
+  -h, --help      show this help
+
+Tools: ${Object.keys(OPS).join(", ")}
+`;
+
+const repoRootArg = { repoRoot: z.string().optional().describe("repo root to operate on; defaults to the server's --repo / cwd") };
+
+// name → { description, inputSchema (a zod raw shape) }. The handler for each is
+// OPS[name]; every tool also accepts the shared optional `repoRoot`.
+const TOOLS = {
+  list_tasks: {
+    description: "List backlog tasks (the backlog.json shape), optionally filtered by status or milestone.",
+    inputSchema: {
+      ...repoRootArg,
+      status: z.enum(["active", "completed", "removed"]).optional().describe("only tasks with this status"),
+      milestone: z.string().optional().describe("only tasks in this milestone"),
+    },
+  },
+  get_task: {
+    description: "Get one task by id: its structured entry plus the raw Markdown body and file path.",
+    inputSchema: { ...repoRootArg, id: z.string().describe("task id, e.g. TRL0004") },
+  },
+  next_id: {
+    description: "The id a newly created task would receive.",
+    inputSchema: { ...repoRootArg },
+  },
+  create_task: {
+    description: "Create an active task: assigns the next id, writes the item file, then regenerates and validates.",
+    inputSchema: {
+      ...repoRootArg,
+      title: z.string().describe("one-line title"),
+      summary: z.string().describe("one-sentence summary for the index"),
+      milestone: z.string().describe("a configured milestone"),
+      priority: z.string().describe("a configured priority"),
+      effort: z.number().describe("a configured canonical effort number"),
+      depends_on: z.array(z.string()).optional().describe("ids this task depends on"),
+      body: z.string().optional().describe("Markdown body; Scope/Notes/Risks are scaffolded if omitted"),
+    },
+  },
+  move_task: {
+    description: "Move an active task to completed or removed: updates front-matter, prepends a closeout note, regenerates and validates.",
+    inputSchema: {
+      ...repoRootArg,
+      id: z.string().describe("active task id to move"),
+      to: z.enum(["completed", "removed"]).describe("target status"),
+      reason: z.string().optional().describe("required when removing: why, and any trigger to revisit"),
+      note: z.string().optional().describe("closeout note prepended to the body"),
+      date: z.string().optional().describe("ISO close date (YYYY-MM-DD); defaults to today"),
+    },
+  },
+  validate: {
+    description: "Validate the backlog (config, items, markers); read-only. Returns { ok, errors, warnings }.",
+    inputSchema: { ...repoRootArg },
+  },
+  regenerate: {
+    description: "Rewrite any stale generated artifact. Returns { changed, nextId, counts }.",
+    inputSchema: { ...repoRootArg },
+  },
+};
+
+function registerTools(server, defaultRoot) {
+  for (const [name, def] of Object.entries(TOOLS)) {
+    server.registerTool(name, { description: def.description, inputSchema: def.inputSchema }, (args = {}) => {
+      try {
+        const root = args.repoRoot ? resolve(args.repoRoot) : defaultRoot;
+        const result = OPS[name](root, args);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+      } catch (e) {
+        const msg = e instanceof TrellisError ? e.message : `unexpected error: ${e.message}`;
+        return { content: [{ type: "text", text: msg }], isError: true };
+      }
+    });
+  }
+}
+
+const opts = parseArgs(process.argv.slice(2));
+if (opts.help) {
+  process.stdout.write(HELP);
+  process.exit(0);
+}
+
+const server = new McpServer({ name: "trellis", version: SERVER_VERSION });
+registerTools(server, opts.repo);
+
+await server.connect(new StdioServerTransport());
+console.error(`trellis-mcp ready (repo: ${opts.repo})`);
