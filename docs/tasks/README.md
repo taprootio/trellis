@@ -12,7 +12,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 | ID | Title | Priority | Effort |
 | --- | --- | --- | --- |
-| [TRL0001](active/TRL0001.md) | Define the Trellis backlog spec (v1) | High | 3 |
 | [TRL0002](active/TRL0002.md) | Build the config-driven generator core | High | 5 |
 | [TRL0003](active/TRL0003.md) | Build the `trellis init` scaffolder | High | 5 |
 | [TRL0004](active/TRL0004.md) | Build the MCP server (operations as tools) | High | 8 |
@@ -27,6 +26,8 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | [TRL0014](active/TRL0014.md) | Bake branch protection + required backlog check into the recipe | High | 3 |
 | [TRL0008](active/TRL0008.md) | Viewer — dependency graph and filters | Medium | 5 |
 | [TRL0009](active/TRL0009.md) | Dogfood — onboard an existing repo end-to-end | Medium | 3 |
+| [TRL0016](active/TRL0016.md) | PR title/description standard, template, and draft shortcut | Medium | 3 |
+| [TRL0015](active/TRL0015.md) | Optional custom effort scales (labels, emoji, images) | Low | 5 |
 
 ### v1
 
@@ -44,5 +45,5 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 ## Next task ID
 
-`TRL0015`
+`TRL0017`
 <!-- END GENERATED:MILESTONES -->

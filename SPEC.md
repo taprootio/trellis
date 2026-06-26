@@ -1,0 +1,303 @@
+# Trellis Backlog Spec
+
+**Version:** 1.0.0 · **Status:** stable
+
+Trellis is a tool-agnostic convention for running a software backlog as plain
+files in a git repository. Work items are Markdown files with YAML front-matter;
+a generator validates them and produces a human index and a machine-readable
+`backlog.json`; CI gates the repo so the index can never drift. This document is
+the canonical specification, intended to be vendored into any repository
+unchanged.
+
+This spec describes the backlog **format and artifacts** — the data, the
+generated outputs, and the tooling contract. It does not prescribe a *process*
+for working items (planning, review, branching); those layer on top and are
+specified separately.
+
+## 1. Concepts
+
+- **Item** — one unit of tracked work, stored as a single Markdown file.
+- **Status** — `active`, `completed`, or `removed`. An item has exactly one,
+  reflected by which directory it lives in.
+- **Generator** — a program that validates items and regenerates the derived
+  artifacts (`README.md` tables and `backlog.json`).
+- **Config** — `backlog.config.json`, the per-repo vocabulary (id prefix,
+  milestones, priorities, effort scale) that lets the same generator serve any
+  repo.
+
+The per-item files are the single source of truth. The index and `backlog.json`
+are derived and must never be hand-edited.
+
+## 2. Repository layout
+
+```
+<repo>/
+  backlog.config.json              # per-repo configuration (§7)
+  docs/tasks/
+    active/<ID>.md                 # open items (§5)
+    completed/
+      tasks/<ID>.md                # finished items, history preserved
+      index.md                     # GENERATED list of completed items (§8.1)
+    removed/<ID>.md                # abandoned items, archived
+    removed/index.md               # GENERATED list of removed items (§8.1)
+    README.md                      # GENERATED human index (§8.1)
+    backlog.json                   # GENERATED machine index (§8.2)
+    assets/effort/                 # optional effort-scale images (§6.3)
+```
+
+The `docs/tasks/` root and the location of `backlog.config.json` (repo root) are
+fixed. Everything inside an item file's body is free-form Markdown.
+
+## 3. Identifiers
+
+An id is a configured **prefix** followed by a zero-padded **number** of a
+configured width — e.g. with prefix `AB` and width 4, `AB0042`.
+
+- The id MUST match the item's filename (`AB0042` ⇄ `AB0042.md`).
+- Ids are assigned monotonically from the **Next task ID** published in the
+  generated `README.md`.
+- An id is permanent and globally unique across all three directories. It MUST
+  NOT be reused, even after an item is removed.
+
+## 4. Status lifecycle
+
+```
+          create
+            │
+            ▼
+        [ active ] ──── ship ────▶ [ completed ]   → completed/tasks/
+            │
+            └──────── drop ───────▶ [ removed ]     → removed/  (with reason)
+```
+
+- There is **no on-hold status.** Park low-priority work as a low-priority
+  `active` item, or remove it with a `removed_reason` that names the trigger to
+  revisit.
+- Transitions are a file **move** plus front-matter edits (§5), made in the same
+  change that ships or drops the work, followed by a generator run.
+- History is preserved: completing or removing an item moves the file (keeping
+  its git history); it is never deleted.
+
+## 5. Item file format
+
+An item file is YAML front-matter delimited by `---`, followed by a Markdown
+body.
+
+### 5.1 Front-matter schema
+
+| field | active | completed | removed | rule |
+| --- | :-: | :-: | :-: | --- |
+| `id` | ✓ | ✓ | ✓ | matches the filename |
+| `title` | ✓ | ✓ | ✓ | one line |
+| `status` | ✓ | ✓ | ✓ | matches the directory |
+| `summary` | ✓ | ✓ | ✓ | one sentence; feeds the README table |
+| `milestone` | ✓ | ✓ | ✓ | a configured milestone (§7.1); historical on closed items |
+| `priority` | ✓ | ✓ | ✓ | a configured priority (§7); historical on closed items |
+| `effort` | ✓ | ✓ | ✓ | a configured effort value (§6); historical on closed items |
+| `depends_on` | ✓ | ✓ | ✓ | list of existing ids (`[]` if none) |
+| `completed_on` | – | ✓ | – | ISO date (`YYYY-MM-DD`) |
+| `removed_on` | – | – | ✓ | ISO date |
+| `removed_reason` | – | – | ✓ | one line; why, and any trigger to revisit |
+
+On close (completed or removed), the descriptive metadata — `milestone`,
+`summary`, `priority`, `effort`, `depends_on` — is carried over from the active
+item as a historical snapshot, and the close fields are added (`completed_on`,
+or `removed_on`/`removed_reason`). These retained enum values are **historical**:
+tooling records them as-was and does not re-validate them against the current
+config (§8.3), so milestones and scales can evolve without breaking the archive.
+
+### 5.2 Body
+
+The body is free-form. Recommended sections are **Scope**, **Notes**, and
+**Risks** for active items, plus a **Completed** section prepended on closeout
+that summarizes what shipped and any follow-ups.
+
+### 5.3 Dependencies
+
+`depends_on` may reference `active` or `completed` ids (every referenced id MUST
+exist somewhere), but an item SHOULD NOT be *worked* until its dependencies are
+`completed`.
+
+## 6. Effort
+
+`effort` is **relative complexity, not time.** Canonical effort values are a
+Fibonacci-like set (default `1, 2, 3, 5, 8, 13, 21`), configurable per repo. The
+non-linear gaps are intentional: reaching the top of the scale is the signal to
+split an item.
+
+The number is always the stored, canonical value. Teams MAY skin it with a
+custom **effort scale** for display.
+
+### 6.1 Effort-scale config
+
+```json
+"effort": {
+  "values": [1, 2, 3, 5, 8, 13, 21],
+  "scale": "fish",
+  "scales": {
+    "fish": {
+      "1":  { "label": "Minnow",    "emoji": "🐟" },
+      "2":  { "label": "Goldfish",  "emoji": "🐠" },
+      "3":  { "label": "Trout",     "emoji": "🐡" },
+      "5":  { "label": "Tuna",      "image": "assets/effort/tuna.svg" },
+      "8":  { "label": "Swordfish" },
+      "13": { "label": "Shark",     "emoji": "🦈" },
+      "21": { "label": "Whale",     "emoji": "🐋" }
+    }
+  }
+}
+```
+
+- `values` (required) — the canonical effort set.
+- `scales` (optional) — named display scales. Each maps **every** value in
+  `values` (string keys) to an entry; a value missing from the active scale is an
+  error.
+- `scale` (optional) — the active scale name. Absent or `"fibonacci"` selects the
+  identity scale (label = the number, no emoji/image).
+- Each entry: `label` (required, unique within the scale), `emoji` (optional),
+  and `image` (optional, repo-relative path). The Tuna/Swordfish entries above
+  show the image-only and label-only cases.
+
+### 6.2 Authoring and resolution
+
+- In front-matter, `effort` MAY be the canonical number **or** a case-insensitive
+  `label` from the active scale (e.g. `effort: Goldfish`). The generator resolves
+  a label to its number; an unresolvable or ambiguous value is an error.
+- `backlog.json` ALWAYS carries the resolved canonical number plus the resolved
+  `effortLabel`, and `effortEmoji`/`effortImage` when present — so consumers
+  render without reading the config.
+
+### 6.3 Rendering
+
+- The generated README shows `label · N` (label and number together) when a
+  non-identity scale is active, and just `N` otherwise — keeping the number
+  legible for velocity and rollup math.
+- `label` doubles as the accessible text/alt for any `image`. SVG or emoji are
+  preferred; images are optional and live under `docs/tasks/assets/effort/`.
+- The array form `effort: [1, 2, 3, 5, 8, 13, 21]` is shorthand for
+  `{ "values": [ … ], "scale": "fibonacci" }` and remains valid.
+
+## 7. Configuration (`backlog.config.json`)
+
+```json
+{
+  "specVersion": "1.0",
+  "idPrefix": "AB",
+  "idWidth": 4,
+  "milestones": ["Alpha", "Beta", "v1", "Future"],
+  "priorities": ["High", "Medium", "Low"],
+  "effort": [1, 2, 3, 5, 8, 13, 21]
+}
+```
+
+| key | meaning |
+| --- | --- |
+| `specVersion` | the Trellis spec version this repo targets (§9) |
+| `idPrefix` | id prefix (e.g. `AB`) |
+| `idWidth` | zero-padded digit count |
+| `milestones` | ordered milestone names (§7.1) |
+| `priorities` | ordered priority names, highest first |
+| `effort` | canonical values, or the effort-scale object (§6.1) |
+
+**Configurable** per repo: everything above. **Fixed** by the spec: the
+`docs/tasks/` layout, the status lifecycle, the front-matter schema, the
+generated-artifact contracts, and the meaning of each field.
+
+### 7.1 Milestones are a maturity axis
+
+A milestone names the **release gate** an item must land in — and nothing else.
+It is a single, ordered axis (e.g. `Alpha → Beta → v1 → Future`). A milestone is
+**not** a feature area (that is the title), **not** a priority (its own field),
+and **not** an on-hold state (§4). Milestone *names* are configured; the
+single-axis, ordered semantics are fixed.
+
+## 8. Generated artifacts
+
+These are derived from the item files and config on every generator run. They
+MUST be deterministic — identical inputs produce byte-identical output, with no
+timestamps or other volatile fields — so that `--check` (§8.3) is stable in CI.
+
+### 8.1 `README.md`
+
+A human index. Item tables are emitted between the markers
+`<!-- BEGIN GENERATED:MILESTONES -->` and `<!-- END GENERATED:MILESTONES -->`;
+content outside the markers is author-owned and preserved. Active items are
+grouped by milestone (config order) and sorted by priority then id. The block
+also publishes the **Next task ID**. Text between the markers MUST NOT be
+hand-edited.
+
+The completed and removed indexes (`completed/index.md`, `removed/index.md`) are
+generated the same way, each between its own `BEGIN/END GENERATED` markers, as a
+table that includes the item's **summary** — completed: id, title, summary, date;
+removed: id, title, summary, date, reason. Closing or removing an item is a file
+move plus a generator run; index rows are never hand-added.
+
+### 8.2 `backlog.json`
+
+The machine contract consumers build on:
+
+```json
+{
+  "prefix": "AB",
+  "milestones": ["Alpha", "Beta", "v1", "Future"],
+  "nextId": "AB0016",
+  "counts": { "active": 14, "completed": 1, "removed": 0 },
+  "tasks": [
+    {
+      "id": "AB0042", "title": "…", "status": "active",
+      "milestone": "Beta", "priority": "High",
+      "effort": 5, "effortLabel": "Tuna", "effortImage": "assets/effort/tuna.svg",
+      "depends_on": ["AB0007"], "summary": "…"
+    }
+  ]
+}
+```
+
+Every entry carries the descriptive metadata (`milestone`, `summary`,
+`priority`, `effort`, `depends_on`). Completed entries add `completed_on`;
+removed entries add `removed_on` and `removed_reason`. Effort label/emoji/image
+fields appear when a scale is active.
+
+### 8.3 Tooling contract
+
+A conforming generator MUST:
+
+1. **Validate** every item against the schema (§5) and config (§7) with
+   actionable messages: id/filename match, required fields, enum membership,
+   effort resolution, unique ids, and `depends_on` referential integrity. Enum
+   membership (milestone/priority/effort) is enforced for **active** items only;
+   on completed/removed items these values are historical and MUST NOT fail
+   validation if they are no longer in the current config (a mismatch MAY warn).
+2. **Regenerate** `README.md`, the completed/removed indexes (each between its
+   markers), and `backlog.json` deterministically.
+3. Support a **`--check`** mode that validates and verifies the artifacts are
+   current **without writing**, exiting non-zero on any error or drift. This is
+   the CI gate.
+4. **Warn** when `specVersion` is absent or its major version differs from the
+   spec version the generator implements (§9).
+
+## 9. Versioning and compatibility
+
+This spec uses SemVer. A repo declares the version it targets via `specVersion`
+(`major.minor`). Within a major version, changes are additive and backward
+compatible; a major bump may change required fields or artifact shape. Tooling
+warns on a major mismatch between `specVersion` and the implemented spec.
+
+## 10. CI and branch protection
+
+Conformant repositories MUST gate the default branch so the index cannot drift:
+
+- The default branch is **protected**; changes land via pull/merge request.
+- The generator's **`--check` is a required status check** that must pass before
+  merge.
+
+This is forge-agnostic — GitHub branch protection, GitLab merge-request
+pipelines, Bitbucket, or Azure DevOps all satisfy it. Setup specifics are left to
+the consumer's onboarding tooling.
+
+## 11. Conformance
+
+A repository is **Trellis-conformant** at `specVersion` *X* if its items follow
+§3–§6, its `backlog.config.json` follows §7, its generated artifacts follow §8,
+and its default branch is gated per §10. A **tool** is conformant if it
+implements the generator contract (§8.3) for that version.
