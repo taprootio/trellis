@@ -8,23 +8,11 @@
   ],
   "nextId": "TRL0019",
   "counts": {
-    "active": 13,
-    "completed": 5,
+    "active": 12,
+    "completed": 6,
     "removed": 0
   },
   "tasks": [
-    {
-      "id": "TRL0004",
-      "title": "Build the MCP server (operations as tools)",
-      "status": "active",
-      "milestone": "Alpha",
-      "priority": "High",
-      "effort": 8,
-      "depends_on": [
-        "TRL0002"
-      ],
-      "summary": "Expose the backlog operations over MCP so any MCP-aware tool can list, read, create, move, validate, and regenerate tasks in any repo."
-    },
     {
       "id": "TRL0005",
       "title": "Build the local viewer (`trellis serve`)",
@@ -206,6 +194,19 @@
         "TRL0002"
       ],
       "summary": "One command that onboards any repo to the Trellis backlog — scaffolds the layout, config, generated index, CI check, AGENTS section, and process playbooks, idempotently and without clobbering.",
+      "completed_on": "2026-06-26"
+    },
+    {
+      "id": "TRL0004",
+      "title": "Build the MCP server (operations as tools)",
+      "status": "completed",
+      "milestone": "Alpha",
+      "priority": "High",
+      "effort": 8,
+      "depends_on": [
+        "TRL0002"
+      ],
+      "summary": "Expose the backlog operations over MCP so any MCP-aware tool can list, read, create, move, validate, and regenerate tasks in any repo.",
       "completed_on": "2026-06-26"
     },
     {
