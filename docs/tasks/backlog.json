@@ -17,7 +17,7 @@
       "id": "TRL0005",
       "title": "Build the local viewer (`trellis serve`)",
       "status": "active",
-      "milestone": "Alpha",
+      "milestone": "Future",
       "priority": "Medium",
       "effort": 5,
       "depends_on": [
@@ -41,7 +41,7 @@
       "id": "TRL0008",
       "title": "Viewer — dependency graph and filters",
       "status": "active",
-      "milestone": "Beta",
+      "milestone": "Future",
       "priority": "Medium",
       "effort": 5,
       "depends_on": [
