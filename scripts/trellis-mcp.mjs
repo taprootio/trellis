@@ -16,6 +16,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { resolve } from "node:path";
 import { OPS, TrellisError } from "../src/mcp.mjs";
+import { RESOURCES, PROMPTS, listResources, readResource, buildPrompt } from "../src/prompts.mjs";
 
 // Server implementation version (distinct from the spec version; packaging and
 // real versioning are TRL0010).
@@ -39,10 +40,13 @@ Usage:
   node scripts/trellis-mcp.mjs [--repo <path>]
 
 Options:
-  --repo <path>   default repo root for tools that omit \`repoRoot\` (default: cwd)
+  --repo <path>   default repo root for tools/prompts that omit \`repoRoot\`, and
+                  the repo served for resources (default: cwd)
   -h, --help      show this help
 
-Tools: ${Object.keys(OPS).join(", ")}
+Tools:     ${Object.keys(OPS).join(", ")}
+Prompts:   ${PROMPTS.map((p) => p.name).join(", ")}
+Resources: ${RESOURCES.map((r) => r.uri).join(", ")}
 `;
 
 const repoRootArg = { repoRoot: z.string().optional().describe("repo root to operate on; defaults to the server's --repo / cwd") };
@@ -115,6 +119,45 @@ function registerTools(server, defaultRoot) {
   }
 }
 
+// Resources serve the server's default repo (a static uri carries no per-call
+// repoRoot). Only the resources whose backing file exists at boot are advertised,
+// so the list never offers what this repo can't serve (e.g. SPEC.md is absent in
+// onboarded repos until TRL0010). Returns the count registered.
+function registerResources(server, defaultRoot) {
+  const available = new Set(listResources(defaultRoot).filter((r) => r.available).map((r) => r.uri));
+  const byUri = new Map(RESOURCES.map((r) => [r.uri, r]));
+  for (const uri of available) {
+    const r = byUri.get(uri);
+    server.registerResource(
+      r.name,
+      r.uri,
+      { title: r.title, description: r.description, mimeType: r.mimeType },
+      () => {
+        const { uri: u, mimeType, text } = readResource(defaultRoot, r.uri);
+        return { contents: [{ uri: u, mimeType, text }] };
+      },
+    );
+  }
+  return available.size;
+}
+
+// Prompts mirror the tools: each accepts an optional `repoRoot` override (else the
+// server default) so one server can build prompts for any repo. A failed build
+// (bad id, missing playbook) throws a TrellisError, which the SDK surfaces as the
+// prompt's get error.
+function registerPrompts(server, defaultRoot) {
+  for (const p of PROMPTS) {
+    const argsSchema = { repoRoot: z.string().optional().describe("repo root to operate on; defaults to the server's --repo / cwd") };
+    for (const a of p.arguments) {
+      argsSchema[a.name] = a.required ? z.string().describe(a.description) : z.string().optional().describe(a.description);
+    }
+    server.registerPrompt(p.name, { title: p.title, description: p.description, argsSchema }, (args = {}) => {
+      const root = args.repoRoot ? resolve(args.repoRoot) : defaultRoot;
+      return buildPrompt(root, p.name, args);
+    });
+  }
+}
+
 const opts = parseArgs(process.argv.slice(2));
 if (opts.help) {
   process.stdout.write(HELP);
@@ -123,6 +166,8 @@ if (opts.help) {
 
 const server = new McpServer({ name: "trellis", version: SERVER_VERSION });
 registerTools(server, opts.repo);
+const resourceCount = registerResources(server, opts.repo);
+registerPrompts(server, opts.repo);
 
 await server.connect(new StdioServerTransport());
-console.error(`trellis-mcp ready (repo: ${opts.repo})`);
+console.error(`trellis-mcp ready (repo: ${opts.repo}; ${Object.keys(OPS).length} tools, ${PROMPTS.length} prompts, ${resourceCount} resources)`);
