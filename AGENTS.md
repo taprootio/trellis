@@ -31,6 +31,9 @@ For the front-matter schema, status lifecycle, effort scales, the generator /
 - Closing a task: move it to `completed/tasks/`, set `status: completed` +
   `completed_on`, and regenerate (the completed index is generated) — in the same
   change. Full rules in SPEC.md §4–§5.
+- To take a task from `active/` to ready-for-review, follow
+  [`docs/playbooks/work-task.md`](docs/playbooks/work-task.md) — refine with the
+  user, plan, branch, work, review, hand off.
 - Code reviews follow [`docs/playbooks/code-review.md`](docs/playbooks/code-review.md):
   ground in these conventions first, then report findings as the canonical JSON
   array (`file` / `line` / `severity` blocker·warning·nit / `suggestion`).
