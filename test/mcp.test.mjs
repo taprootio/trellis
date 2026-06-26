@@ -1,0 +1,193 @@
+// Smoke/behavior tests for the MCP operations (zero-dependency, run via
+// `node --test`). Scope is the tool contract in src/mcp.mjs — the transport-free
+// core, driven directly; the SDK wiring in scripts/trellis-mcp.mjs is a thin
+// adapter. The broader CLI/MCP matrix is TRL0011. Each test scaffolds a throwaway
+// Trellis repo with the init scaffolder, then exercises the tools against it.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { applyScaffold } from "../src/init.mjs";
+import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
+import {
+  listTasks, getTask, nextIdOp, createTask, moveTask, validateOp, regenerateOp, TrellisError,
+} from "../src/mcp.mjs";
+
+const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// A fresh, --check-green Trellis repo to operate on.
+function freshRepo() {
+  const root = mkdtempSync(join(tmpdir(), "trellis-mcp-"));
+  applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+  return root;
+}
+
+// Assert every generated artifact on disk matches what the core would regenerate.
+function assertCheckClean(root) {
+  const { cfg } = loadConfig(root);
+  const data = readBacklog(root, cfg);
+  assert.deepEqual(data.errors, [], "backlog should read without errors");
+  const { files } = generateArtifacts(root, cfg, data);
+  const stale = files.filter((f) => (existsSync(f.path) ? readFileSync(f.path, "utf8") : "") !== f.content);
+  assert.deepEqual(stale.map((f) => f.path), [], "no generated artifact should be stale");
+}
+
+const VALID = { title: "First task", summary: "Do the first thing.", milestone: "Alpha", priority: "High", effort: 3 };
+
+test("next_id reports the first id on a fresh scaffold", () => {
+  const root = freshRepo();
+  try {
+    assert.equal(nextIdOp(root).nextId, "DEMO0001");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("create_task writes a valid active item and stays --check-green", () => {
+  const root = freshRepo();
+  try {
+    const { created } = createTask(root, VALID);
+    assert.equal(created.id, "DEMO0001");
+    assert.equal(created.status, "active");
+    assert.equal(created.effort, 3);
+    assert.ok(existsSync(join(root, "docs/tasks/active/DEMO0001.md")), "the item file exists");
+    assert.equal(nextIdOp(root).nextId, "DEMO0002", "next id advances");
+    assert.ok(validateOp(root).ok, "the backlog validates");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("get_task returns the entry plus the raw Markdown body", () => {
+  const root = freshRepo();
+  try {
+    createTask(root, VALID);
+    const t = getTask(root, { id: "DEMO0001" });
+    assert.equal(t.title, "First task");
+    assert.equal(t.file, "docs/tasks/active/DEMO0001.md");
+    assert.match(t.body, /## Scope/);
+    assert.match(t.body, /## Risks/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("list_tasks filters by status and milestone", () => {
+  const root = freshRepo();
+  try {
+    createTask(root, VALID);
+    assert.equal(listTasks(root).tasks.length, 1, "unfiltered lists the task");
+    assert.equal(listTasks(root, { status: "active" }).tasks.length, 1);
+    assert.equal(listTasks(root, { status: "completed" }).tasks.length, 0);
+    assert.equal(listTasks(root, { milestone: "Alpha" }).tasks.length, 1);
+    assert.equal(listTasks(root, { milestone: "Beta" }).tasks.length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("create_task rolls back when the result would not validate", () => {
+  // A depends_on referencing a nonexistent id fails the core's referential check;
+  // the half-written file must be removed and the backlog left clean.
+  const root = freshRepo();
+  try {
+    assert.throws(
+      () => createTask(root, { ...VALID, depends_on: ["DEMO9999"] }),
+      (e) => e instanceof TrellisError && /DEMO9999/.test(e.message),
+    );
+    assert.equal(existsSync(join(root, "docs/tasks/active/DEMO0001.md")), false, "no file is left behind");
+    assert.ok(validateOp(root).ok, "the backlog is still valid");
+    assert.equal(nextIdOp(root).nextId, "DEMO0001", "next id did not advance");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("move_task completes an item: moves the file, sets completed_on, updates counts", () => {
+  const root = freshRepo();
+  try {
+    createTask(root, VALID);
+    const { moved, counts } = moveTask(root, { id: "DEMO0001", to: "completed", date: "2026-06-26" });
+    assert.equal(moved.status, "completed");
+    assert.equal(moved.completed_on, "2026-06-26");
+    assert.equal(counts.active, 0);
+    assert.equal(counts.completed, 1);
+    assert.equal(existsSync(join(root, "docs/tasks/active/DEMO0001.md")), false, "left active/");
+    assert.ok(existsSync(join(root, "docs/tasks/completed/tasks/DEMO0001.md")), "now in completed/tasks/");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("move_task to removed without a reason is rejected and changes nothing", () => {
+  const root = freshRepo();
+  try {
+    createTask(root, VALID);
+    assert.throws(() => moveTask(root, { id: "DEMO0001", to: "removed", date: "2026-06-26" }), /reason/);
+    assert.ok(existsSync(join(root, "docs/tasks/active/DEMO0001.md")), "the item stays active");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("move_task on an unknown id throws not_found", () => {
+  const root = freshRepo();
+  try {
+    assert.throws(
+      () => moveTask(root, { id: "DEMO0404", to: "completed", date: "2026-06-26" }),
+      (e) => e instanceof TrellisError && e.code === "not_found",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("move_task prepends the closeout note after the H1, before the body", () => {
+  const root = freshRepo();
+  try {
+    createTask(root, { ...VALID, body: "# DEMO0001 — First task\n\n## Scope\n\n- ship it\n" });
+    moveTask(root, { id: "DEMO0001", to: "completed", date: "2026-06-26", note: "Shipped the first thing." });
+    const text = readFileSync(join(root, "docs/tasks/completed/tasks/DEMO0001.md"), "utf8");
+    assert.match(text, /## Completed\n\nShipped the first thing\./);
+    assert.ok(text.indexOf("# DEMO0001") < text.indexOf("## Completed"), "note follows the H1");
+    assert.ok(text.indexOf("## Completed") < text.indexOf("## Scope"), "note precedes the original body");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("validate reports errors on a corrupted item", () => {
+  const root = freshRepo();
+  try {
+    createTask(root, VALID);
+    assert.ok(validateOp(root).ok, "valid before tampering");
+    writeFileSync(join(root, "docs/tasks/active/DEMO0001.md"), "---\nid: DEMO0001\ntitle: x\nstatus: active\n---\n\nbody\n");
+    const v = validateOp(root);
+    assert.equal(v.ok, false, "missing required fields are caught");
+    assert.ok(v.errors.some((e) => /summary|priority|effort|milestone|depends_on/.test(e)));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("regenerate rewrites a stale artifact and reports what changed", () => {
+  const root = freshRepo();
+  try {
+    createTask(root, VALID);
+    assert.deepEqual(regenerateOp(root).changed, [], "nothing stale right after create");
+    writeFileSync(join(root, "docs/tasks/backlog.json"), "{}\n"); // corrupt an artifact
+    const { changed, counts } = regenerateOp(root);
+    assert.ok(changed.some((p) => /backlog\.json$/.test(p)), "the stale artifact is rewritten");
+    assert.equal(counts.active, 1);
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
