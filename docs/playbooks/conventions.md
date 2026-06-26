@@ -41,13 +41,13 @@ check`, a branch pattern, the attribution policy). A repo edits those values to
 match its own tooling; the playbooks need no change to follow them, because they
 only ever name the seam point.
 
-This repo (Trellis) is its own reference instance — see its `AGENTS.md` Loop
-contract block for the concrete values the playbooks' tagged examples come from.
+Trellis itself is the reference instance — its `AGENTS.md` Loop contract block
+holds the concrete values the playbooks' `e.g.` examples are drawn from.
 
 ## How a playbook uses a seam point
 
 > Rewrite the task file, then **regenerate the backlog** (the repo's `regenerate`
-> command — this repo: `npm run backlog:readme`; see AGENTS.md) and commit it.
+> command — e.g. `npm run backlog:readme`; see AGENTS.md) and commit it.
 
 The instruction is "regenerate the backlog"; `npm run backlog:readme` is Trellis's
 value, tagged as such. In an onboarded repo the same step resolves to that repo's

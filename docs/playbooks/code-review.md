@@ -18,7 +18,7 @@ standard.
    stated intent, not just the diff in isolation.
 3. **Verify closeout** when the work claims to finish a task: the item moved to
    `completed/tasks/` with `status: completed` + `completed_on`, the generated
-   artifacts are current (the repo's `check` command passes — this repo:
+   artifacts are current (the repo's `check` command passes — e.g.
    `npm run backlog:check`; see AGENTS.md), and links hold. Flag any miss as a
    `blocker`.
 4. **Review thoroughly, twice.** First pass for the obvious; second pass for what
@@ -26,7 +26,7 @@ standard.
    failure / edge / hostile input, and what *should* have changed but didn't
    (missing tests, a stale doc, an un-updated snapshot).
 5. **Run the gates you can** — the repo's `check` command and its `gates`
-   (tests/lint; this repo: `npm run backlog:check` + `node --test`; see AGENTS.md).
+   (tests/lint; e.g. `npm run backlog:check` + `node --test`; see AGENTS.md).
    A failing gate is a `blocker`.
 
 ## Output format (the standard)
