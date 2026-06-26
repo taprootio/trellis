@@ -6,9 +6,9 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0019",
+  "nextId": "TRL0020",
   "counts": {
-    "active": 12,
+    "active": 13,
     "completed": 6,
     "removed": 0
   },
@@ -158,6 +158,18 @@
       "effort": 3,
       "depends_on": [],
       "summary": "Add a repository PR template and a copy-ready PR title/description draft shortcut that conform to a shared standard, with CI enforcement and an MCP-prompt graduation to follow."
+    },
+    {
+      "id": "TRL0019",
+      "title": "MCP server HTTP transport (port/host) + per-repo resource addressing",
+      "status": "active",
+      "milestone": "v1",
+      "priority": "Medium",
+      "effort": 5,
+      "depends_on": [
+        "TRL0006"
+      ],
+      "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
     },
     {
       "id": "TRL0001",
