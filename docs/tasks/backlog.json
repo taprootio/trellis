@@ -133,7 +133,7 @@
       "priority": "Medium",
       "effort": 3,
       "depends_on": [],
-      "summary": "Add a repository PR template and a copy-ready PR title/description draft shortcut that conform to a shared standard, with CI enforcement and an MCP-prompt graduation to follow."
+      "summary": "Enforce the shared PR title standard in CI with a config-driven, prefix-agnostic title lint; the template, draft shortcut, and MCP prompt already shipped."
     },
     {
       "id": "TRL0019",
