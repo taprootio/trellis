@@ -8,23 +8,11 @@
   ],
   "nextId": "TRL0017",
   "counts": {
-    "active": 15,
-    "completed": 1,
+    "active": 14,
+    "completed": 2,
     "removed": 0
   },
   "tasks": [
-    {
-      "id": "TRL0002",
-      "title": "Build the config-driven generator core",
-      "status": "active",
-      "milestone": "Alpha",
-      "priority": "High",
-      "effort": 5,
-      "depends_on": [
-        "TRL0001"
-      ],
-      "summary": "Generalize the backlog generator into the reusable Trellis core — validate, regenerate README + backlog.json, compute next id, support --check."
-    },
     {
       "id": "TRL0003",
       "title": "Build the `trellis init` scaffolder",
@@ -204,6 +192,19 @@
       "effort": 3,
       "depends_on": [],
       "summary": "Write the canonical, repo-agnostic spec for the file-based backlog — layout, front-matter schema, vocab, and generator contract.",
+      "completed_on": "2026-06-25"
+    },
+    {
+      "id": "TRL0002",
+      "title": "Build the config-driven generator core",
+      "status": "completed",
+      "milestone": "Alpha",
+      "priority": "High",
+      "effort": 5,
+      "depends_on": [
+        "TRL0001"
+      ],
+      "summary": "Generalize the backlog generator into the reusable Trellis core — validate, regenerate README + backlog.json, compute next id, support --check.",
       "completed_on": "2026-06-25"
     }
   ]
