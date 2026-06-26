@@ -18,7 +18,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 | ID | Title | Priority | Effort |
 | --- | --- | --- | --- |
-| [TRL0006](active/TRL0006.md) | Ship the process as MCP prompts + resources | High | 5 |
 | [TRL0007](active/TRL0007.md) | Separate the universal loop from per-repo conventions | High | 3 |
 | [TRL0014](active/TRL0014.md) | Bake branch protection + required backlog check into the recipe | High | 3 |
 | [TRL0008](active/TRL0008.md) | Viewer — dependency graph and filters | Medium | 5 |
@@ -32,6 +31,7 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | --- | --- | --- | --- |
 | [TRL0010](active/TRL0010.md) | Packaging, versioned spec, and docs | High | 5 |
 | [TRL0011](active/TRL0011.md) | Test suite and CI for CLI and MCP server | High | 5 |
+| [TRL0019](active/TRL0019.md) | MCP server HTTP transport (port/host) + per-repo resource addressing | Medium | 5 |
 
 ### Future
 
@@ -42,5 +42,5 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 ## Next task ID
 
-`TRL0019`
+`TRL0020`
 <!-- END GENERATED:MILESTONES -->

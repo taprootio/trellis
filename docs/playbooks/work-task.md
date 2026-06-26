@@ -2,7 +2,8 @@
 
 A ready-to-use shortcut for taking a Trellis task from `docs/tasks/active/` all
 the way to "ready for your review." Invoke it with a task id (e.g. `TRL0007`).
-Point any AI assistant at this file; it graduates to an MCP prompt under TRL0006.
+Point any AI assistant at this file, or invoke the equivalent `work-task` MCP
+prompt (served from this file by the Trellis MCP server — see AGENTS.md §Roadmap).
 
 The loop is fixed — do not improvise the order. There are exactly **two**
 intentional pauses (steps 4 and 5); everything after the confirmed plan runs

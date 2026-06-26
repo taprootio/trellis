@@ -6,10 +6,10 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0019",
+  "nextId": "TRL0020",
   "counts": {
     "active": 12,
-    "completed": 6,
+    "completed": 7,
     "removed": 0
   },
   "tasks": [
@@ -24,18 +24,6 @@
         "TRL0001"
       ],
       "summary": "A local dev server that renders the backlog from backlog.json and hot-reloads when the task files change — no deploy, no auth."
-    },
-    {
-      "id": "TRL0006",
-      "title": "Ship the process as MCP prompts + resources",
-      "status": "active",
-      "milestone": "Beta",
-      "priority": "High",
-      "effort": 5,
-      "depends_on": [
-        "TRL0004"
-      ],
-      "summary": "Carry the \"work a task\" and \"review\" loops as MCP prompts and the spec as MCP resources, so the process travels to any MCP client, not just Claude."
     },
     {
       "id": "TRL0007",
@@ -160,6 +148,18 @@
       "summary": "Add a repository PR template and a copy-ready PR title/description draft shortcut that conform to a shared standard, with CI enforcement and an MCP-prompt graduation to follow."
     },
     {
+      "id": "TRL0019",
+      "title": "MCP server HTTP transport (port/host) + per-repo resource addressing",
+      "status": "active",
+      "milestone": "v1",
+      "priority": "Medium",
+      "effort": 5,
+      "depends_on": [
+        "TRL0006"
+      ],
+      "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
+    },
+    {
       "id": "TRL0001",
       "title": "Define the Trellis backlog spec (v1)",
       "status": "completed",
@@ -207,6 +207,19 @@
         "TRL0002"
       ],
       "summary": "Expose the backlog operations over MCP so any MCP-aware tool can list, read, create, move, validate, and regenerate tasks in any repo.",
+      "completed_on": "2026-06-26"
+    },
+    {
+      "id": "TRL0006",
+      "title": "Ship the process as MCP prompts + resources",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "High",
+      "effort": 5,
+      "depends_on": [
+        "TRL0004"
+      ],
+      "summary": "Carry the \"work a task\" and \"review\" loops as MCP prompts and the spec/playbooks/templates as MCP resources, so the process travels to any MCP client, not just Claude.",
       "completed_on": "2026-06-26"
     },
     {

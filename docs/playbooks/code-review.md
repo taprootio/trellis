@@ -1,7 +1,8 @@
 # Playbook: code review
 
 A ready-to-use shortcut for reviewing work in a Trellis repo. Point any AI
-assistant at this file; it graduates to an MCP prompt under TRL0006. The
+assistant at this file, or invoke the equivalent `code-review` MCP prompt (served
+from this file by the Trellis MCP server). The
 *what to check* defers to the repo's own conventions (AGENTS.md / SPEC.md), so
 this stays tech-agnostic — the **process** and the **output format** are the
 standard.

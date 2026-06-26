@@ -2,8 +2,8 @@
 
 A ready-to-use shortcut for generating a **copy-ready** PR title and description
 that conform to [`.github/pull_request_template.md`](../../.github/pull_request_template.md).
-Point any AI assistant at this file. It will graduate to an MCP prompt under
-TRL0006 so any tool can invoke it directly.
+Point any AI assistant at this file, or invoke the equivalent `pr-draft` MCP
+prompt (served from this file by the Trellis MCP server) so any tool can run it.
 
 ## What the assistant should gather first
 
