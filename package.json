@@ -7,6 +7,11 @@
     "backlog:readme": "node scripts/backlog-readme.mjs",
     "backlog:check": "node scripts/backlog-readme.mjs --check",
     "trellis:init": "node scripts/trellis-init.mjs",
+    "trellis:mcp": "node scripts/trellis-mcp.mjs",
     "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
   }
 }

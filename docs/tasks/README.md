@@ -12,7 +12,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 | ID | Title | Priority | Effort |
 | --- | --- | --- | --- |
-| [TRL0004](active/TRL0004.md) | Build the MCP server (operations as tools) | High | 8 |
 | [TRL0005](active/TRL0005.md) | Build the local viewer (`trellis serve`) | Medium | 5 |
 
 ### Beta

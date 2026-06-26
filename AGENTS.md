@@ -42,7 +42,9 @@ For the front-matter schema, status lifecycle, effort scales, the generator /
 
 ## Roadmap
 
-The work to build Trellis is tracked in `docs/tasks/README.md`. The portable
-*process* — the "work a task" and "review" loops Taproot proved out — will ship
-as MCP **prompts** plus Markdown playbooks, so any MCP-aware tool (Claude,
-Cursor, Windsurf, Codex, Cline, Zed) runs the same loop.
+The work to build Trellis is tracked in `docs/tasks/README.md`. The backlog
+operations are exposed as MCP **tools** (`npm run trellis:mcp`, reusing the same
+core as the CLI; see `src/mcp.mjs`). The portable *process* — the "work a task"
+and "review" loops Taproot proved out — layers on top as MCP **prompts** plus
+Markdown playbooks (TRL0006), so any MCP-aware tool (Claude, Cursor, Windsurf,
+Codex, Cline, Zed) runs the same loop.
