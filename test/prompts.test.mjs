@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -113,6 +113,24 @@ test("buildPrompt(code-review) and (pr-draft) embed their playbooks and need no 
 
     const pr = buildPrompt(root, "pr-draft", {}).messages[0].content.text;
     assert.match(pr, /# Playbook: draft a PR title and description/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("buildPrompt degrades gracefully when the repo's config is unreadable", () => {
+  // The vocabulary preamble (and work-task id check) read config live; a broken
+  // config must fall back to pointing at AGENTS.md, not throw — so the loop stays
+  // usable while the config is being fixed.
+  const root = freshRepo();
+  try {
+    writeFileSync(join(root, "backlog.config.json"), "{ not valid json");
+    const text = buildPrompt(root, "code-review", {}).messages[0].content.text;
+    assert.match(text, /the repo's `backlog\.config\.json` governs its vocabulary/);
+    assert.match(text, /# Playbook: code review/, "still embeds the playbook");
+    // work-task can't validate the id format without config, but must still build.
+    const wt = buildPrompt(root, "work-task", { id: "ANYTHING1" }).messages[0].content.text;
+    assert.match(wt, /work task \*\*ANYTHING1\*\*/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
