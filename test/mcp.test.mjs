@@ -220,3 +220,49 @@ test("create_task dedupes depends_on", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("move_task rejects a path-traversal id and changes nothing", () => {
+  // A traversal id like ../active/DEMO0001 must never reach a filesystem path —
+  // with to:"removed" it could otherwise delete the active task. Reject up front.
+  const root = freshRepo();
+  try {
+    createTask(root, VALID); // DEMO0001 active
+    for (const id of ["../active/DEMO0001", "DEMO0001/../DEMO0001", "../../etc/passwd"]) {
+      assert.throws(
+        () => moveTask(root, { id, to: "removed", reason: "x", date: "2026-06-26" }),
+        (e) => e instanceof TrellisError && e.code === "invalid_request",
+        `id ${id} should be rejected`,
+      );
+    }
+    assert.ok(existsSync(join(root, "docs/tasks/active/DEMO0001.md")), "the active task is untouched");
+    assert.ok(validateOp(root).ok, "the backlog is still valid");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("get_task rejects a malformed id", () => {
+  const root = freshRepo();
+  try {
+    createTask(root, VALID);
+    assert.throws(
+      () => getTask(root, { id: "../../etc/passwd" }),
+      (e) => e instanceof TrellisError && e.code === "invalid_request",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("move_task defaults the close date to a valid local ISO date", () => {
+  const root = freshRepo();
+  try {
+    createTask(root, VALID);
+    const { moved } = moveTask(root, { id: "DEMO0001", to: "completed" }); // no date
+    assert.match(moved.completed_on, /^\d{4}-\d{2}-\d{2}$/, "a YYYY-MM-DD date is recorded");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

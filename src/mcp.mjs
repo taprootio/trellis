@@ -139,7 +139,21 @@ function isoDate(s) {
   return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  // Local calendar date, not UTC — so a default close date doesn't slip a day
+  // when the server's wall clock is on the other side of midnight from UTC.
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
+// Reject a client-supplied id that is not a well-formed task id for this repo,
+// before it is ever used to build a filesystem path — closes path traversal via an
+// id like "../active/DEMO0001" (which, with to:"removed", could delete a task).
+function assertId(id, cfg) {
+  const v = oneLine(id, "id");
+  if (!new RegExp(`^${cfg.idPrefix}\\d{${cfg.idWidth}}$`).test(v)) {
+    throw new TrellisError(`invalid task id: ${v} (expected ${cfg.idPrefix} + ${cfg.idWidth} digits)`, "invalid_request");
+  }
+  return v;
 }
 
 // ---------------------------------------------------- regenerate (shared)
@@ -188,8 +202,8 @@ export function listTasks(repoRoot, { status, milestone } = {}) {
 
 // get_task — the structured entry plus the raw Markdown body and file path.
 export function getTask(repoRoot, { id } = {}) {
-  oneLine(id, "id");
   const cfg = loadCfg(repoRoot);
+  assertId(id, cfg);
   const data = readBacklog(repoRoot, cfg);
   const entry = backlogObject(cfg, data).tasks.find((t) => t.id === id);
   if (!entry) throw new TrellisError(`no task with id ${id}`, "not_found");
@@ -248,15 +262,17 @@ export function createTask(repoRoot, args = {}) {
   const body = args.body ? args.body : scaffoldBody(id, title);
   const file = join(paths(repoRoot).active, `${id}.md`);
 
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, composeFile(fm, body));
+  // The write lives inside the try so a failure at any point — the item write, the
+  // re-validate, or regenerate — rolls the brand-new file back.
   try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, composeFile(fm, body));
     const data2 = readBacklog(repoRoot, cfg);
     if (data2.errors.length) throw new TrellisError(`created task is invalid: ${data2.errors.join("; ")}`, "invalid_backlog");
     writeArtifacts(repoRoot, cfg, data2);
     return { created: backlogObject(cfg, data2).tasks.find((t) => t.id === id) };
   } catch (e) {
-    rmSync(file, { force: true }); // roll back — the file is brand new
+    try { rmSync(file, { force: true }); } catch { /* best-effort */ }
     throw e;
   }
 }
@@ -265,7 +281,6 @@ export function createTask(repoRoot, args = {}) {
 // prepend the closeout note. Rolls back (restore source, remove target) on a
 // validation failure.
 export function moveTask(repoRoot, args = {}) {
-  const id = oneLine(args.id, "id");
   const to = args.to;
   if (to !== "completed" && to !== "removed") throw new TrellisError("`to` must be \"completed\" or \"removed\"");
   const date = args.date === undefined ? todayISO() : args.date;
@@ -273,6 +288,7 @@ export function moveTask(repoRoot, args = {}) {
   const reason = to === "removed" ? oneLine(args.reason, "reason") : undefined;
 
   const { cfg } = loadClean(repoRoot);
+  const id = assertId(args.id, cfg); // validate the id format before building any path
   const p = paths(repoRoot);
   const src = join(p.active, `${id}.md`);
   if (!existsSync(src)) {
@@ -290,17 +306,20 @@ export function moveTask(repoRoot, args = {}) {
 
   const targetDir = to === "completed" ? p.completedTasks : p.removed;
   const target = join(targetDir, `${id}.md`);
-  mkdirSync(targetDir, { recursive: true });
-  writeFileSync(target, composeFile(fm, newBody));
-  rmSync(src, { force: true });
+  // The move (write target, remove source) lives inside the try so a failure at any
+  // point — including between the two writes — restores the source and undoes the
+  // target. Restores are best-effort so the original error is never masked.
   try {
+    mkdirSync(targetDir, { recursive: true });
+    writeFileSync(target, composeFile(fm, newBody));
+    rmSync(src, { force: true });
     const data2 = readBacklog(repoRoot, cfg);
     if (data2.errors.length) throw new TrellisError(`move produced an invalid backlog: ${data2.errors.join("; ")}`, "invalid_backlog");
     writeArtifacts(repoRoot, cfg, data2);
     return { moved: backlogObject(cfg, data2).tasks.find((t) => t.id === id), counts: backlogObject(cfg, data2).counts };
   } catch (e) {
-    writeFileSync(src, original); // restore the source…
-    rmSync(target, { force: true }); // …and undo the target write
+    try { writeFileSync(src, original); } catch { /* best-effort */ } // restore the source…
+    try { rmSync(target, { force: true }); } catch { /* best-effort */ } // …and undo the target write
     throw e;
   }
 }
