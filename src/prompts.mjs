@@ -99,7 +99,7 @@ export const PROMPTS = [
     name: "work-task", title: "Work a task",
     description: "Take a Trellis task from active/ to ready-for-review by following the work-a-task loop.",
     playbook: "docs/playbooks/work-task.md",
-    arguments: [{ name: "id", description: "task id to work, e.g. TRL0007", required: true }],
+    arguments: [{ name: "id", description: "task id to work, using this repo's configured id prefix and width", required: true }],
   },
   {
     name: "code-review", title: "Code review",

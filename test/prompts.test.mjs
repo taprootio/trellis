@@ -41,6 +41,21 @@ test("listResources marks the catalog: playbooks/config/conventions/template ava
   }
 });
 
+test("served prompt/resource metadata carries no repo-specific id prefix example", () => {
+  // TRL0007: this catalog metadata is shown verbatim by MCP clients
+  // (list_prompts/list_resources) BEFORE buildPrompt injects the repo's vocabulary,
+  // so it must not advertise the Trellis id prefix to an onboarded repo's users.
+  const strings = [];
+  for (const p of PROMPTS) {
+    strings.push(p.name, p.title, p.description);
+    for (const a of p.arguments) strings.push(a.name, a.description);
+  }
+  for (const r of RESOURCES) strings.push(r.name, r.title, r.description);
+  for (const s of strings) {
+    assert.doesNotMatch(s, /TRL(xxxx|\d)/, `served metadata leaks the Trellis id prefix: "${s}"`);
+  }
+});
+
 test("the conventions contract is an available resource and serves its content", () => {
   // TRL0007: the contract definition is exposed as its own trellis:// resource and
   // travels via init, so an MCP client can read the seam points behind the loop.
