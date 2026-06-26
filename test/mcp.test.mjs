@@ -269,6 +269,16 @@ test("get_task rejects a malformed id", () => {
   }
 });
 
+test("get_task normalizes a surrounding-whitespace id instead of 404ing", () => {
+  const root = freshRepo();
+  try {
+    createTask(root, VALID);
+    assert.equal(getTask(root, { id: "  DEMO0001  " }).id, "DEMO0001", "the trimmed id resolves");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("move_task defaults the close date to a valid local ISO date", () => {
   const root = freshRepo();
   try {

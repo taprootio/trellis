@@ -207,14 +207,14 @@ export function listTasks(repoRoot, { status, milestone } = {}) {
 // get_task — the structured entry plus the raw Markdown body and file path.
 export function getTask(repoRoot, { id } = {}) {
   const cfg = loadCfg(repoRoot);
-  assertId(id, cfg);
+  const taskId = assertId(id, cfg); // normalized (trimmed) — use it everywhere below
   const data = readBacklog(repoRoot, cfg);
-  const entry = backlogObject(cfg, data).tasks.find((t) => t.id === id);
-  if (!entry) throw new TrellisError(`no task with id ${id}`, "not_found");
+  const entry = backlogObject(cfg, data).tasks.find((t) => t.id === taskId);
+  if (!entry) throw new TrellisError(`no task with id ${taskId}`, "not_found");
   const p = paths(repoRoot);
   const dir = entry.status === "active" ? p.active : entry.status === "completed" ? p.completedTasks : p.removed;
-  const file = join(dir, `${id}.md`);
-  const { body } = splitItem(readFileSync(file, "utf8"), `${entry.status}/${id}.md`);
+  const file = join(dir, `${taskId}.md`);
+  const { body } = splitItem(readFileSync(file, "utf8"), `${entry.status}/${taskId}.md`);
   return { ...entry, body: body.replace(/\n*$/, "\n"), file: relative(repoRoot, file) };
 }
 
