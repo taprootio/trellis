@@ -141,20 +141,22 @@ function registerResources(server, defaultRoot) {
   return available.size;
 }
 
-// Prompts mirror the tools: each accepts an optional `repoRoot` override (else the
-// server default) so one server can build prompts for any repo. A failed build
-// (bad id, missing playbook) throws a TrellisError, which the SDK surfaces as the
-// prompt's get error.
+// Prompts are bound to the server's repo, exactly like resources — deliberately
+// NOT given a per-call `repoRoot` override. A prompt's text points at the
+// `trellis://…` resources, which resolve to `defaultRoot`; letting a prompt build
+// against a different repo would make those pointers reference the wrong repo's
+// conventions. Per-repo addressing across the whole surface (tools, prompts, AND
+// resources, with root scoping) is TRL0019. A failed build (bad id, missing
+// playbook) throws a TrellisError, which the SDK surfaces as the prompt's get error.
 function registerPrompts(server, defaultRoot) {
   for (const p of PROMPTS) {
-    const argsSchema = { repoRoot: z.string().optional().describe("repo root to operate on; defaults to the server's --repo / cwd") };
+    const argsSchema = {};
     for (const a of p.arguments) {
       argsSchema[a.name] = a.required ? z.string().describe(a.description) : z.string().optional().describe(a.description);
     }
-    server.registerPrompt(p.name, { title: p.title, description: p.description, argsSchema }, (args = {}) => {
-      const root = args.repoRoot ? resolve(args.repoRoot) : defaultRoot;
-      return buildPrompt(root, p.name, args);
-    });
+    server.registerPrompt(p.name, { title: p.title, description: p.description, argsSchema }, (args = {}) =>
+      buildPrompt(defaultRoot, p.name, args),
+    );
   }
 }
 

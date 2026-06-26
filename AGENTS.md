@@ -50,4 +50,5 @@ and "review" loops Taproot proved out — layers on top as MCP **prompts**
 MCP **resources** (`trellis://…`) and the equivalent Markdown playbooks (TRL0006;
 see `src/prompts.mjs`), so any MCP-aware tool (Claude, Cursor, Windsurf, Codex,
 Cline, Zed) runs the same loop. Prompts and resources read the repo's own files
-live (keyed by `repoRoot`), so one server serves any repo.
+live and serve the server's repo (`--repo` / cwd); a shared server that keys them
+by `repoRoot` is TRL0019.
