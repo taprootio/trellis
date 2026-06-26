@@ -6,9 +6,9 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0016",
+  "nextId": "TRL0017",
   "counts": {
-    "active": 14,
+    "active": 15,
     "completed": 1,
     "removed": 0
   },
@@ -184,6 +184,16 @@
         "TRL0002"
       ],
       "summary": "Let teams skin the Fibonacci effort scale with custom labels (e.g. fish sizes), emoji, and optional images — mapped 1:1 to the canonical numbers, which stay the stored contract."
+    },
+    {
+      "id": "TRL0016",
+      "title": "PR title/description standard, template, and draft shortcut",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 3,
+      "depends_on": [],
+      "summary": "Add a repository PR template and a copy-ready PR title/description draft shortcut that conform to a shared standard, with CI enforcement and an MCP-prompt graduation to follow."
     },
     {
       "id": "TRL0001",
