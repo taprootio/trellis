@@ -1,0 +1,18 @@
+name: PR Title
+on:
+  pull_request:
+    # `edited` so retitling a PR re-runs the lint; the rest catch the title at open.
+    types: [opened, edited, reopened, synchronize]
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Pass the title via env, never inline `${{ }}` interpolation, so a title
+      # cannot inject shell.
+      - run: node scripts/pr-title-lint.mjs
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
