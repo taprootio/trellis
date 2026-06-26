@@ -40,8 +40,8 @@ Usage:
   node scripts/trellis-mcp.mjs [--repo <path>]
 
 Options:
-  --repo <path>   default repo root for tools/prompts that omit \`repoRoot\`, and
-                  the repo served for resources (default: cwd)
+  --repo <path>   default repo root for tools that omit \`repoRoot\`, and the repo
+                  served for prompts and resources (default: cwd)
   -h, --help      show this help
 
 Tools:     ${Object.keys(OPS).join(", ")}
