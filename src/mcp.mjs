@@ -145,12 +145,16 @@ function todayISO() {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 }
 
+function idRegex(cfg) {
+  return new RegExp(`^${cfg.idPrefix}\\d{${cfg.idWidth}}$`);
+}
+
 // Reject a client-supplied id that is not a well-formed task id for this repo,
 // before it is ever used to build a filesystem path — closes path traversal via an
 // id like "../active/DEMO0001" (which, with to:"removed", could delete a task).
 function assertId(id, cfg) {
   const v = oneLine(id, "id");
-  if (!new RegExp(`^${cfg.idPrefix}\\d{${cfg.idWidth}}$`).test(v)) {
+  if (!idRegex(cfg).test(v)) {
     throw new TrellisError(`invalid task id: ${v} (expected ${cfg.idPrefix} + ${cfg.idWidth} digits)`, "invalid_request");
   }
   return v;
@@ -257,6 +261,13 @@ export function createTask(repoRoot, args = {}) {
   const depends_on = [...new Set(rawDeps)];
 
   const { cfg, data } = loadClean(repoRoot);
+  // Each dependency id must be a well-formed id for this repo — reject up front so a
+  // stray value can't be injected into the front-matter array (the core would catch
+  // it on re-read, but this fails faster and with a clearer message).
+  const idRe = idRegex(cfg);
+  for (const d of depends_on) {
+    if (!idRe.test(d)) throw new TrellisError(`invalid dependency id: ${d} (expected ${cfg.idPrefix} + ${cfg.idWidth} digits)`, "invalid_request");
+  }
   const id = nextId(data.ids, cfg);
   const fm = { id, title, status: "active", milestone, priority, effort: args.effort, depends_on, summary };
   const body = args.body ? args.body : scaffoldBody(id, title);

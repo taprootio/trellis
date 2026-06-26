@@ -242,6 +242,20 @@ test("move_task rejects a path-traversal id and changes nothing", () => {
   }
 });
 
+test("create_task rejects a malformed dependency id and writes nothing", () => {
+  const root = freshRepo();
+  try {
+    assert.throws(
+      () => createTask(root, { ...VALID, depends_on: ["../active/DEMO0001"] }),
+      (e) => e instanceof TrellisError && e.code === "invalid_request",
+    );
+    assert.equal(existsSync(join(root, "docs/tasks/active/DEMO0001.md")), false, "nothing is written");
+    assert.equal(nextIdOp(root).nextId, "DEMO0001", "next id did not advance");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("get_task rejects a malformed id", () => {
   const root = freshRepo();
   try {
