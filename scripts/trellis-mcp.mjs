@@ -15,6 +15,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { OPS, TrellisError } from "../src/mcp.mjs";
 import { RESOURCES, PROMPTS, listResources, readResource, buildPrompt } from "../src/prompts.mjs";
 
@@ -52,8 +53,9 @@ Resources: ${RESOURCES.map((r) => r.uri).join(", ")}
 const repoRootArg = { repoRoot: z.string().optional().describe("repo root to operate on; defaults to the server's --repo / cwd") };
 
 // name → { description, inputSchema (a zod raw shape) }. The handler for each is
-// OPS[name]; every tool also accepts the shared optional `repoRoot`.
-const TOOLS = {
+// OPS[name]; every tool also accepts the shared optional `repoRoot`. Exported so a
+// test can assert the served metadata stays repo-agnostic without booting the server.
+export const TOOLS = {
   list_tasks: {
     description: "List backlog tasks (the backlog.json shape), optionally filtered by status or milestone.",
     inputSchema: {
@@ -64,7 +66,7 @@ const TOOLS = {
   },
   get_task: {
     description: "Get one task by id: its structured entry plus the raw Markdown body and file path.",
-    inputSchema: { ...repoRootArg, id: z.string().describe("task id, e.g. TRL0004") },
+    inputSchema: { ...repoRootArg, id: z.string().describe("task id using this repo's configured id prefix and width") },
   },
   next_id: {
     description: "The id a newly created task would receive.",
@@ -160,16 +162,20 @@ function registerPrompts(server, defaultRoot) {
   }
 }
 
-const opts = parseArgs(process.argv.slice(2));
-if (opts.help) {
-  process.stdout.write(HELP);
-  process.exit(0);
+// Boot only when run as the entry point — guarded so importing this module (e.g.
+// from a test that inspects TOOLS) does not parse argv or open the stdio transport.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  const opts = parseArgs(process.argv.slice(2));
+  if (opts.help) {
+    process.stdout.write(HELP);
+    process.exit(0);
+  }
+
+  const server = new McpServer({ name: "trellis", version: SERVER_VERSION });
+  registerTools(server, opts.repo);
+  const resourceCount = registerResources(server, opts.repo);
+  registerPrompts(server, opts.repo);
+
+  await server.connect(new StdioServerTransport());
+  console.error(`trellis-mcp ready (repo: ${opts.repo}; ${Object.keys(OPS).length} tools, ${PROMPTS.length} prompts, ${resourceCount} resources)`);
 }
-
-const server = new McpServer({ name: "trellis", version: SERVER_VERSION });
-registerTools(server, opts.repo);
-const resourceCount = registerResources(server, opts.repo);
-registerPrompts(server, opts.repo);
-
-await server.connect(new StdioServerTransport());
-console.error(`trellis-mcp ready (repo: ${opts.repo}; ${Object.keys(OPS).length} tools, ${PROMPTS.length} prompts, ${resourceCount} resources)`);

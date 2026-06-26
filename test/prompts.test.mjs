@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
 import { listResources, readResource, buildPrompt, RESOURCES, PROMPTS } from "../src/prompts.mjs";
 import { TrellisError } from "../src/mcp.mjs";
+import { TOOLS } from "../scripts/trellis-mcp.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -41,16 +42,24 @@ test("listResources marks the catalog: playbooks/config/conventions/template ava
   }
 });
 
-test("served prompt/resource metadata carries no repo-specific id prefix example", () => {
+test("served prompt/resource/tool metadata carries no repo-specific id prefix example", () => {
   // TRL0007: this catalog metadata is shown verbatim by MCP clients
-  // (list_prompts/list_resources) BEFORE buildPrompt injects the repo's vocabulary,
-  // so it must not advertise the Trellis id prefix to an onboarded repo's users.
+  // (list_prompts/list_resources/list_tools) BEFORE buildPrompt injects the repo's
+  // vocabulary, so it must not advertise the Trellis id prefix to an onboarded
+  // repo's users. Covers prompts, resources, AND tool schemas (the surfaces three
+  // review passes each found a leak in).
   const strings = [];
   for (const p of PROMPTS) {
     strings.push(p.name, p.title, p.description);
     for (const a of p.arguments) strings.push(a.name, a.description);
   }
   for (const r of RESOURCES) strings.push(r.name, r.title, r.description);
+  for (const [name, def] of Object.entries(TOOLS)) {
+    strings.push(name, def.description);
+    for (const field of Object.values(def.inputSchema)) {
+      if (field && typeof field.description === "string") strings.push(field.description);
+    }
+  }
   for (const s of strings) {
     assert.doesNotMatch(s, /TRL(xxxx|\d)/, `served metadata leaks the Trellis id prefix: "${s}"`);
   }
