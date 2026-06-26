@@ -1,0 +1,40 @@
+// PR-title lint core (zero-dependency, like src/backlog.mjs).
+//
+// The standard: a PR title is `<ID>: <imperative summary>`, where `<ID>` is the
+// repo's configured id prefix + width (read live from backlog.config.json, so
+// the lint is prefix-agnostic per TRL0007) and the colon is the separator. A
+// multi-item PR leads with the primary id and names the rest in the body, so the
+// lint only anchors on a single leading id and ignores whatever follows the
+// summary. Pure so the CLI wrapper (scripts/pr-title-lint.mjs) and `node --test`
+// both call it; see .github/pull_request_template.md / docs/playbooks/pr-draft.md.
+
+export const MAX_TITLE_LENGTH = 72;
+
+// Returns { ok, errors[] }. cfg is the loaded backlog.config.json (needs
+// idPrefix + idWidth). Collects every violation so a malformed title reports all
+// of its problems at once.
+export function lintPrTitle(title, cfg) {
+  if (typeof title !== "string" || !title.trim()) {
+    return { ok: false, errors: ["title is empty"] };
+  }
+
+  const errors = [];
+  // The real title, untrimmed: stray leading/trailing whitespace is a defect the
+  // anchored pattern and the length check should both see.
+  if (title.length > MAX_TITLE_LENGTH) {
+    errors.push(`title is ${title.length} chars; must be ≤ ${MAX_TITLE_LENGTH}`);
+  }
+
+  // `^<prefix><width digits>: ` then a non-space, so an exactly-formed id, the
+  // colon-space separator, and a non-empty summary are all required.
+  const idRe = new RegExp(`^${cfg.idPrefix}\\d{${cfg.idWidth}}: \\S`);
+  if (!idRe.test(title)) {
+    const example = `${cfg.idPrefix}${"0".repeat(cfg.idWidth)}: add the widget`;
+    errors.push(
+      `title must start with \`${cfg.idPrefix}\` + ${cfg.idWidth} digits, then \`: \`, ` +
+        `then a summary (e.g. \`${example}\`)`,
+    );
+  }
+
+  return { ok: errors.length === 0, errors };
+}
