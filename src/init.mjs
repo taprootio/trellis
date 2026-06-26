@@ -31,6 +31,7 @@ const AGENTS_MARKERS = ["<!-- BEGIN TRELLIS -->", "<!-- END TRELLIS -->"];
 // value is the loop, not the exact command names; the AGENTS block below carries
 // the authoritative `npx trellis` commands for the onboarded repo.
 const COPY_FILES = [
+  "docs/playbooks/conventions.md",
   "docs/playbooks/work-task.md",
   "docs/playbooks/code-review.md",
   "docs/playbooks/pr-draft.md",
