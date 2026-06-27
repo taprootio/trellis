@@ -379,3 +379,28 @@ test("the onboarded branch example respects the repo's configured id width", () 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a kept config's custom tasksDir relocates the scaffolded tree, not the default root", () => {
+  // Regression: init must scaffold the tree at the kept config's tasksDir. Using the
+  // fixed default would write trellis/* skeletons the core then fails to fill against
+  // the configured root, leaving a partial scaffold. The config home stays at trellis/.
+  const root = tempRepo();
+  try {
+    mkdirSync(join(root, "trellis"), { recursive: true });
+    writeFileSync(
+      join(root, "trellis/backlog.config.json"),
+      JSON.stringify({ specVersion: "2.0", idPrefix: "DEMO", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1, 2, 3], tasksDir: "planning" }, null, 2) + "\n",
+    );
+    const { summary } = applyScaffold(root, {}, {}, sourceRoot);
+    assert.deepEqual(summary.errors, [], "scaffold over a custom-tasksDir config succeeds");
+    assert.ok(existsSync(join(root, "planning/README.md")), "the tree is scaffolded under tasksDir");
+    assert.ok(existsSync(join(root, "planning/backlog.json")), "artifacts land under tasksDir");
+    assert.equal(existsSync(join(root, "trellis/README.md")), false, "nothing is scaffolded at the default root");
+    assert.ok(existsSync(join(root, "trellis/backlog.config.json")), "the config home stays fixed at trellis/");
+    const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
+    assert.match(agents, /`planning\/\{active/, "the AGENTS block reflects the configured root");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

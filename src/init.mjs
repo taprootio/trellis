@@ -15,12 +15,16 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, loadConfig, readBacklog, generateArtifacts, attachEffortScale } from "./backlog.mjs";
 
-// init scaffolds the default layout: the config home (CONFIG_DIR) and the task
-// tree (DEFAULT_TASKS_DIR) share the `trellis/` folder, and the generated config
-// omits `tasksDir` to accept that default. So every scaffolded path lives under
-// this one root.
-const ROOT = DEFAULT_TASKS_DIR;
+// The config home is fixed at `trellis/backlog.config.json` (CONFIG_DIR),
+// independent of `tasksDir`. A fresh scaffold writes a config that omits
+// `tasksDir`, so its task tree defaults to `trellis/` too. But a *kept* existing
+// config may set a custom `tasksDir`; init must scaffold the tree there, not at
+// the default — otherwise it writes `trellis/*` skeletons that the core then
+// fails to fill against the configured root, leaving a partial scaffold. So the
+// tree/marker/generated paths derive from the effective config's root, while the
+// config path stays fixed.
 const CONFIG_REL = `${CONFIG_DIR}/backlog.config.json`;
+const tasksRootOf = (cfg) => (cfg && cfg.tasksDir) || DEFAULT_TASKS_DIR;
 
 // Default per-repo vocabulary, overridable via options (CLI flags / prompts).
 export const DEFAULTS = {
@@ -47,15 +51,15 @@ const COPY_FILES = [
 
 // The marker-based generated indexes (skeleton-then-filled), each paired with the
 // exact begin/end marker the core requires — the single source of truth shared by
-// the skeletons and the preflight check.
-const MARKER_FILES = [
-  [`${ROOT}/README.md`, MARKERS.milestones],
-  [`${ROOT}/completed/index.md`, MARKERS.completed],
-  [`${ROOT}/removed/index.md`, MARKERS.removed],
+// the skeletons and the preflight check. Derived from the effective backlog root.
+const markerFiles = (root) => [
+  [`${root}/README.md`, MARKERS.milestones],
+  [`${root}/completed/index.md`, MARKERS.completed],
+  [`${root}/removed/index.md`, MARKERS.removed],
 ];
 
 // The four generated artifacts, produced by the core after the skeletons land.
-const GENERATED = [...MARKER_FILES.map(([rel]) => rel), `${ROOT}/backlog.json`];
+const generatedFiles = (root) => [...markerFiles(root).map(([rel]) => rel), `${root}/backlog.json`];
 
 export function resolveOptions(opts = {}) {
   // `=== undefined` throughout, never `||` / `&& .length`: a value that was
@@ -139,6 +143,7 @@ function preflight(targetRoot, options, force) {
   } else {
     cfg = effectiveConfig(options); // fresh target, or --force will overwrite it
   }
+  const root = tasksRootOf(cfg); // a kept config may relocate the tree via tasksDir
   const data = readBacklog(targetRoot, cfg);
   if (data.errors.length) return [`target backlog has errors; fix them before init: ${data.errors.join("; ")}`];
 
@@ -149,7 +154,7 @@ function preflight(targetRoot, options, force) {
   // matching `begin[\s\S]*?end` in fillMarkers, an out-of-order or wrong-section
   // or unterminated pair fails.
   if (!force) {
-    for (const [rel, [begin, end]] of MARKER_FILES) {
+    for (const [rel, [begin, end]] of markerFiles(root)) {
       const abs = join(targetRoot, rel);
       if (!existsSync(abs)) continue;
       const text = readFileSync(abs, "utf8");
@@ -233,7 +238,7 @@ jobs:
 `;
 }
 
-export function agentsBlock(o) {
+export function agentsBlock(o, root = DEFAULT_TASKS_DIR) {
   const [begin, end] = AGENTS_MARKERS;
   // A sample id (number 1, zero-padded to the repo's width) so the branch example
   // matches this repo's actual id format, not a hard-coded 4-digit one.
@@ -242,10 +247,10 @@ export function agentsBlock(o) {
 ## Backlog (Trellis)
 
 This repo uses [Trellis](https://github.com/taprootio/trellis) for a file-based
-backlog. Work items live in \`trellis/{active,completed/tasks,removed}/\` as
+backlog. Work items live in \`${root}/{active,completed/tasks,removed}/\` as
 Markdown files with YAML front-matter; ids are \`${o.prefix}\` + ${o.idWidth} digits.
 
-- \`trellis/README.md\`, \`backlog.json\`, and the completed/removed indexes are
+- \`${root}/README.md\`, \`backlog.json\`, and the completed/removed indexes are
   **generated** — never hand-edit between the \`BEGIN/END GENERATED\` markers.
 - Per-repo vocabulary (id prefix, milestones, priorities, effort) lives in
   \`trellis/backlog.config.json\` (the backlog root is \`trellis/\` by default;
@@ -278,14 +283,14 @@ ${end}
 
 // Build the template files (everything except the generated artifacts, which the
 // core fills in afterward). Returns [{ rel, content }].
-function templateFiles(o, sourceRoot) {
+function templateFiles(o, sourceRoot, root) {
   const files = [
     { rel: CONFIG_REL, content: configContent(o) },
-    { rel: `${ROOT}/active/.gitkeep`, content: "" },
-    { rel: `${ROOT}/completed/tasks/.gitkeep`, content: "" },
-    { rel: `${ROOT}/README.md`, content: readmeSkeleton() },
-    { rel: `${ROOT}/completed/index.md`, content: completedSkeleton() },
-    { rel: `${ROOT}/removed/index.md`, content: removedSkeleton() },
+    { rel: `${root}/active/.gitkeep`, content: "" },
+    { rel: `${root}/completed/tasks/.gitkeep`, content: "" },
+    { rel: `${root}/README.md`, content: readmeSkeleton() },
+    { rel: `${root}/completed/index.md`, content: completedSkeleton() },
+    { rel: `${root}/removed/index.md`, content: removedSkeleton() },
     { rel: ".github/workflows/backlog.yml", content: workflowContent() },
   ];
   const warnings = [];
@@ -310,9 +315,12 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   const existing = loadConfig(targetRoot);
   const keepCfg = existsSync(join(targetRoot, CONFIG_REL)) && !existing.errors.length && !force;
   const o = keepCfg ? optionsFromConfig(existing.cfg) : resolved;
+  // A kept config governs the backlog root via `tasksDir`; a fresh scaffold omits
+  // it and defaults to `trellis/`. Every scaffolded tree path derives from this.
+  const root = keepCfg ? tasksRootOf(existing.cfg) : DEFAULT_TASKS_DIR;
 
   const actions = [];
-  const { files, warnings } = templateFiles(o, sourceRoot);
+  const { files, warnings } = templateFiles(o, sourceRoot, root);
   if (keepCfg && suppliedConflicts(opts, o)) {
     warnings.push(`existing backlog.config.json kept; its vocabulary governs (prefix \`${o.prefix}\`) — supplied flags ignored (use --force to overwrite)`);
   }
@@ -329,7 +337,7 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
 
   // AGENTS.md: create if absent, append the block if present without it, else skip.
   const agentsAbs = join(targetRoot, "AGENTS.md");
-  const block = agentsBlock(o);
+  const block = agentsBlock(o, root);
   if (!existsSync(agentsAbs)) {
     actions.push({ rel: "AGENTS.md", content: `# AGENTS\n\n${block}`, action: "create" });
   } else {
@@ -342,7 +350,7 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
     }
   }
 
-  return { options: o, resolved, actions, warnings };
+  return { options: o, resolved, actions, warnings, root };
 }
 
 // ---------------------------------------------------------------- apply
@@ -357,7 +365,8 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false } = {}, so
   // planScaffold only reads, so the target stays untouched through every check
   // below — a rejected run leaves nothing behind. It also resolves the options
   // (no need to resolve again here).
-  const { options, resolved, actions, warnings } = planScaffold(targetRoot, opts, sourceRoot);
+  const { options, resolved, actions, warnings, root } = planScaffold(targetRoot, opts, sourceRoot);
+  const GENERATED = generatedFiles(root); // artifact rel-paths under the effective backlog root
 
   // Reject malformed *supplied* flags before any write — even when a kept config
   // means they won't be used to render, a bad flag is still a usage error.
