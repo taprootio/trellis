@@ -9,10 +9,17 @@
 // on purpose so Trellis stays drop-in with no install step.
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, isAbsolute } from "node:path";
 
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
-export const SPEC_VERSION = "1.0";
+export const SPEC_VERSION = "2.0";
+
+// The backlog root defaults to `trellis/` and is overridable per repo via the
+// config's `tasksDir` key (SPEC §2/§7). The config file itself lives at a FIXED
+// path under `trellis/`, independent of `tasksDir`, so the tool can always find
+// it before it knows where the task tree is — see paths().
+export const DEFAULT_TASKS_DIR = "trellis";
+export const CONFIG_DIR = "trellis";
 
 export const MARKERS = {
   milestones: ["<!-- BEGIN GENERATED:MILESTONES -->", "<!-- END GENERATED:MILESTONES -->"],
@@ -20,10 +27,16 @@ export const MARKERS = {
   removed: ["<!-- BEGIN GENERATED:REMOVED -->", "<!-- END GENERATED:REMOVED -->"],
 };
 
-export function paths(repoRoot) {
-  const tasks = join(repoRoot, "docs", "tasks");
+// The config path is fixed at `<repo>/trellis/backlog.config.json` and never
+// depends on `cfg` — loadConfig calls paths() before any config is known. The
+// task tree (active/completed/removed + generated artifacts) lives under
+// `cfg.tasksDir` (default `trellis/`), so callers that touch those dirs MUST
+// pass the loaded config.
+export function paths(repoRoot, cfg) {
+  const tasksDir = (cfg && cfg.tasksDir) || DEFAULT_TASKS_DIR;
+  const tasks = join(repoRoot, tasksDir);
   return {
-    config: join(repoRoot, "backlog.config.json"),
+    config: join(repoRoot, CONFIG_DIR, "backlog.config.json"),
     tasks,
     active: join(tasks, "active"),
     completedTasks: join(tasks, "completed", "tasks"),
@@ -60,6 +73,24 @@ export function loadConfig(repoRoot) {
   }
   cfg.effortValues = Array.isArray(effortValues) ? effortValues : [];
   attachEffortScale(cfg, errors);
+
+  // `tasksDir` is optional (defaults to `trellis/`); when present it must be a
+  // non-empty repo-relative path that stays inside the repo — `join(repoRoot,
+  // tasksDir)` must not escape via an absolute path or a `..` segment. The config
+  // home stays fixed regardless (see paths()).
+  if (cfg.tasksDir != null) {
+    if (typeof cfg.tasksDir !== "string" || !cfg.tasksDir.trim()) {
+      errors.push("config: `tasksDir` must be a non-empty string when present");
+    } else if (isAbsolute(cfg.tasksDir) || cfg.tasksDir.split(/[/\\]/).includes("..")) {
+      errors.push("config: `tasksDir` must be a repo-relative path within the repo (no absolute path or `..` segments)");
+    } else {
+      // Canonicalize the stored value so consumers that build rel paths or
+      // messages by string interpolation (init skeletons, the AGENTS block, the
+      // CLI summary) don't inherit a doubled separator from a trailing slash.
+      // join() already tolerates it, but the echoed strings should be clean.
+      cfg.tasksDir = cfg.tasksDir.replace(/[/\\]+$/, "");
+    }
+  }
 
   if (cfg.specVersion == null) {
     warnings.push(`config has no \`specVersion\`; assuming current spec ${SPEC_VERSION}`);
@@ -242,7 +273,7 @@ function idsFromDir(dir, fileRe) {
 }
 
 export function readBacklog(repoRoot, cfg) {
-  const p = paths(repoRoot);
+  const p = paths(repoRoot, cfg);
   const fileRe = new RegExp(`^(${cfg.idPrefix}\\d{${cfg.idWidth}})\\.md$`);
   const errors = [];
 
@@ -401,7 +432,7 @@ export function buildBacklogJson(cfg, data) {
 // Compute each generated artifact's path + new content. Pure except for reading
 // the current files (needed to replace content between their markers).
 export function generateArtifacts(repoRoot, cfg, data) {
-  const p = paths(repoRoot);
+  const p = paths(repoRoot, cfg);
   const errors = [];
   const next = nextId(data.ids, cfg);
 
@@ -419,9 +450,9 @@ export function generateArtifacts(repoRoot, cfg, data) {
   };
 
   const files = [
-    { path: p.readme, content: fillMarkers(readText(p.readme), MARKERS.milestones, readmeBody, "docs/tasks/README.md", errors) },
-    { path: p.completedIndex, content: fillMarkers(readText(p.completedIndex), MARKERS.completed, completedTable(data.completed), "docs/tasks/completed/index.md", errors) },
-    { path: p.removedIndex, content: fillMarkers(readText(p.removedIndex), MARKERS.removed, removedTable(data.removed), "docs/tasks/removed/index.md", errors) },
+    { path: p.readme, content: fillMarkers(readText(p.readme), MARKERS.milestones, readmeBody, relative(repoRoot, p.readme), errors) },
+    { path: p.completedIndex, content: fillMarkers(readText(p.completedIndex), MARKERS.completed, completedTable(data.completed), relative(repoRoot, p.completedIndex), errors) },
+    { path: p.removedIndex, content: fillMarkers(readText(p.removedIndex), MARKERS.removed, removedTable(data.removed), relative(repoRoot, p.removedIndex), errors) },
     { path: p.backlogJson, content: buildBacklogJson(cfg, data) },
   ];
   return { files, nextId: next, errors };

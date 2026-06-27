@@ -212,7 +212,7 @@ export function getTask(repoRoot, { id } = {}) {
   const data = readBacklog(repoRoot, cfg);
   const entry = backlogObject(cfg, data).tasks.find((t) => t.id === taskId);
   if (!entry) throw new TrellisError(`no task with id ${taskId}`, "not_found");
-  const p = paths(repoRoot);
+  const p = paths(repoRoot, cfg);
   const dir = entry.status === "active" ? p.active : entry.status === "completed" ? p.completedTasks : p.removed;
   const file = join(dir, `${taskId}.md`);
   const { body } = splitItem(readFileSync(file, "utf8"), `${entry.status}/${taskId}.md`);
@@ -276,7 +276,7 @@ export function createTask(repoRoot, args = {}) {
   const id = nextId(data.ids, cfg);
   const fm = { id, title, status: "active", milestone, priority, effort: effort.value, depends_on, summary };
   const body = args.body ? args.body : scaffoldBody(id, title);
-  const file = join(paths(repoRoot).active, `${id}.md`);
+  const file = join(paths(repoRoot, cfg).active, `${id}.md`);
 
   // The write lives inside the try so a failure at any point — the item write, the
   // re-validate, or regenerate — rolls the brand-new file back.
@@ -305,7 +305,7 @@ export function moveTask(repoRoot, args = {}) {
 
   const { cfg } = loadClean(repoRoot);
   const id = assertId(args.id, cfg); // validate the id format before building any path
-  const p = paths(repoRoot);
+  const p = paths(repoRoot, cfg);
   const src = join(p.active, `${id}.md`);
   if (!existsSync(src)) {
     const elsewhere = existsSync(join(p.completedTasks, `${id}.md`)) || existsSync(join(p.removed, `${id}.md`));

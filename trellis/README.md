@@ -1,7 +1,7 @@
 # Trellis backlog
 
 The backlog for building **Trellis**, managed with Trellis's own conventions.
-See [`AGENTS.md`](../../AGENTS.md) for the schema and the milestone ethos.
+See [`AGENTS.md`](../AGENTS.md) for the schema and the milestone ethos.
 
 The tables below are generated. Do not hand-edit between the markers — edit the
 per-item files in `active/`, then run `npm run backlog:readme`.
@@ -13,7 +13,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | ID | Title | Priority | Effort |
 | --- | --- | --- | --- |
 | [TRL0014](active/TRL0014.md) | Bake branch protection + required backlog check into the recipe | High | 🐡 Trout · 3 |
-| [TRL0020](active/TRL0020.md) | Relocate the backlog root from docs/tasks/ to trellis/ | High | Tuna · 5 |
 | [TRL0021](active/TRL0021.md) | Build the backlog import engine (disparate schemas → Trellis) | High | Swordfish · 8 |
 | [TRL0009](active/TRL0009.md) | Dogfood — onboard an existing repo end-to-end | Medium | 🐡 Trout · 3 |
 | [TRL0022](active/TRL0022.md) | Expose import over MCP and ship reusable source-mapping profiles | Medium | 🐡 Trout · 3 |

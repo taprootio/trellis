@@ -14,6 +14,7 @@ import {
   resolveEffort,
   generateArtifacts,
   buildBacklogJson,
+  paths,
 } from "../src/backlog.mjs";
 
 const FISH = {
@@ -52,9 +53,9 @@ function fm(fields) {
 // Build a minimal --check-able repo: config + the three marker files + items.
 function makeRepo(config, { active = [], completed = [], removed = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "trellis-backlog-"));
-  const tasks = join(root, "docs", "tasks");
+  const tasks = join(root, "trellis");
   for (const d of ["active", "completed/tasks", "removed"]) mkdirSync(join(tasks, d), { recursive: true });
-  writeFileSync(join(root, "backlog.config.json"), JSON.stringify(config, null, 2));
+  writeFileSync(join(tasks, "backlog.config.json"), JSON.stringify(config, null, 2));
   writeFileSync(join(tasks, "README.md"), "# Backlog\n\n<!-- BEGIN GENERATED:MILESTONES -->\n<!-- END GENERATED:MILESTONES -->\n");
   writeFileSync(join(tasks, "completed", "index.md"), "# Completed\n\n<!-- BEGIN GENERATED:COMPLETED -->\n<!-- END GENERATED:COMPLETED -->\n");
   writeFileSync(join(tasks, "removed", "index.md"), "# Removed\n\n<!-- BEGIN GENERATED:REMOVED -->\n<!-- END GENERATED:REMOVED -->\n");
@@ -219,4 +220,65 @@ test("a closed item resolves best-effort and never fails validation on a stale l
     assert.equal(gone.effort, "Kraken");      // stale label passes through as-is
     assert.equal("effortLabel" in gone, false);
   });
+});
+
+// ------------------------------------------------------- tasksDir (SPEC §2/§7)
+
+test("a custom tasksDir relocates the task tree while the config home stays fixed", () => {
+  // The bootstrap-free decoupling: config is always found at trellis/, then
+  // tasksDir (read from it) points the task tree + artifacts elsewhere. Without
+  // this test the suite would pass even if paths() ignored cfg.tasksDir.
+  const root = mkdtempSync(join(tmpdir(), "trellis-tasksdir-"));
+  try {
+    // config lives at the FIXED home, NOT under tasksDir
+    mkdirSync(join(root, "trellis"), { recursive: true });
+    writeFileSync(join(root, "trellis", "backlog.config.json"), JSON.stringify({ ...ARRAY_CFG, tasksDir: "docs/backlog" }, null, 2));
+    // task tree + skeletons live under the custom tasksDir
+    const tasks = join(root, "docs", "backlog");
+    for (const d of ["active", "completed/tasks", "removed"]) mkdirSync(join(tasks, d), { recursive: true });
+    writeFileSync(join(tasks, "README.md"), "# Backlog\n\n<!-- BEGIN GENERATED:MILESTONES -->\n<!-- END GENERATED:MILESTONES -->\n");
+    writeFileSync(join(tasks, "completed", "index.md"), "# Completed\n\n<!-- BEGIN GENERATED:COMPLETED -->\n<!-- END GENERATED:COMPLETED -->\n");
+    writeFileSync(join(tasks, "removed", "index.md"), "# Removed\n\n<!-- BEGIN GENERATED:REMOVED -->\n<!-- END GENERATED:REMOVED -->\n");
+    writeFileSync(join(tasks, "active", "DEMO0001.md"), fm({ id: "DEMO0001", title: "T", status: "active", depends_on: [], summary: "S.", milestone: "Alpha", priority: "High", effort: 3 }));
+
+    const { cfg, errors } = loadConfig(root);
+    assert.deepEqual(errors, [], "config is found at the fixed home and validates");
+    assert.equal(cfg.tasksDir, "docs/backlog");
+
+    const p = paths(root, cfg);
+    assert.equal(p.config, join(root, "trellis", "backlog.config.json"), "config path is NOT derived from tasksDir");
+    assert.equal(p.active, join(root, "docs", "backlog", "active"), "task tree derives from tasksDir");
+
+    const data = readBacklog(root, cfg);
+    assert.deepEqual(data.errors, []);
+    assert.equal(data.active.length, 1, "the item under the custom tree is read");
+    const { files, errors: gerr } = generateArtifacts(root, cfg, data);
+    assert.deepEqual(gerr, []);
+    assert.ok(files.every((f) => f.path.startsWith(join(root, "docs", "backlog"))), "every artifact lands under the custom tasksDir");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig canonicalizes a tasksDir trailing slash", () => {
+  const root = makeRepo({ ...ARRAY_CFG, tasksDir: "docs/backlog/" }, {});
+  try {
+    const { cfg, errors } = loadConfig(root);
+    assert.deepEqual(errors, []);
+    assert.equal(cfg.tasksDir, "docs/backlog", "the trailing slash is stripped at the source");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a tasksDir that escapes the repo (absolute or `..`) is a config error", () => {
+  for (const bad of ["/etc/trellis", "../outside", "a/../../b"]) {
+    const root = makeRepo({ ...ARRAY_CFG, tasksDir: bad }, {});
+    try {
+      const { errors } = loadConfig(root);
+      assert.ok(errors.some((e) => /tasksDir/.test(e)), `expected ${bad} to be rejected`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
 });

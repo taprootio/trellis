@@ -1,6 +1,6 @@
 # Trellis Backlog Spec
 
-**Version:** 1.0.0 · **Status:** stable
+**Version:** 2.0.0 · **Status:** stable
 
 Trellis is a tool-agnostic convention for running a software backlog as plain
 files in a git repository. Work items are Markdown files with YAML front-matter;
@@ -32,8 +32,8 @@ are derived and must never be hand-edited.
 
 ```
 <repo>/
-  backlog.config.json              # per-repo configuration (§7)
-  docs/tasks/
+  trellis/
+    backlog.config.json            # per-repo configuration (§7)
     active/<ID>.md                 # open items (§5)
     completed/
       tasks/<ID>.md                # finished items, history preserved
@@ -45,8 +45,14 @@ are derived and must never be hand-edited.
     assets/effort/                 # optional effort-scale images (§6.3)
 ```
 
-The `docs/tasks/` root and the location of `backlog.config.json` (repo root) are
-fixed. Everything inside an item file's body is free-form Markdown.
+The **backlog root** defaults to `trellis/` at the repo root and is configurable
+per repo via the `tasksDir` key (§7) — a repo whose static-site generator
+publishes one directory (e.g. Eleventy over `docs/`) can repoint it elsewhere.
+The **config file** is always `trellis/backlog.config.json`, a fixed location
+independent of `tasksDir`: tooling must be able to find the config before it
+knows where the task tree lives. Above, `tasksDir` is its default (`trellis/`),
+so the config and the task tree share one folder. Everything inside an item
+file's body is free-form Markdown.
 
 ## 3. Identifiers
 
@@ -155,8 +161,9 @@ custom **effort scale** for display.
 - `scale` (optional) — the active scale name. Absent or `"fibonacci"` selects the
   identity scale (label = the number, no emoji/image).
 - Each entry: `label` (required, unique within the scale), `emoji` (optional),
-  and `image` (optional, repo-relative path). The Tuna/Swordfish entries above
-  show the image-only and label-only cases.
+  and `image` (optional, a path relative to the backlog root — `tasksDir`, default
+  `trellis/` — so it resolves the same way the artifacts do). The Tuna/Swordfish
+  entries above show the image-only and label-only cases.
 
 ### 6.2 Authoring and resolution
 
@@ -173,7 +180,8 @@ custom **effort scale** for display.
   non-identity scale is active, and just `N` otherwise — keeping the number
   legible for velocity and rollup math.
 - `label` doubles as the accessible text/alt for any `image`. SVG or emoji are
-  preferred; images are optional and live under `docs/tasks/assets/effort/`.
+  preferred; images are optional and live under `<tasksDir>/assets/effort/`
+  (default `trellis/assets/effort/`).
 - The array form `effort: [1, 2, 3, 5, 8, 13, 21]` is shorthand for
   `{ "values": [ … ], "scale": "fibonacci" }` and remains valid.
 
@@ -181,7 +189,7 @@ custom **effort scale** for display.
 
 ```json
 {
-  "specVersion": "1.0",
+  "specVersion": "2.0",
   "idPrefix": "AB",
   "idWidth": 4,
   "milestones": ["Alpha", "Beta", "v1", "Future"],
@@ -198,10 +206,19 @@ custom **effort scale** for display.
 | `milestones` | ordered milestone names (§7.1) |
 | `priorities` | ordered priority names, highest first |
 | `effort` | canonical values, or the effort-scale object (§6.1) |
+| `tasksDir` | optional backlog-root path, repo-relative; defaults to `trellis/` |
 
-**Configurable** per repo: everything above. **Fixed** by the spec: the
-`docs/tasks/` layout, the status lifecycle, the front-matter schema, the
-generated-artifact contracts, and the meaning of each field.
+`tasksDir` locates the task tree and the generated artifacts; omit it to accept
+the `trellis/` default. The config file itself stays at `trellis/backlog.config.json`
+regardless (§2) — its location is **not** governed by `tasksDir`, so the spec
+example above omits the key.
+
+**Configurable** per repo: everything in the table above, including the backlog
+root via `tasksDir`. **Fixed** by the spec: the `trellis/backlog.config.json`
+config location, the in-root layout (`active/`, `completed/tasks/`, `removed/`,
+and the generated artifacts under `tasksDir`), the status lifecycle, the
+front-matter schema, the generated-artifact contracts, and the meaning of each
+field.
 
 ### 7.1 Milestones are a maturity axis
 

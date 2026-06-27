@@ -29,9 +29,11 @@ Two more inputs the loop reads, defined elsewhere and referenced here for
 completeness:
 
 - **id vocabulary** (id prefix/width, milestones, priorities, effort) — from
-  `backlog.config.json` (SPEC.md §7), not restated per playbook.
-- **tasks layout** (`docs/tasks/{active,completed/tasks,removed}/`, the generated
-  artifacts) — fixed by the spec (SPEC.md §2), the same in every repo.
+  `trellis/backlog.config.json` (SPEC.md §7), not restated per playbook.
+- **tasks layout** (`<tasksDir>/{active,completed/tasks,removed}/`, default
+  `trellis/`, plus the generated artifacts) — the in-root structure and the
+  `trellis/backlog.config.json` config home are fixed by the spec (SPEC.md §2);
+  only the root path is configurable via `tasksDir`.
 
 ## How a repo declares its values
 
