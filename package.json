@@ -7,6 +7,7 @@
     "backlog:readme": "node scripts/backlog-readme.mjs",
     "backlog:check": "node scripts/backlog-readme.mjs --check",
     "trellis:init": "node scripts/trellis-init.mjs",
+    "trellis:import": "node scripts/trellis-import.mjs",
     "pr-title:lint": "node scripts/pr-title-lint.mjs",
     "trellis:mcp": "node scripts/trellis-mcp.mjs",
     "test": "node --test"
