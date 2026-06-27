@@ -120,13 +120,16 @@ function resolveEnum(raw, remap, allowed, label) {
 }
 
 // First-sentence (or title) synthesis for a missing summary (SPEC §5.1: summary is
-// required and feeds the README). Skips the H1 and blank lines, takes the first
-// prose line's first sentence, single-lined.
+// required and feeds the README). Skips the H1, blank lines, and metadata-shaped
+// lines (bold `**Field:**`, list bullets, short `Key: value` headers) so it lands
+// on real prose, then takes that line's first sentence, single-lined. A heuristic —
+// summary is descriptive, not correctness-critical — that fails safe to the title.
 function synthSummary(body, title, strategy) {
   if (strategy === "title") return title;
+  const isMeta = (l) => l.startsWith("**") || /^[-*+]\s/.test(l) || /^[A-Za-z][\w ()/-]{0,30}:\s+\S/.test(l);
   for (const line of body.split("\n")) {
     const l = line.trim();
-    if (!l || l.startsWith("#")) continue;
+    if (!l || l.startsWith("#") || isMeta(l)) continue;
     const m = l.match(/^(.+?[.!?])(\s|$)/);
     const s = (m ? m[1] : l).replace(/\s+/g, " ").trim();
     if (s) return s;
@@ -250,8 +253,12 @@ export function planImport(targetRoot, sourceRoot, mapping) {
       const r = resolveEnum(raw0, remap, allowed, label);
       if (!r.error) return r.value;
       if (isActive) { ierr(r.error); return undefined; }
-      warnings.push(`${src.rel}: ${r.error} — kept as historical value`);
-      return raw0 == null ? undefined : String(raw0).trim();
+      // Closed items: enums are historical and not re-validated (SPEC §5.1, §8.3).
+      // Absence is normal for header-style legacy items, so a missing value just
+      // drops to null; only a *present* value that didn't map is worth a warning.
+      const has = raw0 != null && String(raw0).trim() !== "";
+      if (has) warnings.push(`${src.rel}: ${label} "${String(raw0).trim()}" not mapped — kept as a historical value`);
+      return has ? String(raw0).trim() : undefined;
     };
     const remap = mapping.remap || {};
     const priority = resolveOrCarry(runExtractor(fields.priority, ctx), remap.priority, cfg.priorities, "priority");
@@ -262,7 +269,11 @@ export function planImport(targetRoot, sourceRoot, mapping) {
     let effort;
     if (!eff.error) effort = eff.value;
     else if (isActive) ierr(`effort: ${eff.error}`);
-    else { warnings.push(`${src.rel}: effort "${rawEffort}" did not resolve — kept as historical value`); effort = rawEffort; }
+    else {
+      const has = rawEffort != null && String(rawEffort).trim() !== "";
+      if (has) warnings.push(`${src.rel}: effort "${rawEffort}" not resolved — kept as a historical value`);
+      effort = has ? rawEffort : undefined;
+    }
 
     const body = buildBody(raw, newId, title || newId);
     let summary = runExtractor(fields.summary, ctx);

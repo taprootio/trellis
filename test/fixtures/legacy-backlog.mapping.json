@@ -1,0 +1,23 @@
+{
+  "sources": {
+    "active": { "dirs": ["active"], "file": "*.md" },
+    "completed": { "dirs": ["completed"], "file": "*.md" },
+    "removed": { "dirs": ["removed"], "file": "*.md" }
+  },
+  "fields": {
+    "id": { "from": "filename", "pattern": "^(\\d+)" },
+    "title": { "from": "h1" },
+    "priority": { "from": "inline", "label": "Priority" },
+    "effort": { "from": "inline", "label": "Effort" },
+    "milestone": { "from": "inline", "label": "Milestone" },
+    "depends_on": { "from": "inline", "label": "Depends on" },
+    "completed_on": { "from": "header", "label": "Completed", "fallback": { "from": "header", "label": "Created" } },
+    "removed_on": { "from": "header", "label": "Removed" },
+    "removed_reason": { "from": "header", "label": "Reason" }
+  },
+  "remap": {
+    "priority": { "P1": "High", "P2": "Medium", "P3": "Low" },
+    "milestone": { "Pre-Launch": "Alpha", "MCP Servers": "Beta", "Post-Launch": "v1", "Back-Burner": "Future", "Legal Research": "Future" }
+  },
+  "summary": { "strategy": "firstSentence" }
+}
