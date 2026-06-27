@@ -9,12 +9,14 @@ Any AI assistant or human working here should read this file first, then
 
 ## Backlog at a glance
 
-- Work items live in `docs/tasks/{active,completed/tasks,removed}/`, one Markdown
+- Work items live in `trellis/{active,completed/tasks,removed}/`, one Markdown
   file per item with YAML front-matter. Ids are `TRL` + 4 digits.
-- `docs/tasks/README.md` and `docs/tasks/backlog.json` are **generated** — never
+- `trellis/README.md` and `trellis/backlog.json` are **generated** — never
   hand-edit them (or any text between the `BEGIN/END GENERATED` markers).
 - Per-repo vocabulary (id prefix, milestones, priorities, effort) lives in
-  [`backlog.config.json`](backlog.config.json); this repo targets `specVersion 1.0`.
+  [`trellis/backlog.config.json`](trellis/backlog.config.json); this repo targets
+  `specVersion 2.0`. The backlog root is `trellis/` by default (overridable via the
+  config's `tasksDir` key); the config file's own location is fixed there.
 - Milestones are a single, ordered **maturity** axis — `Alpha → Beta → v1 →
   Future` — not feature areas or priorities (SPEC.md §7.1).
 
@@ -56,7 +58,7 @@ reference instance) declares their values. See
 
 ## Roadmap
 
-The work to build Trellis is tracked in `docs/tasks/README.md`. The backlog
+The work to build Trellis is tracked in `trellis/README.md`. The backlog
 operations are exposed as MCP **tools** (`npm run trellis:mcp`, reusing the same
 core as the CLI; see `src/mcp.mjs`). The portable *process* — the "work a task"
 and "review" loops Taproot proved out — layers on top as MCP **prompts**

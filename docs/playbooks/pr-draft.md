@@ -10,7 +10,7 @@ prompt (served from this file by the Trellis MCP server) so any tool can run it.
 - Commits on the branch: `git log --oneline <base>..HEAD` (base is usually `main`).
 - The change surface: `git diff --stat <base>...HEAD`.
 - The PR template: `.github/pull_request_template.md`.
-- The referenced task file(s) under `docs/tasks/`.
+- The referenced task file(s) under the backlog root (default `trellis/`).
 
 ## Prompt
 

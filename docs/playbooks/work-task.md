@@ -1,6 +1,6 @@
 # Playbook: work a task
 
-A ready-to-use shortcut for taking a Trellis task from `docs/tasks/active/` all
+A ready-to-use shortcut for taking a Trellis task from `trellis/active/` all
 the way to "ready for your review." Invoke it with a backlog id — the repo's id
 prefix + number, per `backlog.config.json`.
 Point any AI assistant at this file, or invoke the equivalent `work-task` MCP
@@ -19,7 +19,7 @@ so `main` stays clean.
    seam point in code font (`regenerate`, `check`, `branch-naming`, `gates`,
    `attribution`), it reads that repo's value from AGENTS.md — see
    [`conventions.md`](conventions.md) for the contract.
-2. **Read the task.** Open `docs/tasks/active/<ID>.md` in full — front-matter
+2. **Read the task.** Open `trellis/active/<ID>.md` in full — front-matter
    (milestone, priority, effort, depends_on) and body (Scope, Notes, Risks). If
    it isn't in `active/`, stop and say where it actually is. Confirm every
    `depends_on` id is completed; surface any that aren't.
@@ -39,7 +39,7 @@ so `main` stays clean.
    example). Branch from local `main`, not `origin/main`, so the upstream isn't
    mis-set. Everything from here lands on the branch, never on `main`.
 7. **Rewrite the task on the branch.** Fold the user's refinements into
-   `docs/tasks/active/<ID>.md` (Scope / Notes / Risks), **regenerate the backlog**
+   `trellis/active/<ID>.md` (Scope / Notes / Risks), **regenerate the backlog**
    (the repo's `regenerate` command — e.g. `npm run backlog:readme`; see
    AGENTS.md), and commit it as the first checkpoint. This refined file is the
    source of truth for the rest of the loop.

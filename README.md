@@ -5,12 +5,12 @@ repo. This repository is Trellis, and it dogfoods its own conventions to manage
 its own backlog.
 
 Start with [`AGENTS.md`](AGENTS.md) for the conventions and the milestone ethos,
-then browse the live backlog in [`docs/tasks/README.md`](docs/tasks/README.md).
+then browse the live backlog in [`trellis/README.md`](trellis/README.md).
 
 ## Onboard a repo
 
 `trellis init` scaffolds the Trellis layout into any repo — the config, the
-`docs/tasks/` layout, the generated index, the CI check, an AGENTS.md backlog
+`trellis/` layout, the generated index, the CI check, an AGENTS.md backlog
 section, and the process playbooks — idempotently, without clobbering existing
 files:
 
