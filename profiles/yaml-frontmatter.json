@@ -12,6 +12,8 @@
     "effort": { "from": "yaml", "key": "effort" },
     "milestone": { "from": "yaml", "key": "milestone" },
     "summary": { "from": "yaml", "key": "summary" },
+    "owner": { "from": "yaml", "key": "owner" },
+    "collaborators": { "from": "yaml", "key": "collaborators" },
     "depends_on": { "from": "yaml", "key": "depends_on" },
     "completed_on": { "from": "yaml", "key": "completed_on" },
     "removed_on": { "from": "yaml", "key": "removed_on" },

@@ -126,12 +126,19 @@ export function emptyRoster() {
   return { members: [], byHandle: new Map() };
 }
 
+// Resolve a handle to its roster member regardless of status (case-insensitive),
+// or undefined. Used by the importer to recover the canonical handle of a now-inactive
+// member when carrying a historical owner on a closed item.
+export function findMember(roster, handle) {
+  if (!roster || typeof handle !== "string" || !handle.trim()) return undefined;
+  return roster.byHandle.get(handle.trim().toLowerCase());
+}
+
 // Resolve a handle to its roster member only when that member is ACTIVE — the check
 // behind active-item owner/collaborator validation and import resolution. Returns
 // the member (carrying its canonical handle) or undefined.
 export function findActiveMember(roster, handle) {
-  if (!roster || typeof handle !== "string" || !handle.trim()) return undefined;
-  const m = roster.byHandle.get(handle.trim().toLowerCase());
+  const m = findMember(roster, handle);
   return m && m.status === "active" ? m : undefined;
 }
 

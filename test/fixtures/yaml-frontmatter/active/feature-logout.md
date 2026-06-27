@@ -4,6 +4,8 @@ title: Add logout
 priority: Medium
 milestone: Beta
 effort: 2
+owner: bob
+collaborators: [alice]
 depends_on: [EX-1]
 ---
 

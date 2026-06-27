@@ -4,6 +4,7 @@ title: Add a login form
 priority: High
 milestone: Beta
 effort: 3
+owner: alice
 summary: Add a login form wired to the auth service.
 depends_on: []
 ---
