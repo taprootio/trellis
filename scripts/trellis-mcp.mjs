@@ -3,7 +3,7 @@
 //
 //   node scripts/trellis-mcp.mjs [--repo <path>]
 //
-// The seven tools are thin adapters over src/mcp.mjs (which is dependency-free and
+// The tools are thin adapters over src/mcp.mjs (which is dependency-free and
 // unit-tested); the @modelcontextprotocol SDK and the transport live only in this
 // entry point. Each tool resolves a repo root — the per-call `repoRoot` arg, else
 // the server's default (`--repo`, else cwd) — so one server can serve any repo the

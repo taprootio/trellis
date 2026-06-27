@@ -359,3 +359,19 @@ test("CLI lists profiles, and --mapping <file> matches --profile <name>", () => 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("CLI: an explicit --dry-run wins over --apply and writes nothing", () => {
+  const root = initTarget();
+  const script = join(projectRoot, "scripts", "trellis-import.mjs");
+  try {
+    const out = execFileSync(
+      process.execPath,
+      [script, legacySrc, "--profile", "taproot-ai-backlog", "--target", root, "--apply", "--dry-run"],
+      { encoding: "utf8" },
+    );
+    assert.match(out, /Would import 5 items/);
+    assert.equal(readdirSync(join(root, "trellis/active")).filter((f) => f.endsWith(".md")).length, 0, "the contradictory combo writes nothing");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

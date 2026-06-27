@@ -113,7 +113,7 @@ if (error) { console.error(`error: ${error}`); process.exit(2); }
 
 const targetRoot = resolve(opts.target || ".");
 const sourceRoot = resolve(targetRoot, source); // relative <source> resolves against the target repo
-const dryRun = !opts.apply; // dry-run by default; --apply opts into writing
+const dryRun = opts.dryRun || !opts.apply; // dry-run by default; --apply writes, but an explicit --dry-run always wins
 
 const { summary } = applyImport(targetRoot, sourceRoot, mapping, { dryRun });
 report(targetRoot, summary, dryRun);

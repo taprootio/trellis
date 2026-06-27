@@ -1,8 +1,9 @@
 // Trellis MCP operations (zero-dependency, transport-agnostic).
 //
-// The seven backlog operations the MCP server exposes as tools, each a plain
-// function over the TRL0002 core (src/backlog.mjs) that takes an explicit
-// repoRoot and returns a structured result (the backlog.json shape, or a slice).
+// The backlog operations the MCP server exposes as tools, each a plain function
+// over the TRL0002 core (src/backlog.mjs) that takes an explicit repoRoot and
+// returns a structured result (the backlog.json shape or a slice; the import tool
+// returns an import summary).
 // The SDK + stdio wiring live in scripts/trellis-mcp.mjs; keeping these functions
 // dependency-free means the whole tool surface is unit-testable with `node --test`
 // and no transport.
