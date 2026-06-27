@@ -9,7 +9,7 @@
 // on purpose so Trellis stays drop-in with no install step.
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, isAbsolute } from "node:path";
 
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
 export const SPEC_VERSION = "2.0";
@@ -75,10 +75,14 @@ export function loadConfig(repoRoot) {
   attachEffortScale(cfg, errors);
 
   // `tasksDir` is optional (defaults to `trellis/`); when present it must be a
-  // non-empty relative path. The config home stays fixed regardless (see paths()).
+  // non-empty repo-relative path that stays inside the repo — `join(repoRoot,
+  // tasksDir)` must not escape via an absolute path or a `..` segment. The config
+  // home stays fixed regardless (see paths()).
   if (cfg.tasksDir != null) {
     if (typeof cfg.tasksDir !== "string" || !cfg.tasksDir.trim()) {
       errors.push("config: `tasksDir` must be a non-empty string when present");
+    } else if (isAbsolute(cfg.tasksDir) || cfg.tasksDir.split(/[/\\]/).includes("..")) {
+      errors.push("config: `tasksDir` must be a repo-relative path within the repo (no absolute path or `..` segments)");
     }
   }
 

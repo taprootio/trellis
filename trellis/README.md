@@ -1,7 +1,7 @@
 # Trellis backlog
 
 The backlog for building **Trellis**, managed with Trellis's own conventions.
-See [`AGENTS.md`](../../AGENTS.md) for the schema and the milestone ethos.
+See [`AGENTS.md`](../AGENTS.md) for the schema and the milestone ethos.
 
 The tables below are generated. Do not hand-edit between the markers — edit the
 per-item files in `active/`, then run `npm run backlog:readme`.
