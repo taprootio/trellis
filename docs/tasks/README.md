@@ -17,7 +17,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | [TRL0021](active/TRL0021.md) | Build the backlog import engine (disparate schemas → Trellis) | High | Swordfish · 8 |
 | [TRL0009](active/TRL0009.md) | Dogfood — onboard an existing repo end-to-end | Medium | 🐡 Trout · 3 |
 | [TRL0022](active/TRL0022.md) | Expose import over MCP and ship reusable source-mapping profiles | Medium | 🐡 Trout · 3 |
-| [TRL0015](active/TRL0015.md) | Optional custom effort scales (labels, emoji, images) | Low | Tuna · 5 |
 
 ### v1
 
