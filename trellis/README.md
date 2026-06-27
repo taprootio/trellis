@@ -14,6 +14,9 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | --- | --- | --- | --- |
 | [TRL0014](active/TRL0014.md) | Bake branch protection + required backlog check into the recipe | High | 🐡 Trout · 3 |
 | [TRL0009](active/TRL0009.md) | Dogfood — onboard an existing repo end-to-end | Medium | 🐡 Trout · 3 |
+| [TRL0023](active/TRL0023.md) | Team roster and task ownership (owner + collaborators) | Medium | Swordfish · 8 |
+| [TRL0025](active/TRL0025.md) | Git-derived task history and a materialized history.json | Medium | Tuna · 5 |
+| [TRL0024](active/TRL0024.md) | Drop the README "Next task ID"; make backlog.json the canonical source | Low | 🐠 Goldfish · 2 |
 
 ### v1
 
@@ -34,5 +37,5 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 ## Next task ID
 
-`TRL0023`
+`TRL0026`
 <!-- END GENERATED:MILESTONES -->
