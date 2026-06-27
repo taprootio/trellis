@@ -25,6 +25,8 @@
       "depends_on": [
         "TRL0001"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "A local dev server that renders the backlog from backlog.json and hot-reloads when the task files change — no deploy, no auth."
     },
     {
@@ -39,6 +41,8 @@
       "depends_on": [
         "TRL0005"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Add a dependency graph and filtering by milestone, priority, and effort to the local viewer."
     },
     {
@@ -55,6 +59,8 @@
         "TRL0020",
         "TRL0021"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Run `trellis init` against a second, non-trivial repo and work a real task through the loop to prove the formula travels."
     },
     {
@@ -70,6 +76,8 @@
         "TRL0003",
         "TRL0006"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Publish Trellis as an installable package (npx trellis), version the spec, and write the getting-started and reference docs."
     },
     {
@@ -85,6 +93,8 @@
         "TRL0002",
         "TRL0004"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Unit and integration tests for the generator core, the init scaffolder, and the MCP tools, wired into CI."
     },
     {
@@ -98,6 +108,8 @@
       "depends_on": [
         "TRL0008"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Optionally publish the read-only viewer as a static site (Pages) built from backlog.json, for teams who want a shared URL."
     },
     {
@@ -112,6 +124,8 @@
       "depends_on": [
         "TRL0012"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Gate the deployed viewer behind SSO without building auth — an access proxy (Cloudflare Access) or publishing through an already-gated host."
     },
     {
@@ -127,6 +141,8 @@
         "TRL0001",
         "TRL0003"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Make a protected main with a required backlog-check gate part of standard Trellis onboarding — defined in the spec, set up by init, and documented for consumers (including non-GitHub forges)."
     },
     {
@@ -141,6 +157,8 @@
       "depends_on": [
         "TRL0006"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
     },
     {
@@ -155,6 +173,8 @@
         "TRL0021",
         "TRL0022"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Add a configured team roster (active/historical members) plus optional owner and collaborators task fields, validated like the existing enums and importable via the mapping, so the backlog records who is responsible for each item."
     },
     {
@@ -167,6 +187,8 @@
       "effortLabel": "Goldfish",
       "effortEmoji": "🐠",
       "depends_on": [],
+      "owner": null,
+      "collaborators": [],
       "summary": "Remove the redundant generated \"Next task ID\" section from the README and point the spec at backlog.json's nextId (plus the MCP next_id tool) as the single published source."
     },
     {
@@ -179,6 +201,8 @@
       "effortLabel": "Tuna",
       "effortImage": "assets/effort/tuna.svg",
       "depends_on": [],
+      "owner": null,
+      "collaborators": [],
       "summary": "Derive a lightweight per-task history (who changed it, when, why) from git and materialize it as a non-gated history.json the future viewer can read without a git runtime."
     },
     {
@@ -191,6 +215,8 @@
       "effortLabel": "Trout",
       "effortEmoji": "🐡",
       "depends_on": [],
+      "owner": null,
+      "collaborators": [],
       "summary": "Write the canonical, repo-agnostic spec for the file-based backlog — layout, front-matter schema, vocab, and generator contract.",
       "completed_on": "2026-06-25"
     },
@@ -206,6 +232,8 @@
       "depends_on": [
         "TRL0001"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Generalize the backlog generator into the reusable Trellis core — validate, regenerate README + backlog.json, compute next id, support --check.",
       "completed_on": "2026-06-25"
     },
@@ -221,6 +249,8 @@
       "depends_on": [
         "TRL0002"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "One command that onboards any repo to the Trellis backlog — scaffolds the layout, config, generated index, CI check, AGENTS section, and process playbooks, idempotently and without clobbering.",
       "completed_on": "2026-06-26"
     },
@@ -235,6 +265,8 @@
       "depends_on": [
         "TRL0002"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Expose the backlog operations over MCP so any MCP-aware tool can list, read, create, move, validate, and regenerate tasks in any repo.",
       "completed_on": "2026-06-26"
     },
@@ -250,6 +282,8 @@
       "depends_on": [
         "TRL0004"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Carry the \"work a task\" and \"review\" loops as MCP prompts and the spec/playbooks/templates as MCP resources, so the process travels to any MCP client, not just Claude.",
       "completed_on": "2026-06-26"
     },
@@ -265,6 +299,8 @@
       "depends_on": [
         "TRL0001"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Cleanly split the portable orchestration shape from repo-specific tech rules so the same loop works in any repo by reading a named conventions contract from its AGENTS.md.",
       "completed_on": "2026-06-26"
     },
@@ -281,6 +317,8 @@
         "TRL0001",
         "TRL0002"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Let teams skin the Fibonacci effort scale with custom labels (e.g. fish sizes), emoji, and optional images — mapped 1:1 to the canonical numbers, which stay the stored contract.",
       "completed_on": "2026-06-26"
     },
@@ -294,6 +332,8 @@
       "effortLabel": "Trout",
       "effortEmoji": "🐡",
       "depends_on": [],
+      "owner": null,
+      "collaborators": [],
       "summary": "Enforce the shared PR title standard in CI with a config-driven, prefix-agnostic title lint; the template, draft shortcut, and MCP prompt already shipped.",
       "completed_on": "2026-06-26"
     },
@@ -307,6 +347,8 @@
       "effortLabel": "Trout",
       "effortEmoji": "🐡",
       "depends_on": [],
+      "owner": null,
+      "collaborators": [],
       "summary": "Add a repository code-review standard — a review shortcut that grounds in the repo's conventions and emits the canonical JSON findings format (file/line/severity/suggestion), scaffolded by init and graduating to an MCP prompt.",
       "completed_on": "2026-06-25"
     },
@@ -322,6 +364,8 @@
       "depends_on": [
         "TRL0017"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Add the work-a-task shortcut — a fixed loop that refines a task with the user, plans with checkpoints, branches from clean main, works it end-to-end, runs the code-review playbook, fixes findings, and hands off for review.",
       "completed_on": "2026-06-25"
     },
@@ -338,6 +382,8 @@
         "TRL0001",
         "TRL0003"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Move the canonical backlog root from docs/tasks/ to a top-level trellis/ folder (configurable via a new tasksDir key) so a repo's use of Trellis is obvious and stays out of docs/ site builds — a layout change (spec major bump) carried through the core, init, MCP, and the dogfooded backlog.",
       "completed_on": "2026-06-27"
     },
@@ -353,6 +399,8 @@
         "TRL0003",
         "TRL0020"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Build a config-driven importer that converts an existing backlog on a foreign schema into Trellis items via a declarative mapping — locating fields, remapping enums, assigning fresh canonical ids, deduping colliding source ids and rewriting dependencies, synthesizing summaries — with a dry-run default and a --check-green result.",
       "completed_on": "2026-06-27"
     },
@@ -369,6 +417,8 @@
         "TRL0004",
         "TRL0021"
       ],
+      "owner": null,
+      "collaborators": [],
       "summary": "Expose the importer as an MCP import tool and ship reusable source-mapping profiles (including Taproot's ai-backlog) so disparate repos can describe and import their own backlog schema, with an init --import on-ramp.",
       "completed_on": "2026-06-27"
     }
