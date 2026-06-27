@@ -156,7 +156,7 @@
         "TRL0001",
         "TRL0003"
       ],
-      "summary": "Move the canonical backlog root from docs/tasks/ to a top-level trellis/ folder so a repo's use of Trellis is obvious and stays out of docs/ site builds — a fixed-layout change (spec major bump) carried through the core, init, MCP, and the dogfooded backlog."
+      "summary": "Move the canonical backlog root from docs/tasks/ to a top-level trellis/ folder (configurable via a new tasksDir key) so a repo's use of Trellis is obvious and stays out of docs/ site builds — a layout change (spec major bump) carried through the core, init, MCP, and the dogfooded backlog."
     },
     {
       "id": "TRL0021",
