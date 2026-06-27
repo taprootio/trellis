@@ -22,6 +22,7 @@ import {
   generateArtifacts,
   buildBacklogJson,
   resolveEffort,
+  findActiveMember,
   nextId,
   parseFrontMatter,
   paths,
@@ -73,6 +74,54 @@ function oneLine(value, field) {
   if (typeof value !== "string" || !value.trim()) throw new TrellisError(`\`${field}\` is required`);
   if (/[\r\n]/.test(value)) throw new TrellisError(`\`${field}\` must be a single line`);
   return value.trim();
+}
+
+// ----------------------------------------------------------------- ownership
+// Resolve a create_task `owner` arg → a canonical active-roster handle, or undefined
+// when omitted. A provided owner that is not an active member is a clear error up
+// front (the post-write re-read is the backstop). Empty/whitespace is treated as unset.
+function resolveOwnerArg(value, roster) {
+  if (value === undefined || value === null || String(value).trim() === "") return undefined;
+  const v = oneLine(value, "owner");
+  const m = findActiveMember(roster, v);
+  if (!m) throw new TrellisError(`owner "${v}" is not an active roster member`, "invalid_request");
+  return m.handle;
+}
+
+// Resolve a create_task `collaborators` arg → canonical active-roster handles, deduped,
+// or [] when omitted. Each must be an active member.
+function resolveCollaboratorsArg(value, roster) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((c) => typeof c !== "string")) {
+    throw new TrellisError("`collaborators` must be a list of roster handles");
+  }
+  const out = [];
+  for (const c of value) {
+    const v = c.trim();
+    if (!v) continue;
+    const m = findActiveMember(roster, v);
+    if (!m) throw new TrellisError(`collaborator "${v}" is not an active roster member`, "invalid_request");
+    if (!out.includes(m.handle)) out.push(m.handle);
+  }
+  return out;
+}
+
+// Apply an optional owner/collaborators override when closing a task. On close the
+// values are historical (SPEC §8.3) — not re-validated against the roster — so this
+// only shapes the front-matter (a now-inactive assignee, or who actually did it, is
+// allowed); passing null/empty clears the field.
+function applyOwnershipOverride(fm, args) {
+  if (args.owner !== undefined) {
+    if (args.owner === null || String(args.owner).trim() === "") delete fm.owner;
+    else fm.owner = oneLine(args.owner, "owner");
+  }
+  if (args.collaborators !== undefined) {
+    if (!Array.isArray(args.collaborators) || args.collaborators.some((c) => typeof c !== "string")) {
+      throw new TrellisError("`collaborators` must be a list of roster handles");
+    }
+    const cleaned = [...new Set(args.collaborators.map((c) => c.trim()).filter(Boolean))];
+    if (cleaned.length) fm.collaborators = cleaned; else delete fm.collaborators;
+  }
 }
 
 // Split an item file into its front-matter object and the Markdown body.
@@ -241,8 +290,15 @@ export function createTask(repoRoot, args = {}) {
   for (const d of depends_on) {
     if (!idRe.test(d)) throw new TrellisError(`invalid dependency id: ${d} (expected ${cfg.idPrefix} + ${cfg.idWidth} digits)`, "invalid_request");
   }
+  // Ownership (optional): resolve each handle to an ACTIVE roster member up front for
+  // a clear error and canonical casing; the post-write re-read re-checks as a backstop.
+  const owner = resolveOwnerArg(args.owner, data.roster);
+  const collaborators = resolveCollaboratorsArg(args.collaborators, data.roster);
+
   const id = nextId(data.ids, cfg);
   const fm = { id, title, status: "active", milestone, priority, effort: effort.value, depends_on, summary };
+  if (owner) fm.owner = owner;
+  if (collaborators.length) fm.collaborators = collaborators;
   const body = args.body ? args.body : scaffoldBody(id, title);
   const file = join(paths(repoRoot, cfg).active, `${id}.md`);
 
@@ -285,6 +341,9 @@ export function moveTask(repoRoot, args = {}) {
   fm.status = to;
   if (to === "completed") fm.completed_on = date;
   else { fm.removed_on = date; fm.removed_reason = reason; }
+  // Ownership carries over from the active item automatically; allow an optional
+  // override at close (historical from here — not re-validated against the roster).
+  applyOwnershipOverride(fm, args);
   const heading = to === "completed" ? "Completed" : "Removed";
   const newBody = prependSection(body, heading, args.note ? oneLine(args.note, "note") : "");
 

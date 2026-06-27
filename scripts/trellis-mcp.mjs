@@ -83,6 +83,8 @@ export const TOOLS = {
       priority: z.string().describe("a configured priority"),
       effort: z.union([z.number(), z.string()]).describe("a canonical effort number, or a label from the active effort scale"),
       depends_on: z.array(z.string()).optional().describe("ids this task depends on"),
+      owner: z.string().optional().describe("owner handle; must be an active member of the team roster (team.json)"),
+      collaborators: z.array(z.string()).optional().describe("collaborator handles; each must be an active roster member"),
       body: z.string().optional().describe("Markdown body; Scope/Notes/Risks are scaffolded if omitted"),
     },
   },
@@ -95,6 +97,8 @@ export const TOOLS = {
       reason: z.string().optional().describe("required when removing: why, and any trigger to revisit"),
       note: z.string().optional().describe("closeout note prepended to the body"),
       date: z.string().optional().describe("ISO close date (YYYY-MM-DD); defaults to today"),
+      owner: z.string().optional().describe("override the owner on close (historical; pass empty to clear)"),
+      collaborators: z.array(z.string()).optional().describe("override collaborators on close (historical)"),
     },
   },
   validate: {

@@ -40,6 +40,14 @@ function assertCheckClean(root) {
 
 const VALID = { title: "First task", summary: "Do the first thing.", milestone: "Alpha", priority: "High", effort: 3 };
 
+// Seed a roster into a fresh repo so create_task/move_task can assign owners. A fresh
+// scaffold has no active items, so adding team.json leaves the backlog --check-green.
+function withRoster(root, members) {
+  writeFileSync(join(root, "trellis", "team.json"), JSON.stringify({ members }, null, 2) + "\n");
+  return root;
+}
+const TEAM = [{ handle: "alice", name: "Alice", status: "active" }, { handle: "bob", name: "Bob", status: "active" }];
+
 test("next_id reports the first id on a fresh scaffold", () => {
   const root = freshRepo();
   try {
@@ -339,6 +347,65 @@ test("move_task defaults the close date to a valid local ISO date", () => {
     createTask(root, VALID);
     const { moved } = moveTask(root, { id: "DEMO0001", to: "completed" }); // no date
     assert.match(moved.completed_on, /^\d{4}-\d{2}-\d{2}$/, "a YYYY-MM-DD date is recorded");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("create_task accepts owner/collaborators, normalizes case, dedupes, stays --check-green", () => {
+  const root = withRoster(freshRepo(), TEAM);
+  try {
+    const { created } = createTask(root, { ...VALID, owner: "ALICE", collaborators: ["bob", "bob"] });
+    assert.equal(created.owner, "alice", "owner normalized to the canonical handle");
+    assert.deepEqual(created.collaborators, ["bob"], "collaborators deduped");
+    assert.match(readFileSync(join(root, "trellis/active/DEMO0001.md"), "utf8"), /^owner: alice$/m);
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("create_task rejects an owner/collaborator who is not an active roster member, writing nothing", () => {
+  const root = withRoster(freshRepo(), [{ handle: "alice", name: "Alice", status: "inactive" }]);
+  try {
+    assert.throws(() => createTask(root, { ...VALID, owner: "alice" }), (e) => e instanceof TrellisError && /not an active roster member/.test(e.message));
+    assert.throws(() => createTask(root, { ...VALID, owner: "ghost" }), /not an active roster member/);
+    assert.throws(() => createTask(root, { ...VALID, collaborators: ["ghost"] }), /not an active roster member/);
+    assert.equal(existsSync(join(root, "trellis/active/DEMO0001.md")), false, "nothing written");
+    assert.equal(nextIdOp(root).nextId, "DEMO0001", "next id did not advance");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("get_task and list_tasks surface owner/collaborators", () => {
+  const root = withRoster(freshRepo(), TEAM);
+  try {
+    createTask(root, { ...VALID, owner: "alice", collaborators: ["bob"] });
+    const t = getTask(root, { id: "DEMO0001" });
+    assert.equal(t.owner, "alice");
+    assert.deepEqual(t.collaborators, ["bob"]);
+    assert.equal(listTasks(root).tasks[0].owner, "alice");
+    assert.deepEqual(listTasks(root).tasks[0].collaborators, ["bob"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("move_task carries the owner over on close, and an override records a historical assignee", () => {
+  const root = withRoster(freshRepo(), [{ handle: "alice", name: "Alice", status: "active" }]);
+  try {
+    createTask(root, { ...VALID, owner: "alice" });
+    const { moved } = moveTask(root, { id: "DEMO0001", to: "completed", date: "2026-06-27" });
+    assert.equal(moved.owner, "alice", "owner carries over to the completed item");
+    assertCheckClean(root);
+
+    // A second task whose owner is reassigned at close to a non-roster handle — allowed
+    // because closed items are historical and not re-validated (SPEC §8.3).
+    createTask(root, { ...VALID, owner: "alice" }); // DEMO0002
+    const { moved: m2 } = moveTask(root, { id: "DEMO0002", to: "completed", date: "2026-06-27", collaborators: ["pastIntern"] });
+    assert.deepEqual(m2.collaborators, ["pastIntern"]);
     assertCheckClean(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
