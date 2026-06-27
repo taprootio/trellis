@@ -66,7 +66,12 @@ function report(targetRoot, summary, dryRun) {
     const wrote = summary.created.length || summary.generated.length;
     console.error(wrote ? `Import of ${targetRoot} did not complete:` : `Refused to import into ${targetRoot} — wrote nothing:`);
     for (const e of summary.errors) console.error(`  - ${e}`);
-    // Even on refusal, the id map / warnings help the user fix the mapping.
+    // Even on refusal, the id map + warnings help the user fix the mapping — e.g.
+    // see which source ids collided behind an ambiguous depends_on.
+    if (summary.idMap.length) {
+      console.error("  id map:");
+      for (const m of summary.idMap) console.error(`    ${m.sourceId} (${m.sourceFile}) → ${m.newId}`);
+    }
     for (const w of summary.warnings) console.warn(`  warning: ${w}`);
     return;
   }

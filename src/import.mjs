@@ -70,7 +70,9 @@ function toISO(raw) {
   if (raw == null) return null;
   const m = String(raw).trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (!m) return null;
-  return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  const month = Number(m[2]), day = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null; // reject impossible dates — fail loud, don't guess a close date
+  return `${m[1]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 // ------------------------------------------------------------- extraction
@@ -201,23 +203,25 @@ function validateMapping(mapping) {
 // fresh ids, rewrite dependencies, and collect per-item errors + warnings. Read
 // access is limited to the source tree and the target's config/backlog.
 export function planImport(targetRoot, sourceRoot, mapping) {
-  const empty = { cfg: null, root: null, items: [], idMap: [], counts: { active: 0, completed: 0, removed: 0, total: 0 }, warnings: [], errors: [] };
+  // A factory (not a shared literal) so each early return gets its own arrays/objects
+  // and results can never alias one another.
+  const empty = () => ({ cfg: null, root: null, items: [], idMap: [], counts: { active: 0, completed: 0, removed: 0, total: 0 }, warnings: [], errors: [] });
 
   const mapErrors = validateMapping(mapping);
-  if (mapErrors.length) return { ...empty, errors: mapErrors };
+  if (mapErrors.length) return { ...empty(), errors: mapErrors };
 
   const { cfg, errors: cfgErrors } = loadConfig(targetRoot);
-  if (cfgErrors.length) return { ...empty, errors: [`target config: ${cfgErrors.join("; ")}`] };
+  if (cfgErrors.length) return { ...empty(), errors: [`target config: ${cfgErrors.join("; ")}`] };
   const root = cfg.tasksDir || "trellis";
   const p = paths(targetRoot, cfg);
 
   // The target must already be a Trellis repo — import emits items + regenerates,
   // it does not scaffold (that's `trellis init`; TRL0022 wires `init --import`).
   if (!existsSync(p.readme) || !existsSync(p.completedIndex) || !existsSync(p.removedIndex)) {
-    return { ...empty, cfg, root, errors: ["target is not an initialized Trellis backlog (missing generated indexes); run `trellis init` first"] };
+    return { ...empty(), cfg, root, errors: ["target is not an initialized Trellis backlog (missing generated indexes); run `trellis init` first"] };
   }
   const data = readBacklog(targetRoot, cfg);
-  if (data.errors.length) return { ...empty, cfg, root, errors: [`target backlog has errors; fix them before importing: ${data.errors.join("; ")}`] };
+  if (data.errors.length) return { ...empty(), cfg, root, errors: [`target backlog has errors; fix them before importing: ${data.errors.join("; ")}`] };
 
   const warnings = [];
   const sources = discoverSources(sourceRoot, mapping, warnings);

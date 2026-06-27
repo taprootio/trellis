@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -172,6 +172,31 @@ test("treats a dependency on a collided source id as a hard error", () => {
     assertCheckClean(root); // nothing written
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects an impossible close date instead of guessing one", () => {
+  const root = initTarget();
+  const src = mkdtempSync(join(tmpdir(), "trellis-srcbad-"));
+  try {
+    mkdirSync(join(src, "completed"), { recursive: true });
+    writeFileSync(join(src, "completed", "001-x.md"), "# A done thing\n\nCreated: 2024-13-40\n\nIt shipped.\n");
+    const m = {
+      sources: { completed: { dirs: ["completed"], file: "*.md" } },
+      fields: {
+        id: { from: "filename", pattern: "^(\\d+)" },
+        title: { from: "h1" },
+        completed_on: { from: "header", label: "Created" },
+      },
+    };
+    const plan = planImport(root, src, m);
+    assert.ok(plan.errors.some((e) => e.includes("completed_on")), `expected a completed_on date error, got ${JSON.stringify(plan.errors)}`);
+    const { summary } = applyImport(root, src, m, { dryRun: false });
+    assert.ok(summary.errors.length > 0);
+    assertCheckClean(root); // nothing written
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
   }
 });
 
