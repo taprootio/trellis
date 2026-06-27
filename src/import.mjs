@@ -43,6 +43,7 @@ import {
   generateArtifacts,
   resolveEffort,
   findMember,
+  isValidHandle,
   nextId,
   parseFrontMatter,
   paths,
@@ -373,9 +374,16 @@ export function planImport(targetRoot, sourceRoot, mapping) {
       } else if (isActive) {
         warnings.push(`${src.rel}: collaborator "${c}" is not an active roster member — dropped`);
       } else {
-        const v = m ? m.handle : String(c).trim();
-        if (v && !collaborators.includes(v)) collaborators.push(v);
-        warnings.push(`${src.rel}: collaborator "${c}" is not in the roster — kept as a historical value`);
+        // Closed item, handle not in the roster: carry it verbatim as a historical
+        // value — but only if it is a valid handle, else it would corrupt the inline
+        // `collaborators` array (SPEC §7.2), so drop it with a warning instead.
+        const v = String(c).trim();
+        if (isValidHandle(v)) {
+          if (!collaborators.includes(v)) collaborators.push(v);
+          warnings.push(`${src.rel}: collaborator "${c}" is not in the roster — kept as a historical value`);
+        } else {
+          warnings.push(`${src.rel}: collaborator "${c}" is not a valid handle — dropped`);
+        }
       }
     }
 

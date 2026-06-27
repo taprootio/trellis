@@ -126,6 +126,14 @@ export function emptyRoster() {
   return { members: [], byHandle: new Map() };
 }
 
+// True when a string is a syntactically valid handle. The charset keeps a handle safe
+// inside the inline serialization of `collaborators` (no comma/bracket), so any writer
+// emitting a handle to a file MUST enforce it — not only the roster loader. Historical
+// (closed-item) assignees skip roster membership but still must round-trip (SPEC §7.2).
+export function isValidHandle(handle) {
+  return typeof handle === "string" && HANDLE_RE.test(handle.trim());
+}
+
 // Resolve a handle to its roster member regardless of status (case-insensitive),
 // or undefined. Used by the importer to recover the canonical handle of a now-inactive
 // member when carrying a historical owner on a closed item.
@@ -172,7 +180,7 @@ export function loadRoster(repoRoot) {
     for (const k of Object.keys(m)) if (!MEMBER_KEYS.has(k)) errors.push(`${at}: unknown key \`${k}\``);
     const { handle, name, email, status } = m;
     if (typeof handle !== "string" || !handle.trim()) { errors.push(`${at}: \`handle\` must be a non-empty string`); return; }
-    if (!HANDLE_RE.test(handle.trim())) errors.push(`${at}: \`handle\` "${handle}" must use only letters, digits, ., _, -`);
+    if (!isValidHandle(handle)) errors.push(`${at}: \`handle\` "${handle}" must use only letters, digits, ., _, -`);
     if (typeof name !== "string" || !name.trim()) errors.push(`${at} (${handle}): \`name\` must be a non-empty string`);
     if (email != null && typeof email !== "string") errors.push(`${at} (${handle}): \`email\` must be a string`);
     // `status` is optional and defaults to active; a present-but-invalid value errors.

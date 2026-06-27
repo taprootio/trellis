@@ -394,6 +394,37 @@ test("import: an unresolved active owner falls back to defaults.owner", () => {
   }
 });
 
+test("import drops a closed-item collaborator that is not a valid handle instead of corrupting the file", () => {
+  const root = initTarget();
+  writeFileSync(join(root, "trellis/team.json"), JSON.stringify({ members: [] }, null, 2) + "\n"); // empty roster → everything historical
+  const src = mkdtempSync(join(tmpdir(), "trellis-collab-"));
+  try {
+    mkdirSync(join(src, "completed"), { recursive: true });
+    // "Jane Doe" survives asList as one token (a space, no comma) but is not a valid
+    // handle; "validhandle" is. Only the latter may be carried.
+    writeFileSync(join(src, "completed", "001-x.md"), "# Done\n\nCreated: 2024-02-03\nCollaborators: Jane Doe; validhandle\n\nIt shipped.\n");
+    const m = {
+      sources: { completed: { dirs: ["completed"], file: "*.md" } },
+      fields: {
+        id: { from: "filename", pattern: "^(\\d+)" },
+        title: { from: "h1" },
+        completed_on: { from: "header", label: "Created" },
+        collaborators: { from: "header", label: "Collaborators" },
+      },
+      defaults: { milestone: "Alpha", priority: "Low", effort: 1 },
+    };
+    const { summary } = applyImport(root, src, m, { dryRun: false });
+    assert.deepEqual(summary.errors, []);
+    const item = fm(root, `trellis/completed/tasks/${newIdFor(summary.idMap, "completed/001-x.md")}.md`);
+    assert.deepEqual(item.collaborators, ["validhandle"], "the non-handle token is dropped; the valid one is carried, no corruption");
+    assert.ok(summary.warnings.some((w) => /Jane Doe.*not a valid handle/.test(w)), `expected a dropped-handle warning, got ${JSON.stringify(summary.warnings)}`);
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});
+
 test("every built-in profile loads and is a structurally valid, documented mapping", () => {
   const profiles = listProfiles();
   for (const name of ["taproot-ai-backlog", "yaml-frontmatter"]) {

@@ -23,6 +23,7 @@ import {
   buildBacklogJson,
   resolveEffort,
   findActiveMember,
+  isValidHandle,
   nextId,
   parseFrontMatter,
   paths,
@@ -106,6 +107,14 @@ function resolveCollaboratorsArg(value, roster) {
   return out;
 }
 
+// A historical assignee skips roster membership (closed items are historical, SPEC
+// §8.3) but MUST still be a valid handle, so it round-trips through the inline
+// serializer — a comma/bracket would corrupt the `collaborators` array (SPEC §7.2).
+function assertHandle(v) {
+  if (!isValidHandle(v)) throw new TrellisError(`invalid handle "${v}" (use letters, digits, ., _, -)`, "invalid_request");
+  return v.trim();
+}
+
 // Apply an optional owner/collaborators override when closing a task. On close the
 // values are historical (SPEC §8.3) — not re-validated against the roster — so this
 // only shapes the front-matter (a now-inactive assignee, or who actually did it, is
@@ -113,13 +122,13 @@ function resolveCollaboratorsArg(value, roster) {
 function applyOwnershipOverride(fm, args) {
   if (args.owner !== undefined) {
     if (args.owner === null || String(args.owner).trim() === "") delete fm.owner;
-    else fm.owner = oneLine(args.owner, "owner");
+    else fm.owner = assertHandle(oneLine(args.owner, "owner"));
   }
   if (args.collaborators !== undefined) {
     if (!Array.isArray(args.collaborators) || args.collaborators.some((c) => typeof c !== "string")) {
       throw new TrellisError("`collaborators` must be a list of roster handles");
     }
-    const cleaned = [...new Set(args.collaborators.map((c) => c.trim()).filter(Boolean))];
+    const cleaned = [...new Set(args.collaborators.map((c) => c.trim()).filter(Boolean))].map(assertHandle);
     if (cleaned.length) fm.collaborators = cleaned; else delete fm.collaborators;
   }
 }

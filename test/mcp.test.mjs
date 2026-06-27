@@ -412,6 +412,21 @@ test("move_task carries the owner over on close, and an override records a histo
   }
 });
 
+test("move_task rejects a historical assignee that is not a valid handle (would corrupt serialization)", () => {
+  const root = withRoster(freshRepo(), [{ handle: "alice", name: "Alice", status: "active" }]);
+  try {
+    createTask(root, { ...VALID, owner: "alice" });
+    // A comma in a collaborator would split through the inline-array serializer; a space
+    // in an owner is not a handle. Both must be rejected even on the historical path.
+    assert.throws(() => moveTask(root, { id: "DEMO0001", to: "completed", date: "2026-06-27", collaborators: ["a,b"] }), /invalid handle/);
+    assert.throws(() => moveTask(root, { id: "DEMO0001", to: "completed", date: "2026-06-27", owner: "John Smith" }), /invalid handle/);
+    assert.ok(existsSync(join(root, "trellis/active/DEMO0001.md")), "the task stays active after a rejected move");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("import tool: dry-run by default writes nothing; apply writes + stays --check-green", () => {
   const root = freshRepo();
   try {
