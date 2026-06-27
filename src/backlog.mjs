@@ -59,6 +59,12 @@ export function loadConfig(repoRoot) {
     errors.push("config: `effort` values must all be numbers");
   }
   cfg.effortValues = Array.isArray(effortValues) ? effortValues : [];
+  // Resolve the active effort scale (SPEC §6.1). Only attempt the skin when the
+  // canonical values are well-formed; otherwise fall back to identity so later
+  // stages have a usable (if empty) scale and the real error above is what shows.
+  cfg.effortScale = cfg.effortValues.length && cfg.effortValues.every((v) => typeof v === "number" && Number.isFinite(v))
+    ? buildEffortScale(cfg, errors)
+    : identityScale(cfg.effortValues);
 
   if (cfg.specVersion == null) {
     warnings.push(`config has no \`specVersion\`; assuming current spec ${SPEC_VERSION}`);
@@ -66,6 +72,110 @@ export function loadConfig(repoRoot) {
     warnings.push(`config \`specVersion\` ${cfg.specVersion} differs in major version from this tool's spec ${SPEC_VERSION}`);
   }
   return { cfg, warnings, errors };
+}
+
+// --------------------------------------------------------- effort scales
+// The active effort scale is a 1:1 skin over the canonical numbers (SPEC §6).
+// Shape: { isIdentity, name, byNumber: Map<number,{label,emoji?,image?}>,
+// byLabel: Map<lowercased label, number> }. The identity ("fibonacci") scale
+// labels each value with its own number and accepts no aliases.
+function identityScale(values) {
+  return {
+    isIdentity: true,
+    name: "fibonacci",
+    byNumber: new Map(values.map((v) => [v, { label: String(v) }])),
+    byLabel: new Map(),
+  };
+}
+
+function buildEffortScale(cfg, errors) {
+  const values = cfg.effortValues;
+  const obj = Array.isArray(cfg.effort) ? null : cfg.effort;
+  const scaleName = obj && obj.scale != null ? obj.scale : "fibonacci";
+
+  if (typeof scaleName !== "string") {
+    errors.push("config: effort `scale` must be a string");
+    return identityScale(values);
+  }
+  if (scaleName === "fibonacci") return identityScale(values);
+
+  const scales = obj && obj.scales;
+  if (scales == null || typeof scales !== "object" || Array.isArray(scales)) {
+    errors.push("config: effort `scales` must be an object when a non-identity `scale` is selected");
+    return identityScale(values);
+  }
+  const active = scales[scaleName];
+  if (active == null || typeof active !== "object" || Array.isArray(active)) {
+    errors.push(`config: effort \`scale\` "${scaleName}" is not defined in \`scales\``);
+    return identityScale(values);
+  }
+
+  // Validate the active scale fully: every canonical value mapped, each entry a
+  // non-empty unique label with optional string emoji/image (SPEC §6.1).
+  const byNumber = new Map();
+  const byLabel = new Map();
+  for (const v of values) {
+    const entry = active[String(v)];
+    if (entry == null || typeof entry !== "object" || Array.isArray(entry)) {
+      errors.push(`config: effort scale "${scaleName}" is missing a mapping for value ${v}`);
+      continue;
+    }
+    const { label, emoji, image } = entry;
+    if (typeof label !== "string" || !label.trim()) {
+      errors.push(`config: effort scale "${scaleName}" value ${v}: \`label\` must be a non-empty string`);
+      continue;
+    }
+    if (emoji != null && typeof emoji !== "string") errors.push(`config: effort scale "${scaleName}" value ${v}: \`emoji\` must be a string`);
+    if (image != null && typeof image !== "string") errors.push(`config: effort scale "${scaleName}" value ${v}: \`image\` must be a string`);
+    const key = label.trim().toLowerCase();
+    if (byLabel.has(key)) errors.push(`config: effort scale "${scaleName}" has duplicate label "${label}"`);
+    byLabel.set(key, v);
+    const resolved = { label };
+    if (typeof emoji === "string") resolved.emoji = emoji;
+    if (typeof image === "string") resolved.image = image;
+    byNumber.set(v, resolved);
+  }
+  return { isIdentity: false, name: scaleName, byNumber, byLabel };
+}
+
+// Resolve a front-matter `effort` (a canonical number or a case-insensitive
+// label alias) against the active scale (SPEC §6.2). Returns
+// { value, label, emoji?, image? } on success, or { error } with an actionable
+// message. Shared by the generator (active-item validation) and the MCP writer.
+export function resolveEffort(cfg, raw) {
+  const scale = cfg.effortScale;
+  let value;
+  if (typeof raw === "number") {
+    value = raw;
+  } else if (typeof raw === "string" && raw.trim()) {
+    const key = raw.trim().toLowerCase();
+    if (scale.byLabel.has(key)) value = scale.byLabel.get(key);
+    else if (/^-?\d+$/.test(raw.trim())) value = Number(raw.trim());
+    else return { error: effortError(cfg) };
+  } else {
+    return { error: effortError(cfg) };
+  }
+  if (!cfg.effortValues.includes(value)) return { error: effortError(cfg) };
+  const entry = scale.byNumber.get(value) || { label: String(value) };
+  const out = { value, label: entry.label };
+  if (entry.emoji) out.emoji = entry.emoji;
+  if (entry.image) out.image = entry.image;
+  return out;
+}
+
+function effortError(cfg) {
+  const nums = cfg.effortValues.join(", ");
+  if (cfg.effortScale.isIdentity) return `effort must be one of ${nums}`;
+  const labels = [...cfg.effortScale.byNumber.values()].map((e) => e.label).join(", ");
+  return `effort must be a value (${nums}) or a label (${labels})`;
+}
+
+// The README effort cell: `[emoji ]label · N` under a custom scale, bare `N`
+// under identity (SPEC §6.3). Reads the resolved fields attached in readBacklog.
+function effortCell(it, cfg) {
+  if (cfg.effortScale.isIdentity || !it._effortLabel) return String(it.effort ?? "");
+  const emoji = it._effortEmoji ? `${it._effortEmoji} ` : "";
+  return `${emoji}${it._effortLabel} · ${it.effort}`;
 }
 
 // ----------------------------------------------------------- front-matter
@@ -158,9 +268,20 @@ export function readBacklog(repoRoot, cfg) {
   // required depends_on with referential checks); their historical enum values
   // (milestone/priority/effort) are NOT re-validated against the current config
   // (SPEC.md §5.1, §8.3).
-  const effortSet = new Set(cfg.effortValues);
   const idRe = new RegExp(`^${cfg.idPrefix}\\d{${cfg.idWidth}}$`);
   const isoDate = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+  // Resolve `effort` (number or label alias) and attach the display fields used
+  // by rendering. Active items surface a resolution error; closed items resolve
+  // best-effort (historical values are not re-validated — SPEC §5.1, §8.3).
+  const attachEffort = (it, onError) => {
+    const r = resolveEffort(cfg, it.effort);
+    if (r.error) { if (onError) onError(r.error); return; }
+    it.effort = r.value;
+    it._effortLabel = r.label;
+    if (r.emoji) it._effortEmoji = r.emoji;
+    if (r.image) it._effortImage = r.image;
+  };
 
   const checkCommon = (it, expected, err) => {
     const fileId = it._file.replace(/\.md$/, "");
@@ -178,17 +299,19 @@ export function readBacklog(repoRoot, cfg) {
     checkCommon(it, "active", err);
     if (!it.summary) err("missing `summary`");
     if (!cfg.priorities.includes(it.priority)) err(`priority must be one of ${cfg.priorities.join(", ")}`);
-    if (!effortSet.has(it.effort)) err(`effort must be one of ${cfg.effortValues.join(", ")}`);
+    attachEffort(it, err);
     if (!cfg.milestones.includes(it.milestone)) err(`milestone must be one of ${cfg.milestones.join(", ")}`);
   }
   for (const it of completed) {
     const err = (m) => errors.push(`completed/${it._file}: ${m}`);
     checkCommon(it, "completed", err);
+    attachEffort(it, null);
     if (!isoDate(it.completed_on)) err("`completed_on` must be an ISO date (YYYY-MM-DD)");
   }
   for (const it of removed) {
     const err = (m) => errors.push(`removed/${it._file}: ${m}`);
     checkCommon(it, "removed", err);
+    attachEffort(it, null);
     if (!isoDate(it.removed_on)) err("`removed_on` must be an ISO date (YYYY-MM-DD)");
     if (!it.removed_reason) err("missing `removed_reason`");
   }
@@ -219,7 +342,7 @@ function activeTable(items, cfg) {
   const rank = Object.fromEntries(cfg.priorities.map((p, i) => [p, i]));
   const rows = items.slice()
     .sort((a, b) => (rank[a.priority] - rank[b.priority]) || a.id.localeCompare(b.id))
-    .map((it) => `| [${it.id}](active/${it._file}) | ${cell(it.title)} | ${it.priority} | ${it.effort} |`);
+    .map((it) => `| [${it.id}](active/${it._file}) | ${cell(it.title)} | ${it.priority} | ${cell(effortCell(it, cfg))} |`);
   return ["| ID | Title | Priority | Effort |", "| --- | --- | --- | --- |", ...rows].join("\n");
 }
 
@@ -239,6 +362,17 @@ function removedTable(items) {
   return ["| ID | Title | Summary | Removed | Reason |", "| --- | --- | --- | --- | --- |", ...rows].join("\n");
 }
 
+// Resolved effort skin for backlog.json (SPEC §8.2): label + optional
+// emoji/image, emitted only under a custom scale. Identity (array-form) repos
+// emit no extra fields, so their backlog.json is unchanged.
+function effortFields(a, cfg) {
+  if (cfg.effortScale.isIdentity || !a._effortLabel) return {};
+  const f = { effortLabel: a._effortLabel };
+  if (a._effortEmoji) f.effortEmoji = a._effortEmoji;
+  if (a._effortImage) f.effortImage = a._effortImage;
+  return f;
+}
+
 export function buildBacklogJson(cfg, data) {
   const backlog = {
     prefix: cfg.idPrefix,
@@ -246,9 +380,9 @@ export function buildBacklogJson(cfg, data) {
     nextId: nextId(data.ids, cfg),
     counts: { active: data.active.length, completed: data.completed.length, removed: data.removed.length },
     tasks: [
-      ...data.active.map((a) => ({ id: a.id, title: a.title, status: "active", milestone: a.milestone, priority: a.priority, effort: a.effort, depends_on: a.depends_on ?? [], summary: a.summary })),
-      ...data.completed.map((a) => ({ id: a.id, title: a.title, status: "completed", milestone: a.milestone ?? null, priority: a.priority ?? null, effort: a.effort ?? null, depends_on: a.depends_on ?? [], summary: a.summary ?? null, completed_on: a.completed_on ?? null })),
-      ...data.removed.map((a) => ({ id: a.id, title: a.title, status: "removed", milestone: a.milestone ?? null, priority: a.priority ?? null, effort: a.effort ?? null, depends_on: a.depends_on ?? [], summary: a.summary ?? null, removed_on: a.removed_on ?? null, removed_reason: a.removed_reason ?? null })),
+      ...data.active.map((a) => ({ id: a.id, title: a.title, status: "active", milestone: a.milestone, priority: a.priority, effort: a.effort, ...effortFields(a, cfg), depends_on: a.depends_on ?? [], summary: a.summary })),
+      ...data.completed.map((a) => ({ id: a.id, title: a.title, status: "completed", milestone: a.milestone ?? null, priority: a.priority ?? null, effort: a.effort ?? null, ...effortFields(a, cfg), depends_on: a.depends_on ?? [], summary: a.summary ?? null, completed_on: a.completed_on ?? null })),
+      ...data.removed.map((a) => ({ id: a.id, title: a.title, status: "removed", milestone: a.milestone ?? null, priority: a.priority ?? null, effort: a.effort ?? null, ...effortFields(a, cfg), depends_on: a.depends_on ?? [], summary: a.summary ?? null, removed_on: a.removed_on ?? null, removed_reason: a.removed_reason ?? null })),
     ],
   };
   return JSON.stringify(backlog, null, 2) + "\n";
