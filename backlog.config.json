@@ -4,5 +4,19 @@
   "idWidth": 4,
   "milestones": ["Alpha", "Beta", "v1", "Future"],
   "priorities": ["High", "Medium", "Low"],
-  "effort": [1, 2, 3, 5, 8, 13, 21]
+  "effort": {
+    "values": [1, 2, 3, 5, 8, 13, 21],
+    "scale": "fish",
+    "scales": {
+      "fish": {
+        "1":  { "label": "Minnow",    "emoji": "🐟" },
+        "2":  { "label": "Goldfish",  "emoji": "🐠" },
+        "3":  { "label": "Trout",     "emoji": "🐡" },
+        "5":  { "label": "Tuna",      "image": "assets/effort/tuna.svg" },
+        "8":  { "label": "Swordfish" },
+        "13": { "label": "Shark",     "emoji": "🦈" },
+        "21": { "label": "Whale",     "emoji": "🐋" }
+      }
+    }
+  }
 }

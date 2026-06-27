@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 32" role="img" aria-label="Tuna">
+  <title>Tuna</title>
+  <g fill="#4a7ba6" stroke="#2f5470" stroke-width="1.5" stroke-linejoin="round">
+    <path d="M6 16 C16 4, 40 4, 52 16 C40 28, 16 28, 6 16 Z"/>
+    <path d="M52 16 L62 8 L59 16 L62 24 Z"/>
+  </g>
+  <circle cx="18" cy="14" r="2" fill="#16314a"/>
+</svg>
