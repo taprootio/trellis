@@ -59,12 +59,7 @@ export function loadConfig(repoRoot) {
     errors.push("config: `effort` values must all be numbers");
   }
   cfg.effortValues = Array.isArray(effortValues) ? effortValues : [];
-  // Resolve the active effort scale (SPEC §6.1). Only attempt the skin when the
-  // canonical values are well-formed; otherwise fall back to identity so later
-  // stages have a usable (if empty) scale and the real error above is what shows.
-  cfg.effortScale = cfg.effortValues.length && cfg.effortValues.every((v) => typeof v === "number" && Number.isFinite(v))
-    ? buildEffortScale(cfg, errors)
-    : identityScale(cfg.effortValues);
+  attachEffortScale(cfg, errors);
 
   if (cfg.specVersion == null) {
     warnings.push(`config has no \`specVersion\`; assuming current spec ${SPEC_VERSION}`);
@@ -79,6 +74,21 @@ export function loadConfig(repoRoot) {
 // Shape: { isIdentity, name, byNumber: Map<number,{label,emoji?,image?}>,
 // byLabel: Map<lowercased label, number> }. The identity ("fibonacci") scale
 // labels each value with its own number and accepts no aliases.
+// Resolve and attach the active effort scale to a config (SPEC §6.1). Exported
+// so callers that build a config WITHOUT loadConfig — e.g. trellis init's
+// synthetic effectiveConfig — still get a usable scale; otherwise resolveEffort
+// and the rendering helpers dereference an undefined `effortScale`. Only attempts
+// the skin when the canonical values are well-formed; otherwise falls back to
+// identity so later stages have a usable (if empty) scale and the real config
+// error is what surfaces.
+export function attachEffortScale(cfg, errors = []) {
+  const values = Array.isArray(cfg.effortValues) ? cfg.effortValues : [];
+  cfg.effortScale = values.length && values.every((v) => typeof v === "number" && Number.isFinite(v))
+    ? buildEffortScale(cfg, errors)
+    : identityScale(values);
+  return cfg.effortScale;
+}
+
 function identityScale(values) {
   return {
     isIdentity: true,

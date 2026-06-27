@@ -13,7 +13,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { SPEC_VERSION, MARKERS, loadConfig, readBacklog, generateArtifacts } from "./backlog.mjs";
+import { SPEC_VERSION, MARKERS, loadConfig, readBacklog, generateArtifacts, attachEffortScale } from "./backlog.mjs";
 
 // Default per-repo vocabulary, overridable via options (CLI flags / prompts).
 export const DEFAULTS = {
@@ -105,7 +105,7 @@ function suppliedConflicts(opts, effective) {
 // The in-memory config that will govern the target after init (loadConfig shape,
 // including effortValues), built from the resolved options.
 function effectiveConfig(o) {
-  return {
+  const cfg = {
     specVersion: SPEC_VERSION,
     idPrefix: o.prefix,
     idWidth: o.idWidth,
@@ -114,6 +114,8 @@ function effectiveConfig(o) {
     effort: o.effort,
     effortValues: o.effort,
   };
+  attachEffortScale(cfg); // match loadConfig's shape so readBacklog can resolve effort
+  return cfg;
 }
 
 // Refuse to scaffold over a target whose *existing* backlog or config is already
