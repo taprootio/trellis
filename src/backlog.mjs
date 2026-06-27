@@ -83,6 +83,12 @@ export function loadConfig(repoRoot) {
       errors.push("config: `tasksDir` must be a non-empty string when present");
     } else if (isAbsolute(cfg.tasksDir) || cfg.tasksDir.split(/[/\\]/).includes("..")) {
       errors.push("config: `tasksDir` must be a repo-relative path within the repo (no absolute path or `..` segments)");
+    } else {
+      // Canonicalize the stored value so consumers that build rel paths or
+      // messages by string interpolation (init skeletons, the AGENTS block, the
+      // CLI summary) don't inherit a doubled separator from a trailing slash.
+      // join() already tolerates it, but the echoed strings should be clean.
+      cfg.tasksDir = cfg.tasksDir.replace(/[/\\]+$/, "");
     }
   }
 

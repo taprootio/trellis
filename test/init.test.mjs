@@ -405,3 +405,22 @@ test("a kept config's custom tasksDir relocates the scaffolded tree, not the def
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a tasksDir with a trailing slash is canonicalized — no doubled separators in paths or messages", () => {
+  const root = tempRepo();
+  try {
+    mkdirSync(join(root, "trellis"), { recursive: true });
+    writeFileSync(
+      join(root, "trellis/backlog.config.json"),
+      JSON.stringify({ specVersion: "2.0", idPrefix: "DEMO", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1, 2, 3], tasksDir: "planning/" }, null, 2) + "\n",
+    );
+    const { summary } = applyScaffold(root, {}, {}, sourceRoot);
+    assert.deepEqual(summary.errors, []);
+    assert.equal(summary.root, "planning", "the effective root is canonicalized");
+    assert.ok(summary.generated.every((p) => !p.includes("//")), "no doubled separators in reported artifact paths");
+    assert.doesNotMatch(readFileSync(join(root, "AGENTS.md"), "utf8"), /planning\/\//, "no doubled separator in the AGENTS block");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

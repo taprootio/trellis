@@ -260,6 +260,17 @@ test("a custom tasksDir relocates the task tree while the config home stays fixe
   }
 });
 
+test("loadConfig canonicalizes a tasksDir trailing slash", () => {
+  const root = makeRepo({ ...ARRAY_CFG, tasksDir: "docs/backlog/" }, {});
+  try {
+    const { cfg, errors } = loadConfig(root);
+    assert.deepEqual(errors, []);
+    assert.equal(cfg.tasksDir, "docs/backlog", "the trailing slash is stripped at the source");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a tasksDir that escapes the repo (absolute or `..`) is a config error", () => {
   for (const bad of ["/etc/trellis", "../outside", "a/../../b"]) {
     const root = makeRepo({ ...ARRAY_CFG, tasksDir: bad }, {});
