@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0026",
   "counts": {
-    "active": 12,
-    "completed": 13,
+    "active": 11,
+    "completed": 14,
     "removed": 0
   },
   "tasks": [
@@ -160,22 +160,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
-    },
-    {
-      "id": "TRL0023",
-      "title": "Team roster and task ownership (owner + collaborators)",
-      "status": "active",
-      "milestone": "Beta",
-      "priority": "Medium",
-      "effort": 8,
-      "effortLabel": "Swordfish",
-      "depends_on": [
-        "TRL0021",
-        "TRL0022"
-      ],
-      "owner": "jereme",
-      "collaborators": [],
-      "summary": "Add a configured team roster (active/historical members) plus optional owner and collaborators task fields, validated like the existing enums and importable via the mapping, so the backlog records who is responsible for each item."
     },
     {
       "id": "TRL0024",
@@ -420,6 +404,23 @@
       "owner": null,
       "collaborators": [],
       "summary": "Expose the importer as an MCP import tool and ship reusable source-mapping profiles (including Taproot's ai-backlog) so disparate repos can describe and import their own backlog schema, with an init --import on-ramp.",
+      "completed_on": "2026-06-27"
+    },
+    {
+      "id": "TRL0023",
+      "title": "Team roster and task ownership (owner + collaborators)",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 8,
+      "effortLabel": "Swordfish",
+      "depends_on": [
+        "TRL0021",
+        "TRL0022"
+      ],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Add a configured team roster (active/historical members) plus optional owner and collaborators task fields, validated like the existing enums and importable via the mapping, so the backlog records who is responsible for each item.",
       "completed_on": "2026-06-27"
     }
   ]
