@@ -12,29 +12,28 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 | ID | Title | Priority | Effort |
 | --- | --- | --- | --- |
-| [TRL0014](active/TRL0014.md) | Bake branch protection + required backlog check into the recipe | High | 3 |
-| [TRL0020](active/TRL0020.md) | Relocate the backlog root from docs/tasks/ to trellis/ | High | 5 |
-| [TRL0021](active/TRL0021.md) | Build the backlog import engine (disparate schemas → Trellis) | High | 8 |
-| [TRL0009](active/TRL0009.md) | Dogfood — onboard an existing repo end-to-end | Medium | 3 |
-| [TRL0022](active/TRL0022.md) | Expose import over MCP and ship reusable source-mapping profiles | Medium | 3 |
-| [TRL0015](active/TRL0015.md) | Optional custom effort scales (labels, emoji, images) | Low | 5 |
+| [TRL0014](active/TRL0014.md) | Bake branch protection + required backlog check into the recipe | High | 🐡 Trout · 3 |
+| [TRL0020](active/TRL0020.md) | Relocate the backlog root from docs/tasks/ to trellis/ | High | Tuna · 5 |
+| [TRL0021](active/TRL0021.md) | Build the backlog import engine (disparate schemas → Trellis) | High | Swordfish · 8 |
+| [TRL0009](active/TRL0009.md) | Dogfood — onboard an existing repo end-to-end | Medium | 🐡 Trout · 3 |
+| [TRL0022](active/TRL0022.md) | Expose import over MCP and ship reusable source-mapping profiles | Medium | 🐡 Trout · 3 |
 
 ### v1
 
 | ID | Title | Priority | Effort |
 | --- | --- | --- | --- |
-| [TRL0010](active/TRL0010.md) | Packaging, versioned spec, and docs | High | 5 |
-| [TRL0011](active/TRL0011.md) | Test suite and CI for CLI and MCP server | High | 5 |
-| [TRL0019](active/TRL0019.md) | MCP server HTTP transport (port/host) + per-repo resource addressing | Medium | 5 |
+| [TRL0010](active/TRL0010.md) | Packaging, versioned spec, and docs | High | Tuna · 5 |
+| [TRL0011](active/TRL0011.md) | Test suite and CI for CLI and MCP server | High | Tuna · 5 |
+| [TRL0019](active/TRL0019.md) | MCP server HTTP transport (port/host) + per-repo resource addressing | Medium | Tuna · 5 |
 
 ### Future
 
 | ID | Title | Priority | Effort |
 | --- | --- | --- | --- |
-| [TRL0005](active/TRL0005.md) | Build the local viewer (`trellis serve`) | Medium | 5 |
-| [TRL0008](active/TRL0008.md) | Viewer — dependency graph and filters | Medium | 5 |
-| [TRL0012](active/TRL0012.md) | Static-site deploy of the viewer | Low | 8 |
-| [TRL0013](active/TRL0013.md) | Access control / SSO for the deployed viewer | Low | 5 |
+| [TRL0005](active/TRL0005.md) | Build the local viewer (`trellis serve`) | Medium | Tuna · 5 |
+| [TRL0008](active/TRL0008.md) | Viewer — dependency graph and filters | Medium | Tuna · 5 |
+| [TRL0012](active/TRL0012.md) | Static-site deploy of the viewer | Low | Swordfish · 8 |
+| [TRL0013](active/TRL0013.md) | Access control / SSO for the deployed viewer | Low | Tuna · 5 |
 
 ## Next task ID
 

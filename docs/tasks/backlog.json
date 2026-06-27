@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0023",
   "counts": {
-    "active": 13,
-    "completed": 9,
+    "active": 12,
+    "completed": 10,
     "removed": 0
   },
   "tasks": [
@@ -20,6 +20,8 @@
       "milestone": "Future",
       "priority": "Medium",
       "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
       "depends_on": [
         "TRL0001"
       ],
@@ -32,6 +34,8 @@
       "milestone": "Future",
       "priority": "Medium",
       "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
       "depends_on": [
         "TRL0005"
       ],
@@ -44,6 +48,8 @@
       "milestone": "Beta",
       "priority": "Medium",
       "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
       "depends_on": [
         "TRL0003",
         "TRL0020",
@@ -58,6 +64,8 @@
       "milestone": "v1",
       "priority": "High",
       "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
       "depends_on": [
         "TRL0003",
         "TRL0006"
@@ -71,6 +79,8 @@
       "milestone": "v1",
       "priority": "High",
       "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
       "depends_on": [
         "TRL0002",
         "TRL0004"
@@ -84,6 +94,7 @@
       "milestone": "Future",
       "priority": "Low",
       "effort": 8,
+      "effortLabel": "Swordfish",
       "depends_on": [
         "TRL0008"
       ],
@@ -96,6 +107,8 @@
       "milestone": "Future",
       "priority": "Low",
       "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
       "depends_on": [
         "TRL0012"
       ],
@@ -108,24 +121,13 @@
       "milestone": "Beta",
       "priority": "High",
       "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
       "depends_on": [
         "TRL0001",
         "TRL0003"
       ],
       "summary": "Make a protected main with a required backlog-check gate part of standard Trellis onboarding — defined in the spec, set up by init, and documented for consumers (including non-GitHub forges)."
-    },
-    {
-      "id": "TRL0015",
-      "title": "Optional custom effort scales (labels, emoji, images)",
-      "status": "active",
-      "milestone": "Beta",
-      "priority": "Low",
-      "effort": 5,
-      "depends_on": [
-        "TRL0001",
-        "TRL0002"
-      ],
-      "summary": "Let teams skin the Fibonacci effort scale with custom labels (e.g. fish sizes), emoji, and optional images — mapped 1:1 to the canonical numbers, which stay the stored contract."
     },
     {
       "id": "TRL0019",
@@ -134,6 +136,8 @@
       "milestone": "v1",
       "priority": "Medium",
       "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
       "depends_on": [
         "TRL0006"
       ],
@@ -146,6 +150,8 @@
       "milestone": "Beta",
       "priority": "High",
       "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
       "depends_on": [
         "TRL0001",
         "TRL0003"
@@ -159,6 +165,7 @@
       "milestone": "Beta",
       "priority": "High",
       "effort": 8,
+      "effortLabel": "Swordfish",
       "depends_on": [
         "TRL0003",
         "TRL0020"
@@ -172,6 +179,8 @@
       "milestone": "Beta",
       "priority": "Medium",
       "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
       "depends_on": [
         "TRL0004",
         "TRL0021"
@@ -185,6 +194,8 @@
       "milestone": "Alpha",
       "priority": "High",
       "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
       "depends_on": [],
       "summary": "Write the canonical, repo-agnostic spec for the file-based backlog — layout, front-matter schema, vocab, and generator contract.",
       "completed_on": "2026-06-25"
@@ -196,6 +207,8 @@
       "milestone": "Alpha",
       "priority": "High",
       "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
       "depends_on": [
         "TRL0001"
       ],
@@ -209,6 +222,8 @@
       "milestone": "Alpha",
       "priority": "High",
       "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
       "depends_on": [
         "TRL0002"
       ],
@@ -222,6 +237,7 @@
       "milestone": "Alpha",
       "priority": "High",
       "effort": 8,
+      "effortLabel": "Swordfish",
       "depends_on": [
         "TRL0002"
       ],
@@ -235,6 +251,8 @@
       "milestone": "Beta",
       "priority": "High",
       "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
       "depends_on": [
         "TRL0004"
       ],
@@ -248,10 +266,28 @@
       "milestone": "Beta",
       "priority": "High",
       "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
       "depends_on": [
         "TRL0001"
       ],
       "summary": "Cleanly split the portable orchestration shape from repo-specific tech rules so the same loop works in any repo by reading a named conventions contract from its AGENTS.md.",
+      "completed_on": "2026-06-26"
+    },
+    {
+      "id": "TRL0015",
+      "title": "Optional custom effort scales (labels, emoji, images)",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "Low",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [
+        "TRL0001",
+        "TRL0002"
+      ],
+      "summary": "Let teams skin the Fibonacci effort scale with custom labels (e.g. fish sizes), emoji, and optional images — mapped 1:1 to the canonical numbers, which stay the stored contract.",
       "completed_on": "2026-06-26"
     },
     {
@@ -261,6 +297,8 @@
       "milestone": "Beta",
       "priority": "Medium",
       "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
       "depends_on": [],
       "summary": "Enforce the shared PR title standard in CI with a config-driven, prefix-agnostic title lint; the template, draft shortcut, and MCP prompt already shipped.",
       "completed_on": "2026-06-26"
@@ -272,6 +310,8 @@
       "milestone": "Beta",
       "priority": "Medium",
       "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
       "depends_on": [],
       "summary": "Add a repository code-review standard — a review shortcut that grounds in the repo's conventions and emits the canonical JSON findings format (file/line/severity/suggestion), scaffolded by init and graduating to an MCP prompt.",
       "completed_on": "2026-06-25"
@@ -283,6 +323,8 @@
       "milestone": "Beta",
       "priority": "High",
       "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
       "depends_on": [
         "TRL0017"
       ],

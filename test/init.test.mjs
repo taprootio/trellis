@@ -147,6 +147,25 @@ test("rejects an invalid resolved config and leaves the target untouched", () =>
   }
 });
 
+test("--force over a repo with an existing active item re-scaffolds without crashing", () => {
+  // preflight validates existing items against the synthetic effectiveConfig
+  // (not loadConfig) under --force. That config must carry an effortScale, or
+  // readBacklog → resolveEffort dereferences undefined and throws (regression).
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    writeFileSync(
+      join(root, "docs/tasks/active/DEMO0001.md"),
+      "---\nid: DEMO0001\ntitle: T\nstatus: active\ndepends_on: []\nsummary: S.\nmilestone: Alpha\npriority: High\neffort: 3\n---\n\nBody.\n",
+    );
+    const { summary } = applyScaffold(root, { prefix: "DEMO", force: true }, {}, sourceRoot);
+    assert.deepEqual(summary.errors, [], "force re-scaffold over an active item succeeds");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a provided-but-empty list flag is rejected, not masked by the default", () => {
   // `--effort abc` parses to []; that must reach validateOptions, not silently
   // fall back to the default effort scale.
