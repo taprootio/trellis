@@ -53,7 +53,8 @@ node scripts/trellis-mcp.mjs --repo <path>   # serves over stdio; defaults to cw
 
 Tools: `list_tasks`, `get_task`, `next_id`, `create_task`, `move_task`,
 `validate`, `regenerate`, `import` — each reuses the same core as the CLI, so
-results carry the `backlog.json` shape. Mutating tools regenerate and validate
-before returning, rolling back on failure; `import` is dry-run unless `apply:true`
-(see [`docs/import.md`](docs/import.md)). The process loops (work-a-task, review)
-ship separately as MCP prompts in TRL0006.
+results carry the `backlog.json` shape (except `import`, which returns an import
+summary — counts, id map, created/generated paths). Mutating tools regenerate and
+validate before returning, rolling back on failure; `import` is dry-run unless
+`apply:true` (see [`docs/import.md`](docs/import.md)). The process loops
+(work-a-task, review) ship separately as MCP prompts in TRL0006.

@@ -22,7 +22,8 @@ npx trellis init --import planning/old-backlog --profile yaml-frontmatter
 This scaffolds the Trellis layout (config, `trellis/` tree, generated indexes, CI
 check, AGENTS block, playbooks), then imports the backlog at the given path. A
 relative `<path>` resolves against the repo being onboarded. Add `--dry-run` to
-preview both steps without writing anything.
+preview the scaffold without writing; to preview the import plan itself (counts, id
+map, warnings), run `trellis import --dry-run` once the repo is initialized.
 
 Use `--mapping <file.json>` instead of `--profile <name>` to supply your own
 mapping. Provide exactly one of the two.

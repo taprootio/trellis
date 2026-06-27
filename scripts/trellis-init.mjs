@@ -37,8 +37,8 @@ Flags:
   -h, --help            show this help
 
 With --import, provide exactly one of --profile or --mapping; a relative <path>
-resolves against the target repo. --dry-run previews the scaffold and what would be
-imported without writing anything.
+resolves against the target repo. --dry-run previews the scaffold without writing;
+preview the import plan itself with "trellis import --dry-run" on the initialized repo.
 `;
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -183,10 +183,13 @@ if (opts.import) {
   if (error) { console.error(`error: ${error}`); process.exit(2); }
   const importSource = isAbsolute(opts.import) ? opts.import : resolve(targetRoot, opts.import);
   if (dryRun) {
-    // A dry run scaffolded nothing, so the importer has no initialized target to
-    // plan against — report intent instead of a misleading "not initialized" error.
+    // A dry run scaffolds nothing, so there is no initialized target to plan the
+    // import against — report intent and point at `trellis import --dry-run` (which
+    // previews the full plan against an initialized repo) rather than computing a
+    // misleading plan here against a non-existent backlog.
     const via = opts.profile ? `profile ${opts.profile}` : `mapping ${opts.mapping}`;
-    console.log(`Would then import from ${importSource} using ${via} (re-run without --dry-run to scaffold and import).`);
+    console.log(`Would then import from ${importSource} using ${via}.`);
+    console.log("Re-run without --dry-run to scaffold and import, or run `trellis import --dry-run` on the initialized repo to preview the import plan.");
     process.exit(0);
   }
   const { summary: imp } = applyImport(targetRoot, importSource, mapping, { dryRun: false });
