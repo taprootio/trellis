@@ -66,6 +66,12 @@ test("accepts a title exactly at the length limit", () => {
   assert.equal(lintPrTitle(exact, cfg).ok, true);
 });
 
+test("treats a regex-special prefix literally", () => {
+  const odd = { idPrefix: "T+", idWidth: 3 };
+  assert.equal(lintPrTitle("T+001: add the lint", odd).ok, true);
+  assert.equal(lintPrTitle("TT001: add the lint", odd).ok, false);
+});
+
 test("honors a different repo's prefix and width", () => {
   const demo = { idPrefix: "DEMO", idWidth: 3 };
   assert.equal(lintPrTitle("DEMO007: ship it", demo).ok, true);

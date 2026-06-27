@@ -10,6 +10,10 @@
 
 export const MAX_TITLE_LENGTH = 72;
 
+// Escape regex metacharacters so a configured idPrefix is matched literally — a
+// prefix like `T+` must mean two characters, not "one or more T".
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // Returns { ok, errors[] }. cfg is the loaded backlog.config.json (needs
 // idPrefix + idWidth). Collects every violation so a malformed title reports all
 // of its problems at once.
@@ -30,7 +34,7 @@ export function lintPrTitle(title, cfg) {
 
   // `^<prefix><width digits>: ` then a non-space, so an exactly-formed id, the
   // colon-space separator, and a non-empty summary are all required.
-  const idRe = new RegExp(`^${cfg.idPrefix}\\d{${cfg.idWidth}}: \\S`);
+  const idRe = new RegExp(`^${escapeRe(cfg.idPrefix)}\\d{${cfg.idWidth}}: \\S`);
   if (!idRe.test(title)) {
     const example = `${cfg.idPrefix}${"0".repeat(cfg.idWidth)}: add the widget`;
     errors.push(
