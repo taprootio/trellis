@@ -399,6 +399,7 @@ test("a kept config's custom tasksDir relocates the scaffolded tree, not the def
     assert.ok(existsSync(join(root, "trellis/backlog.config.json")), "the config home stays fixed at trellis/");
     const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
     assert.match(agents, /`planning\/\{active/, "the AGENTS block reflects the configured root");
+    assert.match(agents, /`planning\/backlog\.json`/, "the AGENTS generated-artifacts bullet names the root-relative paths");
     assertCheckClean(root);
   } finally {
     rmSync(root, { recursive: true, force: true });

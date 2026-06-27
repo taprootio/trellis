@@ -250,7 +250,8 @@ This repo uses [Trellis](https://github.com/taprootio/trellis) for a file-based
 backlog. Work items live in \`${root}/{active,completed/tasks,removed}/\` as
 Markdown files with YAML front-matter; ids are \`${o.prefix}\` + ${o.idWidth} digits.
 
-- \`${root}/README.md\`, \`backlog.json\`, and the completed/removed indexes are
+- \`${root}/README.md\`, \`${root}/backlog.json\`, and the
+  \`${root}/completed/index.md\` / \`${root}/removed/index.md\` indexes are
   **generated** — never hand-edit between the \`BEGIN/END GENERATED\` markers.
 - Per-repo vocabulary (id prefix, milestones, priorities, effort) lives in
   \`trellis/backlog.config.json\` (the backlog root is \`trellis/\` by default;
@@ -367,6 +368,7 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false } = {}, so
   // (no need to resolve again here).
   const { options, resolved, actions, warnings, root } = planScaffold(targetRoot, opts, sourceRoot);
   const GENERATED = generatedFiles(root); // artifact rel-paths under the effective backlog root
+  summary.root = root; // surfaced so the CLI can point at the actual scaffold root
 
   // Reject malformed *supplied* flags before any write — even when a kept config
   // means they won't be used to render, a bad flag is still a usage error.
