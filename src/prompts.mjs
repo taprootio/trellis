@@ -35,7 +35,7 @@ export const RESOURCES = [
   {
     uri: "trellis://config", name: "config", title: "Backlog config",
     description: "backlog.config.json — the per-repo vocabulary (id prefix, milestones, priorities, effort).",
-    rel: "backlog.config.json", mimeType: "application/json",
+    rel: "trellis/backlog.config.json", mimeType: "application/json",
   },
   {
     uri: "trellis://playbook/conventions", name: "playbook-conventions", title: "Conventions contract",

@@ -53,7 +53,7 @@ test("create_task writes a valid active item and stays --check-green", () => {
     assert.equal(created.id, "DEMO0001");
     assert.equal(created.status, "active");
     assert.equal(created.effort, 3);
-    assert.ok(existsSync(join(root, "docs/tasks/active/DEMO0001.md")), "the item file exists");
+    assert.ok(existsSync(join(root, "trellis/active/DEMO0001.md")), "the item file exists");
     assert.equal(nextIdOp(root).nextId, "DEMO0002", "next id advances");
     assert.ok(validateOp(root).ok, "the backlog validates");
     assertCheckClean(root);
@@ -67,7 +67,7 @@ test("create_task writes a valid active item and stays --check-green", () => {
 // config swap leaves the backlog --check-green.
 function fishRepo() {
   const root = freshRepo();
-  const cfgPath = join(root, "backlog.config.json");
+  const cfgPath = join(root, "trellis", "backlog.config.json");
   const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
   cfg.effort = {
     values: [1, 2, 3, 5, 8, 13, 21],
@@ -87,7 +87,7 @@ test("create_task resolves a scale label to its canonical number", () => {
     const { created } = createTask(root, { ...VALID, effort: "trout" }); // case-insensitive
     assert.equal(created.effort, 3);
     assert.equal(created.effortLabel, "Trout");
-    assert.match(readFileSync(join(root, "docs/tasks/active/DEMO0001.md"), "utf8"), /^effort: 3$/m);
+    assert.match(readFileSync(join(root, "trellis/active/DEMO0001.md"), "utf8"), /^effort: 3$/m);
     assertCheckClean(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -119,7 +119,7 @@ test("get_task returns the entry plus the raw Markdown body", () => {
     createTask(root, VALID);
     const t = getTask(root, { id: "DEMO0001" });
     assert.equal(t.title, "First task");
-    assert.equal(t.file, "docs/tasks/active/DEMO0001.md");
+    assert.equal(t.file, "trellis/active/DEMO0001.md");
     assert.match(t.body, /## Scope/);
     assert.match(t.body, /## Risks/);
   } finally {
@@ -150,7 +150,7 @@ test("create_task rolls back when the result would not validate", () => {
       () => createTask(root, { ...VALID, depends_on: ["DEMO9999"] }),
       (e) => e instanceof TrellisError && /DEMO9999/.test(e.message),
     );
-    assert.equal(existsSync(join(root, "docs/tasks/active/DEMO0001.md")), false, "no file is left behind");
+    assert.equal(existsSync(join(root, "trellis/active/DEMO0001.md")), false, "no file is left behind");
     assert.ok(validateOp(root).ok, "the backlog is still valid");
     assert.equal(nextIdOp(root).nextId, "DEMO0001", "next id did not advance");
     assertCheckClean(root);
@@ -168,8 +168,8 @@ test("move_task completes an item: moves the file, sets completed_on, updates co
     assert.equal(moved.completed_on, "2026-06-26");
     assert.equal(counts.active, 0);
     assert.equal(counts.completed, 1);
-    assert.equal(existsSync(join(root, "docs/tasks/active/DEMO0001.md")), false, "left active/");
-    assert.ok(existsSync(join(root, "docs/tasks/completed/tasks/DEMO0001.md")), "now in completed/tasks/");
+    assert.equal(existsSync(join(root, "trellis/active/DEMO0001.md")), false, "left active/");
+    assert.ok(existsSync(join(root, "trellis/completed/tasks/DEMO0001.md")), "now in completed/tasks/");
     assertCheckClean(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -181,7 +181,7 @@ test("move_task to removed without a reason is rejected and changes nothing", ()
   try {
     createTask(root, VALID);
     assert.throws(() => moveTask(root, { id: "DEMO0001", to: "removed", date: "2026-06-26" }), /reason/);
-    assert.ok(existsSync(join(root, "docs/tasks/active/DEMO0001.md")), "the item stays active");
+    assert.ok(existsSync(join(root, "trellis/active/DEMO0001.md")), "the item stays active");
     assertCheckClean(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -205,7 +205,7 @@ test("move_task prepends the closeout note after the H1, before the body", () =>
   try {
     createTask(root, { ...VALID, body: "# DEMO0001 — First task\n\n## Scope\n\n- ship it\n" });
     moveTask(root, { id: "DEMO0001", to: "completed", date: "2026-06-26", note: "Shipped the first thing." });
-    const text = readFileSync(join(root, "docs/tasks/completed/tasks/DEMO0001.md"), "utf8");
+    const text = readFileSync(join(root, "trellis/completed/tasks/DEMO0001.md"), "utf8");
     assert.match(text, /## Completed\n\nShipped the first thing\./);
     assert.ok(text.indexOf("# DEMO0001") < text.indexOf("## Completed"), "note follows the H1");
     assert.ok(text.indexOf("## Completed") < text.indexOf("## Scope"), "note precedes the original body");
@@ -219,7 +219,7 @@ test("validate reports errors on a corrupted item", () => {
   try {
     createTask(root, VALID);
     assert.ok(validateOp(root).ok, "valid before tampering");
-    writeFileSync(join(root, "docs/tasks/active/DEMO0001.md"), "---\nid: DEMO0001\ntitle: x\nstatus: active\n---\n\nbody\n");
+    writeFileSync(join(root, "trellis/active/DEMO0001.md"), "---\nid: DEMO0001\ntitle: x\nstatus: active\n---\n\nbody\n");
     const v = validateOp(root);
     assert.equal(v.ok, false, "missing required fields are caught");
     assert.ok(v.errors.some((e) => /summary|priority|effort|milestone|depends_on/.test(e)));
@@ -233,7 +233,7 @@ test("regenerate rewrites a stale artifact and reports what changed", () => {
   try {
     createTask(root, VALID);
     assert.deepEqual(regenerateOp(root).changed, [], "nothing stale right after create");
-    writeFileSync(join(root, "docs/tasks/backlog.json"), "{}\n"); // corrupt an artifact
+    writeFileSync(join(root, "trellis/backlog.json"), "{}\n"); // corrupt an artifact
     const { changed, counts } = regenerateOp(root);
     assert.ok(changed.some((p) => /backlog\.json$/.test(p)), "the stale artifact is rewritten");
     assert.equal(counts.active, 1);
@@ -251,7 +251,7 @@ test("create_task keeps a numeric-looking title as a string (round-trip)", () =>
     const { created } = createTask(root, { ...VALID, title: "2024" });
     assert.equal(typeof created.title, "string", "title stays a string in the result");
     assert.equal(created.title, "2024");
-    const onDisk = JSON.parse(readFileSync(join(root, "docs/tasks/backlog.json"), "utf8"));
+    const onDisk = JSON.parse(readFileSync(join(root, "trellis/backlog.json"), "utf8"));
     assert.strictEqual(onDisk.tasks[0].title, "2024", "backlog.json carries the string, not 2024");
     assert.equal(getTask(root, { id: "DEMO0001" }).title, "2024");
     assertCheckClean(root);
@@ -285,7 +285,7 @@ test("move_task rejects a path-traversal id and changes nothing", () => {
         `id ${id} should be rejected`,
       );
     }
-    assert.ok(existsSync(join(root, "docs/tasks/active/DEMO0001.md")), "the active task is untouched");
+    assert.ok(existsSync(join(root, "trellis/active/DEMO0001.md")), "the active task is untouched");
     assert.ok(validateOp(root).ok, "the backlog is still valid");
     assertCheckClean(root);
   } finally {
@@ -300,7 +300,7 @@ test("create_task rejects a malformed dependency id and writes nothing", () => {
       () => createTask(root, { ...VALID, depends_on: ["../active/DEMO0001"] }),
       (e) => e instanceof TrellisError && e.code === "invalid_request",
     );
-    assert.equal(existsSync(join(root, "docs/tasks/active/DEMO0001.md")), false, "nothing is written");
+    assert.equal(existsSync(join(root, "trellis/active/DEMO0001.md")), false, "nothing is written");
     assert.equal(nextIdOp(root).nextId, "DEMO0001", "next id did not advance");
   } finally {
     rmSync(root, { recursive: true, force: true });

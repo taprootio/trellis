@@ -32,11 +32,11 @@ test("scaffolds a fresh repo that the core validates clean", () => {
   try {
     const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
     for (const rel of [
-      "backlog.config.json",
-      "docs/tasks/active/.gitkeep",
-      "docs/tasks/completed/tasks/.gitkeep",
-      "docs/tasks/README.md",
-      "docs/tasks/backlog.json",
+      "trellis/backlog.config.json",
+      "trellis/active/.gitkeep",
+      "trellis/completed/tasks/.gitkeep",
+      "trellis/README.md",
+      "trellis/backlog.json",
       ".github/workflows/backlog.yml",
       ".github/pull_request_template.md",
       "docs/playbooks/work-task.md",
@@ -54,10 +54,10 @@ test("respects --prefix in config, next id, and the AGENTS block", () => {
   const root = tempRepo();
   try {
     applyScaffold(root, { prefix: "ACME" }, {}, sourceRoot);
-    const cfg = JSON.parse(readFileSync(join(root, "backlog.config.json"), "utf8"));
+    const cfg = JSON.parse(readFileSync(join(root, "trellis/backlog.config.json"), "utf8"));
     assert.equal(cfg.idPrefix, "ACME");
-    assert.equal(cfg.specVersion, "1.0");
-    const backlog = JSON.parse(readFileSync(join(root, "docs/tasks/backlog.json"), "utf8"));
+    assert.equal(cfg.specVersion, "2.0");
+    const backlog = JSON.parse(readFileSync(join(root, "trellis/backlog.json"), "utf8"));
     assert.equal(backlog.prefix, "ACME");
     assert.equal(backlog.nextId, "ACME0001");
     assert.match(readFileSync(join(root, "AGENTS.md"), "utf8"), /ids are `ACME`/);
@@ -73,7 +73,7 @@ test("is idempotent — a re-run skips every template file and stays clean", () 
     const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
     assert.deepEqual(summary.created, [], "nothing new should be created on re-run");
     assert.deepEqual(summary.appended, [], "nothing should be appended on re-run");
-    assert.ok(summary.skipped.includes("backlog.config.json"));
+    assert.ok(summary.skipped.includes("trellis/backlog.config.json"));
     assert.ok(summary.skipped.includes("AGENTS.md"));
     assertCheckClean(root);
   } finally {
@@ -102,8 +102,8 @@ test("--dry-run reports a plan but writes nothing", () => {
   try {
     const { summary } = applyScaffold(root, { prefix: "DEMO" }, { dryRun: true }, sourceRoot);
     assert.ok(summary.created.length > 0, "dry-run still reports planned files");
-    assert.equal(existsSync(join(root, "backlog.config.json")), false);
-    assert.equal(existsSync(join(root, "docs/tasks/README.md")), false);
+    assert.equal(existsSync(join(root, "trellis/backlog.config.json")), false);
+    assert.equal(existsSync(join(root, "trellis/README.md")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -113,10 +113,10 @@ test("--force overwrites a tampered template but leaves the AGENTS block intact"
   const root = tempRepo();
   try {
     applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
-    writeFileSync(join(root, "backlog.config.json"), "{}\n"); // tamper
+    writeFileSync(join(root, "trellis/backlog.config.json"), "{}\n"); // tamper
     const { summary } = applyScaffold(root, { prefix: "DEMO", force: true }, {}, sourceRoot);
-    assert.ok(summary.created.includes("backlog.config.json"), "force re-creates templates");
-    assert.equal(JSON.parse(readFileSync(join(root, "backlog.config.json"), "utf8")).idPrefix, "DEMO");
+    assert.ok(summary.created.includes("trellis/backlog.config.json"), "force re-creates templates");
+    assert.equal(JSON.parse(readFileSync(join(root, "trellis/backlog.config.json"), "utf8")).idPrefix, "DEMO");
     assert.ok(summary.skipped.includes("AGENTS.md"), "the marked AGENTS block is never clobbered, even under --force");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -141,7 +141,7 @@ test("rejects an invalid resolved config and leaves the target untouched", () =>
     const { summary } = applyScaffold(root, { prefix: "DEMO", idWidth: 0 }, {}, sourceRoot);
     assert.ok(summary.errors.some((e) => /id-width/.test(e)), "an option error is reported");
     assert.deepEqual(summary.created, [], "nothing is created on an invalid config");
-    assert.equal(existsSync(join(root, "backlog.config.json")), false, "no file is written");
+    assert.equal(existsSync(join(root, "trellis/backlog.config.json")), false, "no file is written");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -155,7 +155,7 @@ test("--force over a repo with an existing active item re-scaffolds without cras
   try {
     applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
     writeFileSync(
-      join(root, "docs/tasks/active/DEMO0001.md"),
+      join(root, "trellis/active/DEMO0001.md"),
       "---\nid: DEMO0001\ntitle: T\nstatus: active\ndepends_on: []\nsummary: S.\nmilestone: Alpha\npriority: High\neffort: 3\n---\n\nBody.\n",
     );
     const { summary } = applyScaffold(root, { prefix: "DEMO", force: true }, {}, sourceRoot);
@@ -174,7 +174,7 @@ test("a provided-but-empty list flag is rejected, not masked by the default", ()
     const { summary } = applyScaffold(root, { prefix: "DEMO", effort: [] }, {}, sourceRoot);
     assert.ok(summary.errors.some((e) => /effort/.test(e)), "an empty effort list is rejected");
     assert.deepEqual(summary.created, []);
-    assert.equal(existsSync(join(root, "backlog.config.json")), false);
+    assert.equal(existsSync(join(root, "trellis/backlog.config.json")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -187,7 +187,7 @@ test("a partially-invalid effort list (a NaN token) is rejected", () => {
     const { summary } = applyScaffold(root, { prefix: "DEMO", effort: [1, NaN, 3] }, {}, sourceRoot);
     assert.ok(summary.errors.some((e) => /effort/.test(e)));
     assert.deepEqual(summary.created, []);
-    assert.equal(existsSync(join(root, "backlog.config.json")), false);
+    assert.equal(existsSync(join(root, "trellis/backlog.config.json")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -198,13 +198,13 @@ test("refuses to scaffold over a target whose existing backlog has errors", () =
   // must refuse up front and leave the target untouched (no half-scaffold).
   const root = tempRepo();
   try {
-    mkdirSync(join(root, "docs/tasks/active"), { recursive: true });
-    writeFileSync(join(root, "docs/tasks/active/DEMO0001.md"), "no front-matter here\n");
+    mkdirSync(join(root, "trellis/active"), { recursive: true });
+    writeFileSync(join(root, "trellis/active/DEMO0001.md"), "no front-matter here\n");
     const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
     assert.ok(summary.errors.some((e) => /backlog has errors/.test(e)), "the broken item is surfaced");
     assert.deepEqual(summary.created, [], "nothing is scaffolded");
-    assert.equal(existsSync(join(root, "backlog.config.json")), false, "no config is written");
-    assert.equal(existsSync(join(root, "docs/tasks/README.md")), false, "no skeleton is written");
+    assert.equal(existsSync(join(root, "trellis/backlog.config.json")), false, "no config is written");
+    assert.equal(existsSync(join(root, "trellis/README.md")), false, "no skeleton is written");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -218,9 +218,9 @@ test("a missing copy source is a benign warning, not a refusal", () => {
   try {
     const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, emptySource);
     assert.ok(summary.warnings.some((w) => /source not found/.test(w)), "missing copies are warned");
-    assert.ok(summary.created.includes("backlog.config.json"), "the scaffold still proceeds");
+    assert.ok(summary.created.includes("trellis/backlog.config.json"), "the scaffold still proceeds");
     assert.ok(summary.generated.length > 0, "artifacts are still generated");
-    assert.ok(existsSync(join(root, "docs/tasks/backlog.json")), "the backlog is produced");
+    assert.ok(existsSync(join(root, "trellis/backlog.json")), "the backlog is produced");
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(emptySource, { recursive: true, force: true });
@@ -234,7 +234,7 @@ test("refuses (no partial write) when an existing generated file lost its marker
   const root = tempRepo();
   try {
     applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot); // full valid scaffold
-    writeFileSync(join(root, "docs/tasks/README.md"), "# Backlog\n\nno markers here\n");
+    writeFileSync(join(root, "trellis/README.md"), "# Backlog\n\nno markers here\n");
     rmSync(join(root, ".github/workflows/backlog.yml")); // a now-missing template
     const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
     assert.ok(summary.errors.some((e) => /markers/.test(e)), "the markerless file is a fatal error");
@@ -252,7 +252,7 @@ test("refuses (no partial write) when a generated index has wrong-section marker
   const root = tempRepo();
   try {
     applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot); // valid scaffold
-    writeFileSync(join(root, "docs/tasks/README.md"), "# Backlog\n\n<!-- BEGIN GENERATED:COMPLETED -->\n<!-- END GENERATED:COMPLETED -->\n");
+    writeFileSync(join(root, "trellis/README.md"), "# Backlog\n\n<!-- BEGIN GENERATED:COMPLETED -->\n<!-- END GENERATED:COMPLETED -->\n");
     rmSync(join(root, ".github/workflows/backlog.yml")); // a now-missing template
     const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
     assert.ok(summary.errors.some((e) => /markers/.test(e)), "wrong-section markers are caught in preflight");
@@ -268,7 +268,7 @@ test("refuses (no partial write) when a generated index has out-of-order markers
   const root = tempRepo();
   try {
     applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
-    writeFileSync(join(root, "docs/tasks/README.md"), "# Backlog\n\n<!-- END GENERATED:MILESTONES -->\n<!-- BEGIN GENERATED:MILESTONES -->\n");
+    writeFileSync(join(root, "trellis/README.md"), "# Backlog\n\n<!-- END GENERATED:MILESTONES -->\n<!-- BEGIN GENERATED:MILESTONES -->\n");
     rmSync(join(root, ".github/workflows/backlog.yml"));
     const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
     assert.ok(summary.errors.some((e) => /markers/.test(e)), "out-of-order markers are caught");
@@ -284,11 +284,11 @@ test("--force repairs a corrupted generated index instead of refusing", () => {
   const root = tempRepo();
   try {
     applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
-    writeFileSync(join(root, "docs/tasks/README.md"), "# Backlog\n\nno markers here\n");
+    writeFileSync(join(root, "trellis/README.md"), "# Backlog\n\nno markers here\n");
     const { summary } = applyScaffold(root, { prefix: "DEMO", force: true }, {}, sourceRoot);
     assert.deepEqual(summary.errors, [], "--force does not refuse a corrupted index");
-    assert.ok(summary.generated.includes("docs/tasks/README.md"), "the index is regenerated");
-    assert.match(readFileSync(join(root, "docs/tasks/README.md"), "utf8"), /<!-- BEGIN GENERATED:MILESTONES -->/, "markers restored");
+    assert.ok(summary.generated.includes("trellis/README.md"), "the index is regenerated");
+    assert.match(readFileSync(join(root, "trellis/README.md"), "utf8"), /<!-- BEGIN GENERATED:MILESTONES -->/, "markers restored");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -299,9 +299,10 @@ test("renders the AGENTS block from a kept existing config, not the supplied fla
   // claims ids are ACME just because --prefix ACME was passed; the kept config wins.
   const root = tempRepo();
   try {
+    mkdirSync(join(root, "trellis"), { recursive: true }); // config home must exist before we seed it
     writeFileSync(
-      join(root, "backlog.config.json"),
-      JSON.stringify({ specVersion: "1.0", idPrefix: "DEMO", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1, 2, 3] }, null, 2) + "\n",
+      join(root, "trellis/backlog.config.json"),
+      JSON.stringify({ specVersion: "2.0", idPrefix: "DEMO", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1, 2, 3] }, null, 2) + "\n",
     );
     writeFileSync(join(root, "AGENTS.md"), "# Repo\n"); // no Trellis block yet
     const { summary } = applyScaffold(root, { prefix: "ACME" }, {}, sourceRoot);
@@ -309,7 +310,7 @@ test("renders the AGENTS block from a kept existing config, not the supplied fla
     assert.match(agents, /ids are `DEMO`/, "AGENTS reflects the kept config");
     assert.doesNotMatch(agents, /ids are `ACME`/, "the supplied --prefix is not used");
     assert.ok(summary.warnings.some((w) => /governs/.test(w)), "the ignored flag is warned");
-    assert.equal(JSON.parse(readFileSync(join(root, "backlog.config.json"), "utf8")).idPrefix, "DEMO", "the kept config is unchanged");
+    assert.equal(JSON.parse(readFileSync(join(root, "trellis/backlog.config.json"), "utf8")).idPrefix, "DEMO", "the kept config is unchanged");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

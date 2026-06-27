@@ -180,7 +180,7 @@ test("buildPrompt degrades gracefully when the repo's config is unreadable", () 
   // usable while the config is being fixed.
   const root = freshRepo();
   try {
-    writeFileSync(join(root, "backlog.config.json"), "{ not valid json");
+    writeFileSync(join(root, "trellis", "backlog.config.json"), "{ not valid json");
     const text = buildPrompt(root, "code-review", {}).messages[0].content.text;
     assert.match(text, /the repo's `backlog\.config\.json` governs its vocabulary/);
     assert.match(text, /# Playbook: code review/, "still embeds the playbook");

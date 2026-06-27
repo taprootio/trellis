@@ -52,9 +52,9 @@ function fm(fields) {
 // Build a minimal --check-able repo: config + the three marker files + items.
 function makeRepo(config, { active = [], completed = [], removed = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "trellis-backlog-"));
-  const tasks = join(root, "docs", "tasks");
+  const tasks = join(root, "trellis");
   for (const d of ["active", "completed/tasks", "removed"]) mkdirSync(join(tasks, d), { recursive: true });
-  writeFileSync(join(root, "backlog.config.json"), JSON.stringify(config, null, 2));
+  writeFileSync(join(tasks, "backlog.config.json"), JSON.stringify(config, null, 2));
   writeFileSync(join(tasks, "README.md"), "# Backlog\n\n<!-- BEGIN GENERATED:MILESTONES -->\n<!-- END GENERATED:MILESTONES -->\n");
   writeFileSync(join(tasks, "completed", "index.md"), "# Completed\n\n<!-- BEGIN GENERATED:COMPLETED -->\n<!-- END GENERATED:COMPLETED -->\n");
   writeFileSync(join(tasks, "removed", "index.md"), "# Removed\n\n<!-- BEGIN GENERATED:REMOVED -->\n<!-- END GENERATED:REMOVED -->\n");
