@@ -3,9 +3,9 @@
 // Converts an existing backlog on a foreign schema into Trellis items, driven by a
 // declarative, JSON-serializable mapping. Mirrors src/init.mjs: every entry point
 // takes an explicit targetRoot/sourceRoot and holds no process-wide state, so the
-// `trellis import` CLI and a future MCP import tool (TRL0022) share one
-// implementation, and named source profiles (TRL0022) are just mapping objects of
-// the same shape.
+// `trellis import` CLI, the MCP `import` tool, and `init --import` share one
+// implementation, and named source profiles (src/profiles.mjs) are just mapping
+// objects of the same shape.
 //
 // Contracts (SPEC §4–§5, §8; TRL0021): the source tree is READ-ONLY (copy-out,
 // never delete); ids are assigned fresh-sequentially from the target's nextId so an
@@ -15,7 +15,8 @@
 // core and ROLLS BACK on any failure, so the target is never left invalid or
 // half-written.
 //
-// The mapping shape — see docs and test/fixtures for a worked example:
+// The mapping shape (documented in full in docs/import.md, with the built-in
+// profiles/ as worked examples):
 //   {
 //     sources: { active|completed|removed: { dirs: [..], file: "*.md" } },
 //     fields:  { title, id, priority, effort, milestone, summary, depends_on,
@@ -228,7 +229,8 @@ export function planImport(targetRoot, sourceRoot, mapping) {
   const p = paths(targetRoot, cfg);
 
   // The target must already be a Trellis repo — import emits items + regenerates,
-  // it does not scaffold (that's `trellis init`; TRL0022 wires `init --import`).
+  // it does not scaffold (that's `trellis init`, or the `init --import` on-ramp
+  // that scaffolds first, then calls this).
   if (!existsSync(p.readme) || !existsSync(p.completedIndex) || !existsSync(p.removedIndex)) {
     return { ...empty(), cfg, root, errors: ["target is not an initialized Trellis backlog (missing generated indexes); run `trellis init` first"] };
   }
