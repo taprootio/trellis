@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0023",
   "counts": {
-    "active": 10,
-    "completed": 12,
+    "active": 9,
+    "completed": 13,
     "removed": 0
   },
   "tasks": [
@@ -142,21 +142,6 @@
         "TRL0006"
       ],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
-    },
-    {
-      "id": "TRL0022",
-      "title": "Expose import over MCP and ship reusable source-mapping profiles",
-      "status": "active",
-      "milestone": "Beta",
-      "priority": "Medium",
-      "effort": 3,
-      "effortLabel": "Trout",
-      "effortEmoji": "🐡",
-      "depends_on": [
-        "TRL0004",
-        "TRL0021"
-      ],
-      "summary": "Expose the importer as an MCP import tool and ship reusable source-mapping profiles (including Taproot's ai-backlog) so disparate repos can describe and import their own backlog schema, with an init --import on-ramp."
     },
     {
       "id": "TRL0001",
@@ -331,6 +316,22 @@
         "TRL0020"
       ],
       "summary": "Build a config-driven importer that converts an existing backlog on a foreign schema into Trellis items via a declarative mapping — locating fields, remapping enums, assigning fresh canonical ids, deduping colliding source ids and rewriting dependencies, synthesizing summaries — with a dry-run default and a --check-green result.",
+      "completed_on": "2026-06-27"
+    },
+    {
+      "id": "TRL0022",
+      "title": "Expose import over MCP and ship reusable source-mapping profiles",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
+      "depends_on": [
+        "TRL0004",
+        "TRL0021"
+      ],
+      "summary": "Expose the importer as an MCP import tool and ship reusable source-mapping profiles (including Taproot's ai-backlog) so disparate repos can describe and import their own backlog schema, with an init --import on-ramp.",
       "completed_on": "2026-06-27"
     }
   ]
