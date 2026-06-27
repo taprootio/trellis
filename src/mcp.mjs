@@ -24,6 +24,7 @@ import {
   nextId,
   parseFrontMatter,
   paths,
+  composeFile,
 } from "./backlog.mjs";
 
 // A domain error the transport maps to an MCP tool error (isError result) rather
@@ -62,49 +63,13 @@ function backlogObject(cfg, data) {
 }
 
 // ----------------------------------------------------------- front-matter
-// Canonical field order, matching the hand-authored items (close date sits right
-// after milestone; removed_reason last). Order is cosmetic — the parser is
-// order-independent — but consistency keeps diffs clean.
-const FM_ORDER = [
-  "id", "title", "status", "milestone",
-  "completed_on", "removed_on",
-  "priority", "effort", "depends_on", "summary", "removed_reason",
-];
-
+// The serializer (FM_ORDER / emitScalar / serializeFrontMatter / composeFile) lives
+// in the core (src/backlog.mjs) so the importer shares one writer; only the
+// MCP-specific input guard stays here.
 function oneLine(value, field) {
   if (typeof value !== "string" || !value.trim()) throw new TrellisError(`\`${field}\` is required`);
   if (/[\r\n]/.test(value)) throw new TrellisError(`\`${field}\` must be a single line`);
   return value.trim();
-}
-
-// Quote a value the core parser would otherwise misread on the way back in: an
-// all-digit string (coerced to a number), one already wrapped in a quote (stripped
-// by `unquote`), or the empty string. The parser's unquote is greedy and anchored
-// and does not unescape, so a bare wrap with `"` round-trips for any single-line
-// value. Numbers (e.g. effort) pass through bare.
-function emitScalar(v) {
-  if (typeof v === "number") return String(v);
-  const s = String(v);
-  if (s === "" || /^-?\d+$/.test(s) || /^["']/.test(s) || /["']$/.test(s)) return `"${s}"`;
-  return s;
-}
-
-// Emit the YAML-subset front-matter the core's parser reads back: depends_on as an
-// inline array, everything else as a (possibly quoted) scalar. Unknown keys are
-// preserved after the known ones so nothing is silently dropped.
-function serializeFrontMatter(fm) {
-  const emit = (key) => {
-    const v = fm[key];
-    if (key === "depends_on") return `depends_on: [${(v ?? []).join(", ")}]`;
-    return `${key}: ${emitScalar(v)}`;
-  };
-  const keys = [...FM_ORDER.filter((k) => fm[k] !== undefined), ...Object.keys(fm).filter((k) => !FM_ORDER.includes(k))];
-  return keys.map(emit).join("\n");
-}
-
-function composeFile(fm, body) {
-  const b = String(body).replace(/^\n+/, "").replace(/\n*$/, "\n");
-  return `---\n${serializeFrontMatter(fm)}\n---\n\n${b}`;
 }
 
 // Split an item file into its front-matter object and the Markdown body.

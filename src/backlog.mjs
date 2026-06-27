@@ -259,11 +259,58 @@ export function parseFrontMatter(text, where, errors = []) {
     const quoted = /^"[\s\S]*"$/.test(val) || /^'[\s\S]*'$/.test(val);
     const v = unquote(val);
     // Coerce only *unquoted* all-digit values to numbers, so a quoted "404" round-
-    // trips as the string "404" — how the MCP writer preserves a numeric-looking
-    // title/summary (src/mcp.mjs serializeFrontMatter) against the string contract.
+    // trips as the string "404" — how the writer below preserves a numeric-looking
+    // title/summary (serializeFrontMatter) against the string contract.
     fm[key] = !quoted && /^-?\d+$/.test(v) ? Number(v) : v;
   }
   return fm;
+}
+
+// ------------------------------------------------------- front-matter (write)
+// The serializer side of parseFrontMatter: turn an item object back into the
+// YAML-subset front-matter the parser reads. Lives in the core so every writer —
+// the MCP create/move ops (src/mcp.mjs) and the importer (src/import.mjs) — emits
+// byte-identical, hand-authored-looking files with no string drift.
+
+// Canonical field order, matching the hand-authored items (close date sits right
+// after milestone; removed_reason last). Order is cosmetic — the parser is
+// order-independent — but consistency keeps diffs clean.
+export const FM_ORDER = [
+  "id", "title", "status", "milestone",
+  "completed_on", "removed_on",
+  "priority", "effort", "depends_on", "summary", "removed_reason",
+];
+
+// Quote a value the parser would otherwise misread on the way back in: an all-digit
+// string (it coerces unquoted digits to a number), one already wrapped in a quote
+// (stripped by `unquote`), or the empty string. `unquote` is greedy, anchored, and
+// does not unescape, so a bare `"` wrap round-trips for any single-line value.
+// Numbers (e.g. effort) pass through bare.
+export function emitScalar(v) {
+  if (typeof v === "number") return String(v);
+  const s = String(v);
+  if (s === "" || /^-?\d+$/.test(s) || /^["']/.test(s) || /["']$/.test(s)) return `"${s}"`;
+  return s;
+}
+
+// Emit the front-matter the parser reads back: depends_on as an inline array,
+// everything else as a (possibly quoted) scalar. Unknown keys are preserved after
+// the known ones so nothing is silently dropped.
+export function serializeFrontMatter(fm) {
+  const emit = (key) => {
+    const v = fm[key];
+    if (key === "depends_on") return `depends_on: [${(v ?? []).join(", ")}]`;
+    return `${key}: ${emitScalar(v)}`;
+  };
+  const keys = [...FM_ORDER.filter((k) => fm[k] !== undefined), ...Object.keys(fm).filter((k) => !FM_ORDER.includes(k))];
+  return keys.map(emit).join("\n");
+}
+
+// Compose a full item file: front-matter block + a body normalized to start at its
+// first line and end with exactly one trailing newline.
+export function composeFile(fm, body) {
+  const b = String(body).replace(/^\n+/, "").replace(/\n*$/, "\n");
+  return `---\n${serializeFrontMatter(fm)}\n---\n\n${b}`;
 }
 
 // --------------------------------------------------------------- reading
