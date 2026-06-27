@@ -105,6 +105,16 @@ export const TOOLS = {
     description: "Rewrite any stale generated artifact. Returns { changed, nextId, counts }.",
     inputSchema: { ...repoRootArg },
   },
+  import: {
+    description: "Import an existing backlog into this repo via a named profile or an inline mapping. Dry-run by default; pass apply:true to write items and regenerate (rolls back on any failure). Returns the import summary (counts, idMap, created, generated).",
+    inputSchema: {
+      ...repoRootArg,
+      source: z.string().describe("path to the source backlog to import; a relative path resolves against the target repo"),
+      profile: z.string().optional().describe("name of a built-in source-mapping profile (alternative to `mapping`)"),
+      mapping: z.record(z.string(), z.any()).optional().describe("inline mapping object describing the source schema (alternative to `profile`)"),
+      apply: z.boolean().optional().describe("write items and regenerate; omit or false for a dry-run (the default)"),
+    },
+  },
 };
 
 function registerTools(server, defaultRoot) {

@@ -14,7 +14,7 @@
 // generated files — mirroring init's no-partial-write ethos.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { join, relative, dirname } from "node:path";
+import { join, relative, dirname, isAbsolute } from "node:path";
 import {
   loadConfig,
   readBacklog,
@@ -26,6 +26,8 @@ import {
   paths,
   composeFile,
 } from "./backlog.mjs";
+import { applyImport } from "./import.mjs";
+import { loadProfile } from "./profiles.mjs";
 
 // A domain error the transport maps to an MCP tool error (isError result) rather
 // than a protocol failure. `code` is a short slug for programmatic handling.
@@ -305,6 +307,42 @@ export function moveTask(repoRoot, args = {}) {
   }
 }
 
+// import — bring an existing backlog into this repo via a named profile or an
+// inline mapping. The engine (src/import.mjs) does the resolve → write →
+// regenerate → roll-back-on-any-failure; this adapter only resolves the mapping,
+// runs it against the target, and maps a refused/failed import (summary.errors) to
+// a TrellisError so the transport returns an isError result rather than a silent
+// partial. DRY-RUN unless `apply: true` — mirroring the `trellis import` CLI's safe
+// default for a bulk, multi-file operation.
+export function importOp(repoRoot, args = {}) {
+  if (typeof args.source !== "string" || !args.source.trim()) {
+    throw new TrellisError("`source` is required (path to the backlog to import)");
+  }
+  const hasProfile = args.profile != null && String(args.profile).trim() !== "";
+  const hasMapping = args.mapping != null;
+  // Exactly one mapping source — a profile name or an inline mapping object.
+  if (hasProfile === hasMapping) {
+    throw new TrellisError("provide exactly one of `profile` (a built-in profile name) or `mapping` (an inline mapping object)");
+  }
+  let mapping;
+  if (hasProfile) {
+    const r = loadProfile(String(args.profile).trim());
+    if (r.error) throw new TrellisError(r.error, "not_found");
+    mapping = r.mapping;
+  } else {
+    if (typeof args.mapping !== "object" || Array.isArray(args.mapping)) throw new TrellisError("`mapping` must be an object");
+    mapping = args.mapping;
+  }
+  // Relative source resolves against the target repo (you import a backlog that
+  // lives in the repo being onboarded); an absolute path is used as-is.
+  const src = args.source.trim();
+  const source = isAbsolute(src) ? src : join(repoRoot, src);
+  const dryRun = !args.apply;
+  const { summary } = applyImport(repoRoot, source, mapping, { dryRun });
+  if (summary.errors.length) throw new TrellisError(summary.errors.join("; "), "import_failed");
+  return { ...summary, dryRun };
+}
+
 // Dispatch table for the transport: tool name → (repoRoot, args) → result.
 export const OPS = {
   list_tasks: listTasks,
@@ -314,4 +352,5 @@ export const OPS = {
   move_task: moveTask,
   validate: validateOp,
   regenerate: regenerateOp,
+  import: importOp,
 };
