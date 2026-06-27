@@ -20,6 +20,7 @@ import {
   readBacklog,
   generateArtifacts,
   buildBacklogJson,
+  resolveEffort,
   nextId,
   parseFrontMatter,
   paths,
@@ -251,8 +252,8 @@ export function createTask(repoRoot, args = {}) {
   const summary = oneLine(args.summary, "summary");
   const milestone = oneLine(args.milestone, "milestone");
   const priority = oneLine(args.priority, "priority");
-  if (typeof args.effort !== "number" || !Number.isFinite(args.effort)) {
-    throw new TrellisError("`effort` must be a number (label resolution is TRL0015)");
+  if (typeof args.effort !== "number" && typeof args.effort !== "string") {
+    throw new TrellisError("`effort` must be a number or a scale label");
   }
   const rawDeps = args.depends_on ?? [];
   if (!Array.isArray(rawDeps) || rawDeps.some((d) => typeof d !== "string")) {
@@ -261,6 +262,10 @@ export function createTask(repoRoot, args = {}) {
   const depends_on = [...new Set(rawDeps)];
 
   const { cfg, data } = loadClean(repoRoot);
+  // Resolve a number or a case-insensitive scale label to the canonical number,
+  // which is what we store in front-matter (SPEC §6.2).
+  const effort = resolveEffort(cfg, args.effort);
+  if (effort.error) throw new TrellisError(effort.error, "invalid_request");
   // Each dependency id must be a well-formed id for this repo — reject up front so a
   // stray value can't be injected into the front-matter array (the core would catch
   // it on re-read, but this fails faster and with a clearer message).
@@ -269,7 +274,7 @@ export function createTask(repoRoot, args = {}) {
     if (!idRe.test(d)) throw new TrellisError(`invalid dependency id: ${d} (expected ${cfg.idPrefix} + ${cfg.idWidth} digits)`, "invalid_request");
   }
   const id = nextId(data.ids, cfg);
-  const fm = { id, title, status: "active", milestone, priority, effort: args.effort, depends_on, summary };
+  const fm = { id, title, status: "active", milestone, priority, effort: effort.value, depends_on, summary };
   const body = args.body ? args.body : scaffoldBody(id, title);
   const file = join(paths(repoRoot).active, `${id}.md`);
 

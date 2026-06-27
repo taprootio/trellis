@@ -81,7 +81,7 @@ export const TOOLS = {
       summary: z.string().describe("one-sentence summary for the index"),
       milestone: z.string().describe("a configured milestone"),
       priority: z.string().describe("a configured priority"),
-      effort: z.number().describe("a configured canonical effort number"),
+      effort: z.union([z.number(), z.string()]).describe("a canonical effort number, or a label from the active effort scale"),
       depends_on: z.array(z.string()).optional().describe("ids this task depends on"),
       body: z.string().optional().describe("Markdown body; Scope/Notes/Risks are scaffolded if omitted"),
     },

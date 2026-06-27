@@ -62,6 +62,57 @@ test("create_task writes a valid active item and stays --check-green", () => {
   }
 });
 
+// Swap a fresh repo onto a custom (fish) effort scale so create_task exercises
+// label resolution (SPEC §6.2). A fresh scaffold has no active items, so the
+// config swap leaves the backlog --check-green.
+function fishRepo() {
+  const root = freshRepo();
+  const cfgPath = join(root, "backlog.config.json");
+  const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  cfg.effort = {
+    values: [1, 2, 3, 5, 8, 13, 21],
+    scale: "fish",
+    scales: { fish: {
+      1: { label: "Minnow" }, 2: { label: "Goldfish", emoji: "🐠" }, 3: { label: "Trout" },
+      5: { label: "Tuna" }, 8: { label: "Swordfish" }, 13: { label: "Shark" }, 21: { label: "Whale" },
+    } },
+  };
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+  return root;
+}
+
+test("create_task resolves a scale label to its canonical number", () => {
+  const root = fishRepo();
+  try {
+    const { created } = createTask(root, { ...VALID, effort: "trout" }); // case-insensitive
+    assert.equal(created.effort, 3);
+    assert.equal(created.effortLabel, "Trout");
+    assert.match(readFileSync(join(root, "docs/tasks/active/DEMO0001.md"), "utf8"), /^effort: 3$/m);
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("create_task still accepts a canonical number under a custom scale", () => {
+  const root = fishRepo();
+  try {
+    assert.equal(createTask(root, { ...VALID, effort: 2 }).created.effortLabel, "Goldfish");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("create_task rejects an effort that is neither a value nor a label", () => {
+  const root = fishRepo();
+  try {
+    assert.throws(() => createTask(root, { ...VALID, effort: "Kraken" }), /effort must be a value/);
+    assert.throws(() => createTask(root, { ...VALID, effort: true }), /must be a number or a scale label/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("get_task returns the entry plus the raw Markdown body", () => {
   const root = freshRepo();
   try {
