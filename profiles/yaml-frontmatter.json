@@ -1,0 +1,21 @@
+{
+  "description": "Generic backlog where each item carries complete YAML front-matter (title, priority, milestone, effort, summary, depends_on, dates) under active/, completed/, and removed/ directories, in standard Trellis vocabulary. Exercises the `yaml` extractor with no remap or defaults — the differently-shaped second source that keeps the profile schema from over-fitting Taproot.",
+  "sources": {
+    "active": { "dirs": ["active"], "file": "*.md" },
+    "completed": { "dirs": ["completed"], "file": "*.md" },
+    "removed": { "dirs": ["removed"], "file": "*.md" }
+  },
+  "fields": {
+    "id": { "from": "yaml", "key": "id", "fallback": { "from": "filename" } },
+    "title": { "from": "yaml", "key": "title", "fallback": { "from": "h1" } },
+    "priority": { "from": "yaml", "key": "priority" },
+    "effort": { "from": "yaml", "key": "effort" },
+    "milestone": { "from": "yaml", "key": "milestone" },
+    "summary": { "from": "yaml", "key": "summary" },
+    "depends_on": { "from": "yaml", "key": "depends_on" },
+    "completed_on": { "from": "yaml", "key": "completed_on" },
+    "removed_on": { "from": "yaml", "key": "removed_on" },
+    "removed_reason": { "from": "yaml", "key": "removed_reason" }
+  },
+  "summary": { "strategy": "firstSentence" }
+}

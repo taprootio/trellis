@@ -1,4 +1,5 @@
 {
+  "description": "Taproot's planning/ai-backlog: bold-inline (**Field:**) metadata on active items, header-style (Created:/Completed:) closed items, numeric-prefix filenames, P1–P3 priorities, and milestones that mix maturity gates with feature areas. The proven reference profile (TRL0009 imports it).",
   "sources": {
     "active": { "dirs": ["active"], "file": "*.md" },
     "completed": { "dirs": ["completed"], "file": "*.md" },
