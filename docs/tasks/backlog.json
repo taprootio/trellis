@@ -6,9 +6,9 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0020",
+  "nextId": "TRL0023",
   "counts": {
-    "active": 10,
+    "active": 13,
     "completed": 9,
     "removed": 0
   },
@@ -45,7 +45,9 @@
       "priority": "Medium",
       "effort": 3,
       "depends_on": [
-        "TRL0003"
+        "TRL0003",
+        "TRL0020",
+        "TRL0021"
       ],
       "summary": "Run `trellis init` against a second, non-trivial repo and work a real task through the loop to prove the formula travels."
     },
@@ -136,6 +138,45 @@
         "TRL0006"
       ],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
+    },
+    {
+      "id": "TRL0020",
+      "title": "Relocate the backlog root from docs/tasks/ to trellis/",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "High",
+      "effort": 5,
+      "depends_on": [
+        "TRL0001",
+        "TRL0003"
+      ],
+      "summary": "Move the canonical backlog root from docs/tasks/ to a top-level trellis/ folder so a repo's use of Trellis is obvious and stays out of docs/ site builds — a fixed-layout change (spec major bump) carried through the core, init, MCP, and the dogfooded backlog."
+    },
+    {
+      "id": "TRL0021",
+      "title": "Build the backlog import engine (disparate schemas → Trellis)",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "High",
+      "effort": 8,
+      "depends_on": [
+        "TRL0003",
+        "TRL0020"
+      ],
+      "summary": "Build a config-driven importer that converts an existing backlog on a foreign schema into Trellis items — mapping fields, assigning a preserved prefix, deduping colliding ids and rewriting dependencies, synthesizing summaries — with a dry-run and a --check-green result."
+    },
+    {
+      "id": "TRL0022",
+      "title": "Expose import over MCP and ship reusable source-mapping profiles",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 3,
+      "depends_on": [
+        "TRL0004",
+        "TRL0021"
+      ],
+      "summary": "Expose the importer as an MCP import tool and ship reusable source-mapping profiles (including Taproot's ai-backlog) so disparate repos can describe and import their own backlog schema, with an init --import on-ramp."
     },
     {
       "id": "TRL0001",
