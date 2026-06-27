@@ -155,7 +155,7 @@
         "TRL0003",
         "TRL0020"
       ],
-      "summary": "Build a config-driven importer that converts an existing backlog on a foreign schema into Trellis items — mapping fields, assigning a preserved prefix, deduping colliding ids and rewriting dependencies, synthesizing summaries — with a dry-run and a --check-green result."
+      "summary": "Build a config-driven importer that converts an existing backlog on a foreign schema into Trellis items via a declarative mapping — locating fields, remapping enums, assigning fresh canonical ids, deduping colliding source ids and rewriting dependencies, synthesizing summaries — with a dry-run default and a --check-green result."
     },
     {
       "id": "TRL0022",
