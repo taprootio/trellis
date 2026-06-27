@@ -1,6 +1,6 @@
 # Trellis Backlog Spec
 
-**Version:** 2.0.0 · **Status:** stable
+**Version:** 2.1.0 · **Status:** stable
 
 Trellis is a tool-agnostic convention for running a software backlog as plain
 files in a git repository. Work items are Markdown files with YAML front-matter;
@@ -34,6 +34,7 @@ are derived and must never be hand-edited.
 <repo>/
   trellis/
     backlog.config.json            # per-repo configuration (§7)
+    team.json                      # optional team roster (§7.2)
     active/<ID>.md                 # open items (§5)
     completed/
       tasks/<ID>.md                # finished items, history preserved
@@ -101,9 +102,14 @@ body.
 | `priority` | ✓ | ✓ | ✓ | a configured priority (§7); historical on closed items |
 | `effort` | ✓ | ✓ | ✓ | a configured effort value (§6); historical on closed items |
 | `depends_on` | ✓ | ✓ | ✓ | list of existing ids (`[]` if none) |
+| `owner` | ○ | ○ | ○ | a roster handle (§7.2); active → an active member; historical on closed |
+| `collaborators` | ○ | ○ | ○ | list of roster handles; active → active members; historical on closed |
 | `completed_on` | – | ✓ | – | ISO date (`YYYY-MM-DD`) |
 | `removed_on` | – | – | ✓ | ISO date |
 | `removed_reason` | – | – | ✓ | one line; why, and any trigger to revisit |
+
+(○ = optional.) `owner` and `collaborators` are optional everywhere and reference
+the team roster (§7.2); no item need carry them, and no backfill is required.
 
 On close (completed or removed), the descriptive metadata — `milestone`,
 `summary`, `priority`, `effort`, `depends_on` — is carried over from the active
@@ -111,6 +117,8 @@ item as a historical snapshot, and the close fields are added (`completed_on`,
 or `removed_on`/`removed_reason`). These retained enum values are **historical**:
 tooling records them as-was and does not re-validate them against the current
 config (§8.3), so milestones and scales can evolve without breaking the archive.
+`owner`/`collaborators` are likewise historical on closed items, so a member who
+has since gone `inactive` (or left the roster) does not invalidate the archive.
 
 ### 5.2 Body
 
@@ -228,6 +236,39 @@ It is a single, ordered axis (e.g. `Alpha → Beta → v1 → Future`). A milest
 and **not** an on-hold state (§4). Milestone *names* are configured; the
 single-axis, ordered semantics are fixed.
 
+### 7.2 Team roster (`team.json`)
+
+The optional **team roster** records who can own work. It is a separate authored
+file, `team.json`, at the fixed config home (`trellis/team.json`, next to
+`backlog.config.json` and independent of `tasksDir`) — kept apart from the config so
+the core vocabulary stays stable while the roster (richer, faster-changing) evolves
+on its own.
+
+```json
+{
+  "members": [
+    { "handle": "ada",  "name": "Ada Lovelace", "email": "ada@example.com", "status": "active" },
+    { "handle": "alan", "name": "Alan Turing",  "status": "inactive" }
+  ]
+}
+```
+
+- `members` (required) — the list of people. The object wrapper leaves room for
+  additive top-level keys in future minor versions.
+- `handle` (required) — the stable key referenced by `owner`/`collaborators` in
+  front-matter (§5.1). Constrained to `[A-Za-z0-9._-]` (so it survives the inline
+  serialization of `collaborators`) and unique, case-insensitively.
+- `name` (required) and `email` (optional) are **display only**.
+- `status` — `active` or `inactive` (default `active`). Only **active** members may
+  own or collaborate on **active** items; closed items keep historical assignees
+  (§8.3), so a member can go `inactive` or leave without breaking the archive.
+
+The roster is **optional**: an absent `team.json` is an empty roster, so a repo that
+never assigns owners is unaffected. A present-but-malformed roster (bad JSON,
+duplicate handle, bad `handle`/`status`, unknown member key) is a validation error
+(§8.3). `handle` is the only identity contract — names/emails are not coupled to any
+external identity provider; cross-repo identity is left to future work.
+
 ## 8. Generated artifacts
 
 These are derived from the item files and config on every generator run. They
@@ -264,27 +305,31 @@ The machine contract consumers build on:
       "id": "AB0042", "title": "…", "status": "active",
       "milestone": "Beta", "priority": "High",
       "effort": 5, "effortLabel": "Tuna", "effortImage": "assets/effort/tuna.svg",
-      "depends_on": ["AB0007"], "summary": "…"
+      "depends_on": ["AB0007"], "owner": "ada", "collaborators": ["alan"], "summary": "…"
     }
   ]
 }
 ```
 
 Every entry carries the descriptive metadata (`milestone`, `summary`,
-`priority`, `effort`, `depends_on`). Completed entries add `completed_on`;
-removed entries add `removed_on` and `removed_reason`. Effort label/emoji/image
-fields appear when a scale is active.
+`priority`, `effort`, `depends_on`) plus `owner` (a roster handle or `null`) and
+`collaborators` (handles, `[]` if none) — historical on closed entries. Completed
+entries add `completed_on`; removed entries add `removed_on` and `removed_reason`.
+Effort label/emoji/image fields appear when a scale is active.
 
 ### 8.3 Tooling contract
 
 A conforming generator MUST:
 
-1. **Validate** every item against the schema (§5) and config (§7) with
-   actionable messages: id/filename match, required fields, enum membership,
-   effort resolution, unique ids, and `depends_on` referential integrity. Enum
-   membership (milestone/priority/effort) is enforced for **active** items only;
-   on completed/removed items these values are historical and MUST NOT fail
-   validation if they are no longer in the current config (a mismatch MAY warn).
+1. **Validate** every item against the schema (§5), config (§7), and roster (§7.2)
+   with actionable messages: id/filename match, required fields, enum membership,
+   effort resolution, unique ids, `depends_on` referential integrity, and
+   owner/collaborator roster membership. Enum membership (milestone/priority/effort)
+   and roster membership (owner/collaborators must be **active** members) are
+   enforced for **active** items only; on completed/removed items these values are
+   historical and MUST NOT fail validation if they are no longer in the current
+   config or roster (a mismatch MAY warn). A malformed `team.json` is a validation
+   error regardless.
 2. **Regenerate** `README.md`, the completed/removed indexes (each between its
    markers), and `backlog.json` deterministically.
 3. Support a **`--check`** mode that validates and verifies the artifacts are

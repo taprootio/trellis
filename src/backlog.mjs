@@ -12,7 +12,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
-export const SPEC_VERSION = "2.0";
+export const SPEC_VERSION = "2.1";
 
 // The backlog root defaults to `trellis/` and is overridable per repo via the
 // config's `tasksDir` key (SPEC §2/§7). The config file itself lives at a FIXED

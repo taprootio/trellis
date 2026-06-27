@@ -173,7 +173,7 @@
         "TRL0021",
         "TRL0022"
       ],
-      "owner": null,
+      "owner": "jereme",
       "collaborators": [],
       "summary": "Add a configured team roster (active/historical members) plus optional owner and collaborators task fields, validated like the existing enums and importable via the mapping, so the backlog records who is responsible for each item."
     },
