@@ -24,21 +24,22 @@ package (the scaffolded CI calls `npx trellis check`), which ships in TRL0010.
 ## Import an existing backlog
 
 `trellis import` converts a backlog on a foreign schema into Trellis items in an
-already-initialized repo, driven by a declarative mapping (where source items
-live, how to locate each field, enum remaps). It is **dry-run by default** —
-preview the plan and the id map, then re-run with `--apply`:
+already-initialized repo, driven by a declarative mapping — either a built-in
+**profile** (`--profile <name>`; run `--list-profiles`) or your own
+`--mapping <file.json>`. It is **dry-run by default** — preview the plan and the id
+map, then re-run with `--apply`:
 
 ```
-node scripts/trellis-import.mjs <source> --mapping mapping.json --target .   # add --apply to write
+node scripts/trellis-import.mjs <source> --profile yaml-frontmatter --target .   # add --apply to write
 ```
 
 Ids are assigned fresh-sequentially from the target's next id, colliding source
 ids are deduped, and `depends_on` is rewritten through the id map; the source tree
-is never modified and a real run leaves the backlog `--check`-green. The mapping
-shape is documented in [`src/import.mjs`](src/import.mjs);
-[`test/fixtures/legacy-backlog.mapping.json`](test/fixtures/legacy-backlog.mapping.json)
-is a worked example. Reusable named profiles, an `import` MCP tool, and an
-`init --import` on-ramp ship in TRL0022.
+is never modified and a real run leaves the backlog `--check`-green. To scaffold
+and import in one step on a fresh repo, use
+`trellis init --import <path> --profile <name>`. The mapping schema, the built-in
+profiles, and the full getting-started guide are in
+[`docs/import.md`](docs/import.md).
 
 ## Operate over MCP
 
@@ -51,7 +52,9 @@ node scripts/trellis-mcp.mjs --repo <path>   # serves over stdio; defaults to cw
 ```
 
 Tools: `list_tasks`, `get_task`, `next_id`, `create_task`, `move_task`,
-`validate`, `regenerate` — each reuses the same core as the CLI, so results carry
-the `backlog.json` shape. Mutating tools regenerate and validate before
-returning, rolling back on failure. The process loops (work-a-task, review) ship
-separately as MCP prompts in TRL0006.
+`validate`, `regenerate`, `import` — each reuses the same core as the CLI, so
+results carry the `backlog.json` shape (except `import`, which returns an import
+summary — counts, id map, created/generated paths). Mutating tools regenerate and
+validate before returning, rolling back on failure; `import` is dry-run unless
+`apply:true` (see [`docs/import.md`](docs/import.md)). The process loops
+(work-a-task, review) ship separately as MCP prompts in TRL0006.

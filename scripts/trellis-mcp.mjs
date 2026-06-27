@@ -3,7 +3,7 @@
 //
 //   node scripts/trellis-mcp.mjs [--repo <path>]
 //
-// The seven tools are thin adapters over src/mcp.mjs (which is dependency-free and
+// The tools are thin adapters over src/mcp.mjs (which is dependency-free and
 // unit-tested); the @modelcontextprotocol SDK and the transport live only in this
 // entry point. Each tool resolves a repo root — the per-call `repoRoot` arg, else
 // the server's default (`--repo`, else cwd) — so one server can serve any repo the
@@ -104,6 +104,16 @@ export const TOOLS = {
   regenerate: {
     description: "Rewrite any stale generated artifact. Returns { changed, nextId, counts }.",
     inputSchema: { ...repoRootArg },
+  },
+  import: {
+    description: "Import an existing backlog into this repo via a named profile or an inline mapping. Dry-run by default; pass apply:true to write items and regenerate (rolls back on any failure). Returns the import summary (counts, idMap, created, generated).",
+    inputSchema: {
+      ...repoRootArg,
+      source: z.string().describe("path to the source backlog to import; a relative path resolves against the target repo"),
+      profile: z.string().optional().describe("name of a built-in source-mapping profile (alternative to `mapping`)"),
+      mapping: z.record(z.string(), z.any()).optional().describe("inline mapping object describing the source schema (alternative to `profile`)"),
+      apply: z.boolean().optional().describe("write items and regenerate; omit or false for a dry-run (the default)"),
+    },
   },
 };
 

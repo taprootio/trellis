@@ -6,17 +6,20 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
+import { loadProfile } from "../src/profiles.mjs";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
 import {
-  listTasks, getTask, nextIdOp, createTask, moveTask, validateOp, regenerateOp, TrellisError,
+  listTasks, getTask, nextIdOp, createTask, moveTask, validateOp, regenerateOp, importOp, TrellisError,
 } from "../src/mcp.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const fixtures = join(sourceRoot, "test", "fixtures");
+const yamlSrc = join(fixtures, "yaml-frontmatter");
 
 // A fresh, --check-green Trellis repo to operate on.
 function freshRepo() {
@@ -336,6 +339,96 @@ test("move_task defaults the close date to a valid local ISO date", () => {
     createTask(root, VALID);
     const { moved } = moveTask(root, { id: "DEMO0001", to: "completed" }); // no date
     assert.match(moved.completed_on, /^\d{4}-\d{2}-\d{2}$/, "a YYYY-MM-DD date is recorded");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("import tool: dry-run by default writes nothing; apply writes + stays --check-green", () => {
+  const root = freshRepo();
+  try {
+    const dry = importOp(root, { source: yamlSrc, profile: "yaml-frontmatter" }); // no apply
+    assert.equal(dry.dryRun, true);
+    assert.equal(dry.counts.total, 4);
+    assert.equal(existsSync(join(root, "trellis/active/DEMO0001.md")), false, "dry-run writes no items");
+
+    const applied = importOp(root, { source: yamlSrc, profile: "yaml-frontmatter", apply: true });
+    assert.equal(applied.dryRun, false);
+    assert.deepEqual(applied.counts, { active: 2, completed: 1, removed: 1, total: 4 });
+    assert.ok(existsSync(join(root, "trellis/active/DEMO0001.md")), "apply writes the items");
+    assert.ok(validateOp(root).ok);
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("import tool accepts an inline mapping object as an alternative to a profile", () => {
+  const root = freshRepo();
+  const mapping = loadProfile("yaml-frontmatter").mapping;
+  try {
+    const res = importOp(root, { source: yamlSrc, mapping, apply: true });
+    assert.deepEqual(res.counts, { active: 2, completed: 1, removed: 1, total: 4 });
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("import tool resolves a relative source against the target repo", () => {
+  const root = freshRepo();
+  try {
+    mkdirSync(join(root, "src-backlog/active"), { recursive: true });
+    writeFileSync(
+      join(root, "src-backlog/active/x.md"),
+      "---\nid: A1\ntitle: Imported\npriority: High\nmilestone: Alpha\neffort: 1\nsummary: An imported item.\ndepends_on: []\n---\n\n# Imported\n\nProse.\n",
+    );
+    const res = importOp(root, { source: "src-backlog", profile: "yaml-frontmatter", apply: true });
+    assert.equal(res.counts.active, 1);
+    assert.ok(existsSync(join(root, "trellis/active/DEMO0001.md")), "the relative source was found and imported");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("import tool requires exactly one of profile or mapping, plus a source", () => {
+  const root = freshRepo();
+  const mapping = loadProfile("yaml-frontmatter").mapping;
+  try {
+    assert.throws(() => importOp(root, { source: yamlSrc }), /exactly one of/); // neither
+    assert.throws(() => importOp(root, { source: yamlSrc, profile: "yaml-frontmatter", mapping }), /exactly one of/); // both
+    assert.throws(() => importOp(root, { profile: "yaml-frontmatter" }), /source. is required/); // no source
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("import tool throws not_found on an unknown profile", () => {
+  const root = freshRepo();
+  try {
+    assert.throws(
+      () => importOp(root, { source: yamlSrc, profile: "does-not-exist" }),
+      (e) => e instanceof TrellisError && e.code === "not_found",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("import tool surfaces a refused import as an error and writes nothing", () => {
+  // Drop the milestone remap so the legacy fixture's active milestones no longer
+  // resolve — the engine refuses the whole import; the tool maps that to an error.
+  const root = freshRepo();
+  const mapping = loadProfile("taproot-ai-backlog").mapping;
+  delete mapping.remap.milestone;
+  try {
+    assert.throws(
+      () => importOp(root, { source: join(fixtures, "legacy-backlog"), mapping, apply: true }),
+      (e) => e instanceof TrellisError && e.code === "import_failed",
+    );
+    assert.equal(existsSync(join(root, "trellis/active/DEMO0001.md")), false, "nothing written on refusal");
     assertCheckClean(root);
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -6,10 +6,10 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0023",
+  "nextId": "TRL0026",
   "counts": {
-    "active": 10,
-    "completed": 12,
+    "active": 12,
+    "completed": 13,
     "removed": 0
   },
   "tasks": [
@@ -144,19 +144,42 @@
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
     },
     {
-      "id": "TRL0022",
-      "title": "Expose import over MCP and ship reusable source-mapping profiles",
+      "id": "TRL0023",
+      "title": "Team roster and task ownership (owner + collaborators)",
       "status": "active",
       "milestone": "Beta",
       "priority": "Medium",
-      "effort": 3,
-      "effortLabel": "Trout",
-      "effortEmoji": "🐡",
+      "effort": 8,
+      "effortLabel": "Swordfish",
       "depends_on": [
-        "TRL0004",
-        "TRL0021"
+        "TRL0021",
+        "TRL0022"
       ],
-      "summary": "Expose the importer as an MCP import tool and ship reusable source-mapping profiles (including Taproot's ai-backlog) so disparate repos can describe and import their own backlog schema, with an init --import on-ramp."
+      "summary": "Add a configured team roster (active/historical members) plus optional owner and collaborators task fields, validated like the existing enums and importable via the mapping, so the backlog records who is responsible for each item."
+    },
+    {
+      "id": "TRL0024",
+      "title": "Drop the README \"Next task ID\"; make backlog.json the canonical source",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "Low",
+      "effort": 2,
+      "effortLabel": "Goldfish",
+      "effortEmoji": "🐠",
+      "depends_on": [],
+      "summary": "Remove the redundant generated \"Next task ID\" section from the README and point the spec at backlog.json's nextId (plus the MCP next_id tool) as the single published source."
+    },
+    {
+      "id": "TRL0025",
+      "title": "Git-derived task history and a materialized history.json",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [],
+      "summary": "Derive a lightweight per-task history (who changed it, when, why) from git and materialize it as a non-gated history.json the future viewer can read without a git runtime."
     },
     {
       "id": "TRL0001",
@@ -331,6 +354,22 @@
         "TRL0020"
       ],
       "summary": "Build a config-driven importer that converts an existing backlog on a foreign schema into Trellis items via a declarative mapping — locating fields, remapping enums, assigning fresh canonical ids, deduping colliding source ids and rewriting dependencies, synthesizing summaries — with a dry-run default and a --check-green result.",
+      "completed_on": "2026-06-27"
+    },
+    {
+      "id": "TRL0022",
+      "title": "Expose import over MCP and ship reusable source-mapping profiles",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
+      "depends_on": [
+        "TRL0004",
+        "TRL0021"
+      ],
+      "summary": "Expose the importer as an MCP import tool and ship reusable source-mapping profiles (including Taproot's ai-backlog) so disparate repos can describe and import their own backlog schema, with an init --import on-ramp.",
       "completed_on": "2026-06-27"
     }
   ]

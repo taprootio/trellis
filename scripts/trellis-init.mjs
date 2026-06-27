@@ -6,13 +6,17 @@
 // Onboards the target repo (default ".") to the Trellis layout. Vocabulary comes
 // from flags with sensible defaults; when run interactively with the prefix or
 // milestones omitted, it prompts for them. Idempotent — existing files are never
-// clobbered (use --force to overwrite). Logic lives in src/init.mjs so the MCP
-// server (TRL0004) can share it; this stays dependency-free.
+// clobbered (use --force to overwrite). With `--import <path>` it then imports an
+// existing backlog via a named profile or a mapping file — the onboard-a-repo-that-
+// already-has-a-backlog on-ramp — reusing src/import.mjs and src/profiles.mjs. All
+// logic lives under src/, so this stays free of third-party dependencies.
 
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { DEFAULTS, applyScaffold, resolveOptions, validateOptions } from "../src/init.mjs";
+import { applyImport } from "../src/import.mjs";
+import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
 
 const HELP = `trellis init — scaffold the Trellis backlog into a repo
 
@@ -25,9 +29,16 @@ Flags:
   --milestones <a,b,c>  ordered maturity milestones (default: ${DEFAULTS.milestones.join(",")})
   --priorities <a,b,c>  ordered priorities, highest first (default: ${DEFAULTS.priorities.join(",")})
   --effort <1,2,3>      canonical effort values (default: ${DEFAULTS.effort.join(",")})
+  --import <path>       after scaffolding, import an existing backlog at <path>
+  --profile <name>      source-mapping profile for --import (trellis import --list-profiles)
+  --mapping <file>      mapping file (JSON) for --import (alternative to --profile)
   --force               overwrite existing files instead of skipping
   --dry-run             report what would change without writing
   -h, --help            show this help
+
+With --import, provide exactly one of --profile or --mapping; a relative <path>
+resolves against the target repo. --dry-run previews the scaffold without writing;
+preview the import plan itself with "trellis import --dry-run" on the initialized repo.
 `;
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -46,6 +57,9 @@ function parseArgs(argv) {
       case "-h": case "--help": opts.help = true; break;
       case "--force": opts.force = true; break;
       case "--dry-run": opts.dryRun = true; break;
+      case "--import": opts.import = next(); break;
+      case "--profile": opts.profile = next(); break;
+      case "--mapping": opts.mapping = next(); break;
       case "--prefix": opts.prefix = next(); break;
       case "--id-width": opts.idWidth = Number(next()); break;
       case "--milestones": opts.milestones = csv(next()); break;
@@ -105,6 +119,40 @@ function report(targetRoot, summary, dryRun) {
   if (!dryRun) console.log(`Done. Next: add a task under ${summary.root}/active/, then \`npx trellis generate\`.`);
 }
 
+// Usage errors for the --import on-ramp, validated before any write: --profile /
+// --mapping only make sense with --import, and --import needs exactly one of them.
+function importFlagErrors(opts) {
+  const errors = [];
+  const hasProfile = !!opts.profile, hasMapping = !!opts.mapping;
+  if (!opts.import) {
+    if (hasProfile || hasMapping) errors.push("--profile/--mapping only apply with --import <path>");
+    return errors;
+  }
+  if (hasProfile === hasMapping) errors.push("--import requires exactly one of --profile <name> or --mapping <file>");
+  return errors;
+}
+
+// Concise report for the follow-on import (mirrors the trellis import CLI). Fatal
+// errors never claim success; otherwise echo counts + the id map so the user can
+// review before committing.
+function reportImport(targetRoot, summary) {
+  if (summary.errors.length) {
+    const wrote = summary.created.length || summary.generated.length;
+    console.error(wrote ? `Import into ${targetRoot} did not complete:` : `Refused to import into ${targetRoot} — wrote nothing:`);
+    for (const e of summary.errors) console.error(`  - ${e}`);
+    for (const w of summary.warnings) console.warn(`  warning: ${w}`);
+    return;
+  }
+  const c = summary.counts || { total: 0, active: 0, completed: 0, removed: 0 };
+  console.log(`Imported ${c.total} item${c.total === 1 ? "" : "s"} (${c.active} active, ${c.completed} completed, ${c.removed} removed).`);
+  if (summary.idMap.length) {
+    console.log("  id map:");
+    for (const m of summary.idMap) console.log(`    ${m.sourceId} (${m.sourceFile}) → ${m.newId}`);
+  }
+  for (const w of summary.warnings) console.warn(`  warning: ${w}`);
+  console.log(`Done. Review ${summary.root}/, then commit.`);
+}
+
 const { target, opts } = parseArgs(process.argv.slice(2));
 if (opts.help) { process.stdout.write(HELP); process.exit(0); }
 
@@ -116,9 +164,38 @@ if (optErrors.length) {
   process.exit(2);
 }
 
+const flagErrors = importFlagErrors(opts);
+if (flagErrors.length) {
+  for (const e of flagErrors) console.error(`error: ${e}`);
+  process.exit(2);
+}
+
 const targetRoot = resolve(target);
-const { summary } = applyScaffold(targetRoot, opts, { dryRun: !!opts.dryRun }, sourceRoot);
-report(targetRoot, summary, !!opts.dryRun);
-// Exit non-zero only on a fatal error (refusal or generate failure); a benign
-// warning (e.g. a missing copy source) on a completed scaffold exits 0.
-process.exit(summary.errors.length ? 1 : 0);
+const dryRun = !!opts.dryRun;
+const { summary } = applyScaffold(targetRoot, opts, { dryRun }, sourceRoot);
+report(targetRoot, summary, dryRun);
+// A failed scaffold (refusal or generate failure) is fatal and blocks any import.
+if (summary.errors.length) process.exit(1);
+
+// --import on-ramp: scaffold, then import an existing backlog in one command.
+if (opts.import) {
+  const { mapping, error } = opts.profile ? loadProfile(opts.profile) : loadMappingFile(opts.mapping);
+  if (error) { console.error(`error: ${error}`); process.exit(2); }
+  const importSource = isAbsolute(opts.import) ? opts.import : resolve(targetRoot, opts.import);
+  if (dryRun) {
+    // A dry run scaffolds nothing, so there is no initialized target to plan the
+    // import against — report intent and point at `trellis import --dry-run` (which
+    // previews the full plan against an initialized repo) rather than computing a
+    // misleading plan here against a non-existent backlog.
+    const via = opts.profile ? `profile ${opts.profile}` : `mapping ${opts.mapping}`;
+    console.log(`Would then import from ${importSource} using ${via}.`);
+    console.log("Re-run without --dry-run to scaffold and import, or run `trellis import --dry-run` on the initialized repo to preview the import plan.");
+    process.exit(0);
+  }
+  const { summary: imp } = applyImport(targetRoot, importSource, mapping, { dryRun: false });
+  reportImport(targetRoot, imp);
+  process.exit(imp.errors.length ? 1 : 0);
+}
+
+// A benign warning (e.g. a missing copy source) on a completed scaffold exits 0.
+process.exit(0);

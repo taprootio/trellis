@@ -14,13 +14,16 @@ import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
 import { planImport, applyImport } from "../src/import.mjs";
+import { loadProfile, listProfiles } from "../src/profiles.mjs";
 import { loadConfig, readBacklog, generateArtifacts, parseFrontMatter } from "../src/backlog.mjs";
 
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtures = join(projectRoot, "test", "fixtures");
 const legacySrc = join(fixtures, "legacy-backlog");
-const mappingFile = join(fixtures, "legacy-backlog.mapping.json");
-const mapping = JSON.parse(readFileSync(mappingFile, "utf8"));
+const yamlSrc = join(fixtures, "yaml-frontmatter");
+// The shipped Taproot reference profile doubles as this suite's regression mapping
+// (the built-in profiles are the canonical fixtures — TRL0022).
+const mapping = loadProfile("taproot-ai-backlog").mapping;
 
 const tempRepo = () => mkdtempSync(join(tmpdir(), "trellis-import-"));
 
@@ -272,19 +275,102 @@ test("refuses to import into an uninitialized target and writes nothing", () => 
   }
 });
 
-test("CLI is dry-run by default and writes only with --apply", () => {
+test("CLI is dry-run by default and writes only with --apply (via --profile)", () => {
   const root = initTarget();
   const script = join(projectRoot, "scripts", "trellis-import.mjs");
   const mdCount = () => readdirSync(join(root, "trellis/active")).filter((f) => f.endsWith(".md")).length;
   try {
-    const dry = execFileSync(process.execPath, [script, legacySrc, "--mapping", mappingFile, "--target", root], { encoding: "utf8" });
+    const dry = execFileSync(process.execPath, [script, legacySrc, "--profile", "taproot-ai-backlog", "--target", root], { encoding: "utf8" });
     assert.match(dry, /Would import 5 items/);
     assert.equal(mdCount(), 0, "dry-run writes no items");
 
-    const applied = execFileSync(process.execPath, [script, legacySrc, "--mapping", mappingFile, "--target", root, "--apply"], { encoding: "utf8" });
+    const applied = execFileSync(process.execPath, [script, legacySrc, "--profile", "taproot-ai-backlog", "--target", root, "--apply"], { encoding: "utf8" });
     assert.match(applied, /Imported 5 items/);
     assert.equal(mdCount(), 3, "apply writes the 3 active items");
     assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("imports the yaml-frontmatter profile clean, with dates and a dep rewrite (anti-overfit)", () => {
+  const root = initTarget();
+  const before = snapshot(yamlSrc);
+  const yaml = loadProfile("yaml-frontmatter").mapping;
+  try {
+    const { summary } = applyImport(root, yamlSrc, yaml, { dryRun: false });
+    assert.deepEqual(summary.errors, []);
+    assert.deepEqual(summary.counts, { active: 2, completed: 1, removed: 1, total: 4 });
+    assertCheckClean(root);
+
+    const loginId = newIdFor(summary.idMap, "active/feature-login.md");
+    const logoutId = newIdFor(summary.idMap, "active/feature-logout.md");
+    // depends_on rewritten through the id map (source EX-1 → loginId)
+    const logout = fm(root, `trellis/active/${logoutId}.md`);
+    assert.deepEqual(logout.depends_on, [loginId]);
+    // no remap or defaults needed — yaml values pass straight through
+    assert.equal(logout.priority, "Medium");
+    assert.equal(logout.milestone, "Beta");
+    assert.equal(logout.effort, 2);
+    // summary synthesized from the prose when the yaml omits it
+    assert.equal(logout.summary, "Tear down the session and clear the auth cookie.");
+
+    // completed/removed close metadata read straight from yaml
+    const spec = fm(root, `trellis/completed/tasks/${newIdFor(summary.idMap, "completed/initial-spec.md")}.md`);
+    assert.equal(spec.completed_on, "2025-01-15");
+    const removed = fm(root, `trellis/removed/${newIdFor(summary.idMap, "removed/telepathy-login.md")}.md`);
+    assert.equal(removed.removed_on, "2025-02-01");
+    assert.equal(removed.removed_reason, "Not feasible with current hardware.");
+
+    assert.deepEqual(snapshot(yamlSrc), before); // source untouched
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("every built-in profile loads and is a structurally valid, documented mapping", () => {
+  const profiles = listProfiles();
+  for (const name of ["taproot-ai-backlog", "yaml-frontmatter"]) {
+    assert.ok(profiles.some((p) => p.name === name), `${name} profile ships`);
+  }
+  for (const p of profiles) {
+    const { mapping: m, error } = loadProfile(p.name);
+    assert.equal(error, null, `profile ${p.name} loads: ${error}`);
+    assert.ok(m && typeof m === "object" && m.sources && m.fields, `profile ${p.name} has sources + fields`);
+    assert.ok(p.description, `profile ${p.name} documents itself with a description`);
+  }
+  // The clean-import proof for each profile is its dedicated test above.
+});
+
+test("CLI lists profiles, and --mapping <file> matches --profile <name>", () => {
+  const script = join(projectRoot, "scripts", "trellis-import.mjs");
+  const list = execFileSync(process.execPath, [script, "--list-profiles"], { encoding: "utf8" });
+  assert.match(list, /taproot-ai-backlog/);
+  assert.match(list, /yaml-frontmatter/);
+
+  const root = initTarget();
+  const profileFile = join(projectRoot, "profiles", "taproot-ai-backlog.json");
+  try {
+    const viaProfile = execFileSync(process.execPath, [script, legacySrc, "--profile", "taproot-ai-backlog", "--target", root], { encoding: "utf8" });
+    const viaMapping = execFileSync(process.execPath, [script, legacySrc, "--mapping", profileFile, "--target", root], { encoding: "utf8" });
+    assert.match(viaProfile, /Would import 5 items/);
+    assert.match(viaMapping, /Would import 5 items/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CLI: an explicit --dry-run wins over --apply and writes nothing", () => {
+  const root = initTarget();
+  const script = join(projectRoot, "scripts", "trellis-import.mjs");
+  try {
+    const out = execFileSync(
+      process.execPath,
+      [script, legacySrc, "--profile", "taproot-ai-backlog", "--target", root, "--apply", "--dry-run"],
+      { encoding: "utf8" },
+    );
+    assert.match(out, /Would import 5 items/);
+    assert.equal(readdirSync(join(root, "trellis/active")).filter((f) => f.endsWith(".md")).length, 0, "the contradictory combo writes nothing");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

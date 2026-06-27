@@ -8,10 +8,13 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { applyScaffold } from "../src/init.mjs";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const initScript = join(sourceRoot, "scripts", "trellis-init.mjs");
+const yamlSrc = join(sourceRoot, "test", "fixtures", "yaml-frontmatter");
 const tempRepo = () => mkdtempSync(join(tmpdir(), "trellis-init-"));
 
 // Assert the scaffolded repo is --check-green: every generated artifact on disk
@@ -420,6 +423,64 @@ test("a tasksDir with a trailing slash is canonicalized — no doubled separator
     assert.ok(summary.generated.every((p) => !p.includes("//")), "no doubled separators in reported artifact paths");
     assert.doesNotMatch(readFileSync(join(root, "AGENTS.md"), "utf8"), /planning\/\//, "no doubled separator in the AGENTS block");
     assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- init --import on-ramp (CLI-composed: scaffold, then import) ----------------
+
+test("init --import scaffolds then imports an existing backlog in one command", () => {
+  const root = tempRepo();
+  try {
+    const out = execFileSync(
+      process.execPath,
+      [initScript, root, "--prefix", "ONB", "--import", yamlSrc, "--profile", "yaml-frontmatter"],
+      { encoding: "utf8" },
+    );
+    assert.match(out, /Scaffolded Trellis/);
+    assert.match(out, /Imported 4 items/);
+    assert.ok(existsSync(join(root, "trellis/active/ONB0001.md")), "an imported active item exists");
+    assert.ok(existsSync(join(root, "trellis/completed/tasks/ONB0003.md")), "an imported completed item exists");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("init --import --dry-run previews and writes nothing", () => {
+  const root = tempRepo();
+  try {
+    const out = execFileSync(
+      process.execPath,
+      [initScript, root, "--prefix", "ONB", "--import", yamlSrc, "--profile", "yaml-frontmatter", "--dry-run"],
+      { encoding: "utf8" },
+    );
+    assert.match(out, /Would scaffold Trellis/);
+    assert.match(out, /Would then import from .* using profile yaml-frontmatter/);
+    assert.match(out, /trellis import --dry-run/, "points at the real import-plan preview");
+    assert.equal(existsSync(join(root, "trellis")), false, "a dry run writes no trellis/ tree");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("init rejects --import without a profile/mapping, and --profile without --import", () => {
+  const root = tempRepo();
+  const run = (args) => {
+    try { execFileSync(process.execPath, [initScript, root, ...args], { encoding: "utf8" }); return { status: 0, stderr: "" }; }
+    catch (e) { return { status: e.status, stderr: String(e.stderr) }; }
+  };
+  try {
+    const noMapping = run(["--import", yamlSrc]);
+    assert.equal(noMapping.status, 2);
+    assert.match(noMapping.stderr, /--import requires exactly one of/);
+
+    const noImport = run(["--profile", "yaml-frontmatter"]);
+    assert.equal(noImport.status, 2);
+    assert.match(noImport.stderr, /only apply with --import/);
+
+    assert.equal(existsSync(join(root, "trellis")), false, "a usage error scaffolds nothing");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
