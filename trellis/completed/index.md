@@ -6,6 +6,7 @@ task and run `npm run backlog:readme`.
 <!-- BEGIN GENERATED:COMPLETED -->
 | ID | Title | Summary | Completed |
 | --- | --- | --- | --- |
+| [TRL0020](tasks/TRL0020.md) | Relocate the backlog root from docs/tasks/ to trellis/ | Move the canonical backlog root from docs/tasks/ to a top-level trellis/ folder (configurable via a new tasksDir key) so a repo's use of Trellis is obvious and stays out of docs/ site builds — a layout change (spec major bump) carried through the core, init, MCP, and the dogfooded backlog. | 2026-06-27 |
 | [TRL0003](tasks/TRL0003.md) | Build the `trellis init` scaffolder | One command that onboards any repo to the Trellis backlog — scaffolds the layout, config, generated index, CI check, AGENTS section, and process playbooks, idempotently and without clobbering. | 2026-06-26 |
 | [TRL0004](tasks/TRL0004.md) | Build the MCP server (operations as tools) | Expose the backlog operations over MCP so any MCP-aware tool can list, read, create, move, validate, and regenerate tasks in any repo. | 2026-06-26 |
 | [TRL0006](tasks/TRL0006.md) | Ship the process as MCP prompts + resources | Carry the "work a task" and "review" loops as MCP prompts and the spec/playbooks/templates as MCP resources, so the process travels to any MCP client, not just Claude. | 2026-06-26 |
