@@ -22,14 +22,16 @@
 //                completed_on, removed_on, removed_reason: <extractor> },
 //     remap:   { priority: {..}, milestone: {..} },   // case-insensitive keys
 //     summary: { strategy: "firstSentence" | "title" },
-//     defaults:{ removed_reason: ".." },
+//     defaults:{ milestone, priority, effort, removed_reason },  // used when the source lacks a value
 //   }
+// `defaults` chiefly fills the historical metadata that header-style legacy closed
+// items lack but the schema still requires on completed/removed items (SPEC §5.1).
 // An <extractor> is { from: "yaml", key } | { from:"inline"|"header", label }
 //   | { from:"h1" } | { from:"filename", pattern? } | { from:"const", value },
 // each optionally carrying { fallback: <extractor> } and { list: true }.
 
 import { readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
-import { join, relative, dirname } from "node:path";
+import { join, relative, dirname, isAbsolute } from "node:path";
 import {
   loadConfig,
   readBacklog,
@@ -64,14 +66,17 @@ function asList(raw) {
 }
 
 // Normalize a date token to ISO `YYYY-MM-DD` (padding single-digit month/day), or
-// null if it isn't a recognizable date — the caller turns null into a hard error
+// null if it isn't a real calendar date — the caller turns null into a hard error
 // rather than guessing a close date (SPEC §5.1 requires a valid ISO close date).
+// A UTC round-trip rejects impossible dates (month 13, day 0, Feb 31, …): an
+// out-of-range component rolls Date over to a different y/m/d than we put in.
 function toISO(raw) {
   if (raw == null) return null;
   const m = String(raw).trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (!m) return null;
-  const month = Number(m[2]), day = Number(m[3]);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null; // reject impossible dates — fail loud, don't guess a close date
+  const y = Number(m[1]), month = Number(m[2]), day = Number(m[3]);
+  const dt = new Date(Date.UTC(y, month - 1, day));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== month - 1 || dt.getUTCDate() !== day) return null;
   return `${m[1]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
@@ -191,10 +196,17 @@ function validateMapping(mapping) {
     for (const s of present) {
       const spec = mapping.sources[s];
       if (!Array.isArray(spec.dirs) || !spec.dirs.length) errors.push(`mapping.sources.${s}.dirs must be a non-empty array`);
+      else for (const d of spec.dirs) {
+        // Source dirs must stay inside sourceRoot — reject absolute paths and any
+        // `..` segment so a mapping can't read outside the tree it was pointed at.
+        if (typeof d !== "string" || !d.trim()) errors.push(`mapping.sources.${s}.dirs entries must be non-empty strings`);
+        else if (isAbsolute(d) || d.split(/[/\\]/).includes("..")) errors.push(`mapping.sources.${s}.dirs entry "${d}" must be a relative path within the source (no absolute path or ".." segments)`);
+      }
       if (spec.file != null && typeof spec.file !== "string") errors.push(`mapping.sources.${s}.file must be a string`);
     }
   }
   if (!mapping.fields || typeof mapping.fields !== "object") errors.push("mapping.fields must be an object");
+  if (mapping.defaults != null && (typeof mapping.defaults !== "object" || Array.isArray(mapping.defaults))) errors.push("mapping.defaults must be an object when present");
   return errors;
 }
 
@@ -265,10 +277,16 @@ export function planImport(targetRoot, sourceRoot, mapping) {
       return has ? String(raw0).trim() : undefined;
     };
     const remap = mapping.remap || {};
-    const priority = resolveOrCarry(runExtractor(fields.priority, ctx), remap.priority, cfg.priorities, "priority");
-    const milestone = resolveOrCarry(runExtractor(fields.milestone, ctx), remap.milestone, cfg.milestones, "milestone");
+    // `mapping.defaults` supplies a value when the source has none — chiefly for the
+    // historical metadata that header-style legacy closed items lack but the schema
+    // still requires (SPEC §5.1). A defaulted value is treated like any extracted
+    // one (validated for active items, carried for closed).
+    const defaults = mapping.defaults || {};
+    const withDefault = (v, field) => (v != null && String(v).trim() !== "" ? v : defaults[field]);
+    const priority = resolveOrCarry(withDefault(runExtractor(fields.priority, ctx), "priority"), remap.priority, cfg.priorities, "priority");
+    const milestone = resolveOrCarry(withDefault(runExtractor(fields.milestone, ctx), "milestone"), remap.milestone, cfg.milestones, "milestone");
 
-    const rawEffort = runExtractor(fields.effort, ctx);
+    const rawEffort = withDefault(runExtractor(fields.effort, ctx), "effort");
     const eff = resolveEffort(cfg, rawEffort);
     let effort;
     if (!eff.error) effort = eff.value;
@@ -277,6 +295,15 @@ export function planImport(targetRoot, sourceRoot, mapping) {
       const has = rawEffort != null && String(rawEffort).trim() !== "";
       if (has) warnings.push(`${src.rel}: effort "${rawEffort}" not resolved — kept as a historical value`);
       effort = has ? rawEffort : undefined;
+    }
+
+    // Closed items still require the descriptive metadata as a historical snapshot
+    // (SPEC §5.1) — if the source lacks it and no mapping default fills it, fail loud
+    // (a clear plan-time error) rather than emit an item the core would reject.
+    if (!isActive) {
+      for (const [k, v] of [["milestone", milestone], ["priority", priority], ["effort", effort]]) {
+        if (v === undefined) ierr(`${src.status} item is missing \`${k}\` (source has none — set \`defaults.${k}\` in the mapping)`);
+      }
     }
 
     const body = buildBody(raw, newId, title || newId);

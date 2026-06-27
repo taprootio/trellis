@@ -175,13 +175,50 @@ test("treats a dependency on a collided source id as a hard error", () => {
   }
 });
 
-test("rejects an impossible close date instead of guessing one", () => {
+test("rejects non-calendar close dates instead of guessing, but accepts real ones", () => {
   const root = initTarget();
-  const src = mkdtempSync(join(tmpdir(), "trellis-srcbad-"));
+  const m = {
+    sources: { completed: { dirs: ["completed"], file: "*.md" } },
+    fields: {
+      id: { from: "filename", pattern: "^(\\d+)" },
+      title: { from: "h1" },
+      completed_on: { from: "header", label: "Created" },
+    },
+    defaults: { milestone: "Alpha", priority: "Low", effort: 1 }, // isolate the date as the only variable
+  };
+  const writeSrc = (date) => {
+    const src = mkdtempSync(join(tmpdir(), "trellis-srcdate-"));
+    mkdirSync(join(src, "completed"), { recursive: true });
+    writeFileSync(join(src, "completed", "001-x.md"), `# A done thing\n\nCreated: ${date}\n\nIt shipped.\n`);
+    return src;
+  };
+  try {
+    for (const bad of ["2024-13-40", "2024-02-31", "2024-00-10", "2024-12-00"]) {
+      const src = writeSrc(bad);
+      try {
+        const plan = planImport(root, src, m);
+        assert.ok(plan.errors.some((e) => e.includes("completed_on")), `expected a date error for ${bad}, got ${JSON.stringify(plan.errors)}`);
+        assert.ok(applyImport(root, src, m, { dryRun: false }).summary.errors.length > 0);
+      } finally { rmSync(src, { recursive: true, force: true }); }
+    }
+    const ok = writeSrc("2024-02-29"); // 2024 is a leap year — a real date
+    try {
+      const { summary } = applyImport(root, ok, m, { dryRun: false });
+      assert.deepEqual(summary.errors, []);
+      assertCheckClean(root);
+    } finally { rmSync(ok, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("requires historical metadata on closed items unless a mapping default supplies it", () => {
+  const root = initTarget();
+  const src = mkdtempSync(join(tmpdir(), "trellis-srcmeta-"));
   try {
     mkdirSync(join(src, "completed"), { recursive: true });
-    writeFileSync(join(src, "completed", "001-x.md"), "# A done thing\n\nCreated: 2024-13-40\n\nIt shipped.\n");
-    const m = {
+    writeFileSync(join(src, "completed", "007-x.md"), "# Shipped thing\n\nCreated: 2024-02-03\n\nIt shipped.\n");
+    const base = {
       sources: { completed: { dirs: ["completed"], file: "*.md" } },
       fields: {
         id: { from: "filename", pattern: "^(\\d+)" },
@@ -189,14 +226,37 @@ test("rejects an impossible close date instead of guessing one", () => {
         completed_on: { from: "header", label: "Created" },
       },
     };
-    const plan = planImport(root, src, m);
-    assert.ok(plan.errors.some((e) => e.includes("completed_on")), `expected a completed_on date error, got ${JSON.stringify(plan.errors)}`);
-    const { summary } = applyImport(root, src, m, { dryRun: false });
-    assert.ok(summary.errors.length > 0);
+    // No defaults: the header-style item has no milestone/priority/effort → hard error.
+    const plan = planImport(root, src, base);
+    for (const f of ["milestone", "priority", "effort"]) {
+      assert.ok(plan.errors.some((e) => e.includes(f)), `expected a missing-${f} error, got ${JSON.stringify(plan.errors)}`);
+    }
+    assert.ok(applyImport(root, src, base, { dryRun: false }).summary.errors.length > 0);
     assertCheckClean(root); // nothing written
+
+    // With mapping defaults, the same source imports clean.
+    const withDefaults = { ...base, defaults: { milestone: "Alpha", priority: "Low", effort: 1 } };
+    const { summary } = applyImport(root, src, withDefaults, { dryRun: false });
+    assert.deepEqual(summary.errors, []);
+    assertCheckClean(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(src, { recursive: true, force: true });
+  }
+});
+
+test("rejects source dirs that escape the source root", () => {
+  const root = initTarget();
+  try {
+    const m = {
+      sources: { active: { dirs: ["../escape"], file: "*.md" } },
+      fields: { id: { from: "filename" }, title: { from: "h1" } },
+    };
+    const plan = planImport(root, legacySrc, m);
+    assert.ok(plan.errors.some((e) => e.includes("within the source")), `expected a traversal error, got ${JSON.stringify(plan.errors)}`);
+    assert.ok(applyImport(root, legacySrc, m, { dryRun: false }).summary.errors.length > 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

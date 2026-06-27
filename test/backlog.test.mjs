@@ -60,8 +60,8 @@ function makeRepo(config, { active = [], completed = [], removed = [] } = {}) {
   writeFileSync(join(tasks, "completed", "index.md"), "# Completed\n\n<!-- BEGIN GENERATED:COMPLETED -->\n<!-- END GENERATED:COMPLETED -->\n");
   writeFileSync(join(tasks, "removed", "index.md"), "# Removed\n\n<!-- BEGIN GENERATED:REMOVED -->\n<!-- END GENERATED:REMOVED -->\n");
   for (const it of active) writeFileSync(join(tasks, "active", `${it.id}.md`), fm({ status: "active", depends_on: [], summary: "S.", milestone: "Alpha", priority: "High", ...it }));
-  for (const it of completed) writeFileSync(join(tasks, "completed", "tasks", `${it.id}.md`), fm({ status: "completed", depends_on: [], summary: "S.", milestone: "Alpha", priority: "High", completed_on: "2026-01-01", ...it }));
-  for (const it of removed) writeFileSync(join(tasks, "removed", `${it.id}.md`), fm({ status: "removed", depends_on: [], summary: "S.", milestone: "Alpha", priority: "High", removed_on: "2026-01-01", removed_reason: "R.", ...it }));
+  for (const it of completed) writeFileSync(join(tasks, "completed", "tasks", `${it.id}.md`), fm({ status: "completed", depends_on: [], summary: "S.", milestone: "Alpha", priority: "High", effort: 3, completed_on: "2026-01-01", ...it }));
+  for (const it of removed) writeFileSync(join(tasks, "removed", `${it.id}.md`), fm({ status: "removed", depends_on: [], summary: "S.", milestone: "Alpha", priority: "High", effort: 3, removed_on: "2026-01-01", removed_reason: "R.", ...it }));
   return root;
 }
 
@@ -219,6 +219,21 @@ test("a closed item resolves best-effort and never fails validation on a stale l
     assert.equal(done.effortLabel, "Trout"); // resolves under the current scale
     assert.equal(gone.effort, "Kraken");      // stale label passes through as-is
     assert.equal("effortLabel" in gone, false);
+  });
+});
+
+test("closed items still require the descriptive metadata (presence, not enum membership)", () => {
+  withRepo(ARRAY_CFG, {}, (root) => {
+    // A completed item that omits the required historical snapshot fields (SPEC §5.1).
+    writeFileSync(
+      join(root, "trellis", "completed", "tasks", "DEMO0001.md"),
+      "---\nid: DEMO0001\ntitle: T\nstatus: completed\ndepends_on: []\ncompleted_on: 2026-01-01\n---\n\nBody.\n",
+    );
+    const { cfg } = loadConfig(root);
+    const errors = readBacklog(root, cfg).errors.join("; ");
+    for (const field of ["summary", "milestone", "priority", "effort"]) {
+      assert.ok(errors.includes("missing `" + field + "`"), `expected a missing-${field} error in ${errors}`);
+    }
   });
 });
 

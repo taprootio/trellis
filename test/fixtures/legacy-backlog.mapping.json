@@ -19,5 +19,6 @@
     "priority": { "P1": "High", "P2": "Medium", "P3": "Low" },
     "milestone": { "Pre-Launch": "Alpha", "MCP Servers": "Beta", "Post-Launch": "v1", "Back-Burner": "Future", "Legal Research": "Future" }
   },
+  "defaults": { "milestone": "Alpha", "priority": "Low", "effort": 1 },
   "summary": { "strategy": "firstSentence" }
 }

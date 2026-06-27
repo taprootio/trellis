@@ -382,6 +382,18 @@ export function readBacklog(repoRoot, cfg) {
     else for (const d of it.depends_on) if (!ids.has(d)) err(`depends_on ${d} is not a known task id`);
   };
 
+  // The descriptive metadata is required on closed items too, as a historical
+  // snapshot (SPEC §5.1): its *presence* is enforced here, but its enum membership
+  // is NOT re-validated against the current config (§8.3) — a value that has since
+  // left the config still validates. Call before attachEffort, so a present-but-
+  // unresolvable historical effort (e.g. a retired scale label) counts as present.
+  const checkHistorical = (it, err) => {
+    if (!it.summary) err("missing `summary`");
+    if (it.milestone === undefined || it.milestone === "") err("missing `milestone`");
+    if (it.priority === undefined || it.priority === "") err("missing `priority`");
+    if (it.effort === undefined || it.effort === "") err("missing `effort`");
+  };
+
   for (const it of active) {
     const err = (m) => errors.push(`active/${it._file}: ${m}`);
     checkCommon(it, "active", err);
@@ -393,12 +405,14 @@ export function readBacklog(repoRoot, cfg) {
   for (const it of completed) {
     const err = (m) => errors.push(`completed/${it._file}: ${m}`);
     checkCommon(it, "completed", err);
+    checkHistorical(it, err);
     attachEffort(it, null);
     if (!isoDate(it.completed_on)) err("`completed_on` must be an ISO date (YYYY-MM-DD)");
   }
   for (const it of removed) {
     const err = (m) => errors.push(`removed/${it._file}: ${m}`);
     checkCommon(it, "removed", err);
+    checkHistorical(it, err);
     attachEffort(it, null);
     if (!isoDate(it.removed_on)) err("`removed_on` must be an ISO date (YYYY-MM-DD)");
     if (!it.removed_reason) err("missing `removed_reason`");
