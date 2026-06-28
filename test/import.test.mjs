@@ -21,6 +21,9 @@ const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtures = join(projectRoot, "test", "fixtures");
 const legacySrc = join(fixtures, "legacy-backlog");
 const yamlSrc = join(fixtures, "yaml-frontmatter");
+// Header-less / size-only drift (TRL0026): closed items with no date header, effort
+// under a `Size:` label, and one item with no effort signal at all.
+const headerlessSrc = join(fixtures, "legacy-headerless");
 // The shipped Taproot reference profile doubles as this suite's regression mapping
 // (the built-in profiles are the canonical fixtures — TRL0022).
 const mapping = loadProfile("taproot-ai-backlog").mapping;
@@ -764,5 +767,43 @@ test("a closed item with no effort signal is filled from defaults.effort and fla
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(src, { recursive: true, force: true });
+  }
+});
+
+// ------------------------- TRL0026: header-less / size-only fixture, end-to-end
+test("taproot profile imports a header-less, size-only fixture: git-dated, Size→effort, estimate-flagged", () => {
+  const root = initTarget();
+  const before = snapshot(headerlessSrc);
+  try {
+    // Inject the git date so the end-to-end assertion is deterministic; the real-git
+    // path is covered by the integration test above.
+    const gitDate = () => "2022-11-02";
+    const { summary } = applyImport(root, headerlessSrc, mapping, { dryRun: false, gitDate });
+    assert.deepEqual(summary.errors, []);
+    assert.deepEqual(summary.counts, { active: 1, completed: 2, removed: 0, total: 3 });
+
+    // Active item: effort read from `Size:` (Effort: absent), enums remapped.
+    const active = fm(root, `trellis/active/${newIdFor(summary.idMap, "active/100-sized-active.md")}.md`);
+    assert.equal(active.effort, 5, "active effort from the Size fallback");
+    assert.equal(active.priority, "Medium"); // P2 → Medium
+    assert.equal(active.milestone, "Beta");  // "MCP Servers" → Beta
+
+    // Header-less completed item with a Size: git-dated, effort from Size, not estimated.
+    const sized = fm(root, `trellis/completed/tasks/${newIdFor(summary.idMap, "completed/099-no-date.md")}.md`);
+    assert.equal(sized.completed_on, "2022-11-02", "completed_on git-dated");
+    assert.equal(sized.effort, 3, "closed effort from the Size fallback");
+
+    // Header-less completed item with no effort signal: git-dated + defaults.effort, flagged.
+    const bare = fm(root, `trellis/completed/tasks/${newIdFor(summary.idMap, "completed/098-no-size.md")}.md`);
+    assert.equal(bare.completed_on, "2022-11-02");
+    assert.equal(bare.effort, 1, "effort from defaults.effort");
+
+    assert.equal(summary.provenance.gitDated, 2, "both header-less completed items git-dated");
+    assert.equal(summary.provenance.effortEstimated, 1, "only the no-size completed item is effort-estimated");
+    assert.ok(summary.warnings.some((w) => /098-no-size.*effort 1 estimated/.test(w)), `expected an estimate warning, got ${JSON.stringify(summary.warnings)}`);
+    assert.deepEqual(snapshot(headerlessSrc), before, "source tree untouched");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
