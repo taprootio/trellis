@@ -24,7 +24,7 @@ jobs:
 Require the check named **`backlog`**, not `Backlog Hygiene`. The job carries an
 explicit `name: backlog` so the context is pinned: renaming the workflow's display
 name cannot move it, and a rename of the job is a visible edit to this line rather
-than a silent gate-disabling drift (the risk §10's stable-context requirement
+than a silent gate-disabling drift (the risk §10's stable-context guidance
 guards against). If you change the job name, update the required check to match.
 
 ## GitHub
