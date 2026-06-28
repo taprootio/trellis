@@ -12,7 +12,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 | ID | Title | Owner | Priority | Effort |
 | --- | --- | --- | --- | --- |
-| [TRL0014](active/TRL0014.md) | Bake branch protection + required backlog check into the recipe |  | High | 🐡 Trout · 3 |
 | [TRL0009](active/TRL0009.md) | Dogfood — onboard an existing repo end-to-end |  | Medium | 🐡 Trout · 3 |
 
 ### v1
