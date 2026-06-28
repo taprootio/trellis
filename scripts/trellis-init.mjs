@@ -152,12 +152,15 @@ function importFlagErrors(opts) {
 }
 
 // --retire-source is a separate, later step — never automatic mid-import (TRL0027), so
-// it cannot share a run with --import.
+// it cannot share a run with --import. Keyed on the flag's PRESENCE (not a truthy
+// value): a valueless `--retire-source` (trailing flag, or `--retire-source=`) must be
+// a usage error, not a silent fall-through to scaffolding.
 function retireFlagErrors(opts) {
-  if (opts.retireSource && opts.import) {
-    return ["--retire-source cannot be combined with --import — retire the source in a separate run after the import is committed"];
-  }
-  return [];
+  if (!("retireSource" in opts)) return [];
+  const errors = [];
+  if (!opts.retireSource || !String(opts.retireSource).trim()) errors.push("--retire-source requires a path");
+  if (opts.import) errors.push("--retire-source cannot be combined with --import — retire the source in a separate run after the import is committed");
+  return errors;
 }
 
 // Concise report for the follow-on import (mirrors the trellis import CLI). Fatal
@@ -212,10 +215,14 @@ if (opts.help) { process.stdout.write(HELP); process.exit(0); }
 
 await promptMissing(opts);
 
-const optErrors = validateOptions(resolveOptions(opts));
-if (optErrors.length) {
-  for (const e of optErrors) console.error(`error: ${e}`);
-  process.exit(2);
+// Scaffold vocabulary is irrelevant to a retire-only run (it never scaffolds), so don't
+// validate it there — mirrors promptMissing, which also skips on retire.
+if (!("retireSource" in opts)) {
+  const optErrors = validateOptions(resolveOptions(opts));
+  if (optErrors.length) {
+    for (const e of optErrors) console.error(`error: ${e}`);
+    process.exit(2);
+  }
 }
 
 const flagErrors = [...importFlagErrors(opts), ...retireFlagErrors(opts)];
@@ -229,7 +236,8 @@ const dryRun = !!opts.dryRun;
 
 // --retire-source: a deliberate, standalone step run after the import is committed. It
 // does not scaffold or import — it stages a history-preserving `git rm` of the source.
-if (opts.retireSource) {
+// Keyed on presence (a valueless flag was already rejected by retireFlagErrors).
+if ("retireSource" in opts) {
   const { summary: ret } = retireSource(targetRoot, opts.retireSource, { dryRun });
   reportRetire(ret, dryRun);
   process.exit(ret.errors.length ? 1 : 0);

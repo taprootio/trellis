@@ -811,3 +811,17 @@ test("--retire-source cannot be combined with --import", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a valueless --retire-source is a usage error, never a silent scaffold", () => {
+  const root = tempRepo(); // not git — the usage error must fire before any fs/git work
+  try {
+    for (const args of [["--retire-source"], ["--retire-source", ""]]) {
+      const { status, stderr } = runInit(root, args);
+      assert.equal(status, 2, `${JSON.stringify(args)} should be a usage error`);
+      assert.match(stderr, /--retire-source requires a path/);
+    }
+    assert.equal(existsSync(join(root, "trellis")), false, "a valueless retire flag scaffolds nothing");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
