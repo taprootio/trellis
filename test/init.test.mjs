@@ -117,7 +117,7 @@ test("respects --prefix in config, next id, and the AGENTS block", () => {
     applyScaffold(root, { prefix: "ACME" }, {}, sourceRoot);
     const cfg = JSON.parse(readFileSync(join(root, "trellis/backlog.config.json"), "utf8"));
     assert.equal(cfg.idPrefix, "ACME");
-    assert.equal(cfg.specVersion, "2.2");
+    assert.equal(cfg.specVersion, "2.3");
     const backlog = JSON.parse(readFileSync(join(root, "trellis/backlog.json"), "utf8"));
     assert.equal(backlog.prefix, "ACME");
     assert.equal(backlog.nextId, "ACME0001");

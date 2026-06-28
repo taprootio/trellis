@@ -6,6 +6,7 @@ task and run `npm run backlog:readme`.
 <!-- BEGIN GENERATED:COMPLETED -->
 | ID | Title | Summary | Completed |
 | --- | --- | --- | --- |
+| [TRL0024](tasks/TRL0024.md) | Drop the README "Next task ID"; make backlog.json the canonical source | Remove the redundant generated "Next task ID" section from the README and point the spec at backlog.json's nextId (plus the MCP next_id tool) as the single published source. | 2026-06-28 |
 | [TRL0025](tasks/TRL0025.md) | Git-derived task history and a materialized history.json | Derive a lightweight per-task history (who changed it, when, why) from git and materialize it as a non-gated history.json the future viewer can read without a git runtime. | 2026-06-28 |
 | [TRL0020](tasks/TRL0020.md) | Relocate the backlog root from docs/tasks/ to trellis/ | Move the canonical backlog root from docs/tasks/ to a top-level trellis/ folder (configurable via a new tasksDir key) so a repo's use of Trellis is obvious and stays out of docs/ site builds — a layout change (spec major bump) carried through the core, init, MCP, and the dogfooded backlog. | 2026-06-27 |
 | [TRL0021](tasks/TRL0021.md) | Build the backlog import engine (disparate schemas → Trellis) | Build a config-driven importer that converts an existing backlog on a foreign schema into Trellis items via a declarative mapping — locating fields, remapping enums, assigning fresh canonical ids, deduping colliding source ids and rewriting dependencies, synthesizing summaries — with a dry-run default and a --check-green result. | 2026-06-27 |

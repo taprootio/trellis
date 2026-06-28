@@ -192,6 +192,17 @@ test("README shows `[emoji ]label · N` under a custom scale, bare N under ident
   });
 });
 
+test("README publishes the milestone tables only — no `Next task ID` section (SPEC §8.1)", () => {
+  withRepo(ARRAY_CFG, { active: [{ id: "DEMO0001", title: "T", effort: 2 }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    const readme = generateArtifacts(root, cfg, data).files.find((f) => f.path.endsWith("README.md")).content;
+    assert.doesNotMatch(readme, /Next task ID/, "the next id is no longer published in the README");
+    // It stays canonical in backlog.json (SPEC §8.2) — one active item ⇒ next is DEMO0002.
+    assert.equal(JSON.parse(buildBacklogJson(cfg, data)).nextId, "DEMO0002");
+  });
+});
+
 test("backlog.json carries effortLabel/emoji/image under a custom scale, nothing under identity", () => {
   withRepo(FISH, { active: [{ id: "DEMO0001", title: "T", effort: 5 }] }, (root) => {
     const { cfg } = loadConfig(root);

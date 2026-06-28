@@ -12,7 +12,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
-export const SPEC_VERSION = "2.2";
+export const SPEC_VERSION = "2.3";
 
 // The backlog root defaults to `trellis/` and is overridable per repo via the
 // config's `tasksDir` key (SPEC §2/§7). The config file itself lives at a FIXED
@@ -646,7 +646,10 @@ export function generateArtifacts(repoRoot, cfg, data) {
     const items = data.active.filter((a) => a.milestone === ms);
     if (items.length) block += `\n### ${ms}\n\n${activeTable(items, cfg)}\n`;
   }
-  const readmeBody = `${block}\n## Next task ID\n\n\`${next}\``;
+  // The README publishes only the milestone tables; the next id lives in
+  // backlog.json (SPEC §8.1/§8.2), so `next` below feeds only that artifact and
+  // this function's return value (CLI/MCP callers), not the README body.
+  const readmeBody = block;
 
   const readText = (path) => {
     if (existsSync(path)) return readFileSync(path, "utf8");
