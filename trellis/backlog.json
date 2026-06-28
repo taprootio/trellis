@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0026",
   "counts": {
-    "active": 10,
-    "completed": 15,
+    "active": 9,
+    "completed": 16,
     "removed": 0
   },
   "tasks": [
@@ -160,20 +160,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
-    },
-    {
-      "id": "TRL0024",
-      "title": "Drop the README \"Next task ID\"; make backlog.json the canonical source",
-      "status": "active",
-      "milestone": "Beta",
-      "priority": "Low",
-      "effort": 2,
-      "effortLabel": "Goldfish",
-      "effortEmoji": "🐠",
-      "depends_on": [],
-      "owner": null,
-      "collaborators": [],
-      "summary": "Remove the redundant generated \"Next task ID\" section from the README and point the spec at backlog.json's nextId (plus the MCP next_id tool) as the single published source."
     },
     {
       "id": "TRL0001",
@@ -408,6 +394,21 @@
       "collaborators": [],
       "summary": "Add a configured team roster (active/historical members) plus optional owner and collaborators task fields, validated like the existing enums and importable via the mapping, so the backlog records who is responsible for each item.",
       "completed_on": "2026-06-27"
+    },
+    {
+      "id": "TRL0024",
+      "title": "Drop the README \"Next task ID\"; make backlog.json the canonical source",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "Low",
+      "effort": 2,
+      "effortLabel": "Goldfish",
+      "effortEmoji": "🐠",
+      "depends_on": [],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Remove the redundant generated \"Next task ID\" section from the README and point the spec at backlog.json's nextId (plus the MCP next_id tool) as the single published source.",
+      "completed_on": "2026-06-28"
     },
     {
       "id": "TRL0025",
