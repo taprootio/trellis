@@ -356,11 +356,16 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   for (const f of files) {
     const abs = join(targetRoot, f.rel);
     const exists = existsSync(abs);
-    actions.push({
-      rel: f.rel,
-      content: f.content,
-      action: exists && !force ? "skip" : "create",
-    });
+    let action = exists && !force ? "skip" : "create";
+    // team.json holds authored roster data with no flag source, so a VALID existing
+    // roster is preserved even under --force — overwriting it would drop real members
+    // and could leave active owners dangling (a partial, broken scaffold). Only an
+    // absent or broken roster is (re)written with the stub. Mirrors the AGENTS block,
+    // which --force also never clobbers.
+    if (f.rel === TEAM_REL && exists && loadRoster(targetRoot).errors.length === 0) {
+      action = "skip";
+    }
+    actions.push({ rel: f.rel, content: f.content, action });
   }
 
   // AGENTS.md: create if absent, append the block if present without it, else skip.

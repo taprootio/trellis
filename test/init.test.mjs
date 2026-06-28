@@ -70,6 +70,27 @@ test("scaffolds a valid team.json stub (one active member) and mentions the rost
   }
 });
 
+test("--force preserves a valid team.json instead of clobbering it (no data loss, no dangling owners)", () => {
+  // Regression: --force overwriting a real roster with the stub would drop members and
+  // leave an active `owner: alice` dangling, failing generate after a partial write.
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    writeFileSync(join(root, "trellis/team.json"), JSON.stringify({ members: [{ handle: "alice", name: "Alice", status: "active" }] }, null, 2) + "\n");
+    writeFileSync(
+      join(root, "trellis/active/DEMO0001.md"),
+      "---\nid: DEMO0001\ntitle: T\nstatus: active\nmilestone: Alpha\npriority: High\neffort: 3\ndepends_on: []\nowner: alice\nsummary: S.\n---\n\n# DEMO0001 — T\n",
+    );
+    const { summary } = applyScaffold(root, { prefix: "DEMO", force: true }, {}, sourceRoot);
+    assert.deepEqual(summary.errors, [], "force does not break the owned active task");
+    assert.ok(summary.skipped.includes("trellis/team.json"), "the valid roster is preserved (skipped), not recreated");
+    assert.deepEqual(loadRoster(root).roster.members.map((m) => m.handle), ["alice"], "members are intact, not replaced by the stub");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("--force repairs a broken team.json instead of refusing", () => {
   // A pre-existing broken roster would fail the core read; --force overwrites it with a
   // fresh stub, so preflight must not block on it (parallel to a corrupted index).

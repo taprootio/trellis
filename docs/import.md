@@ -164,8 +164,9 @@ the title.
   warning** — an owner that resolves to no active member is dropped, never invented.
   An unresolved collaborator is likewise dropped with a warning. On a **closed**
   item the value is historical: a member who has since gone inactive keeps their
-  canonical handle, and a handle absent from the roster is carried verbatim, each
-  with a warning only when unknown. Carrying owners therefore requires the target
+  canonical handle; a handle absent from the roster is kept (after `remap.owner`) only
+  if it is a valid handle — a former member — and otherwise dropped with a warning, so
+  a non-handle value can never corrupt the stored item. Carrying owners therefore requires the target
   repo to have a `team.json` (with no roster, every owner drops or carries as
   above); curating the roster can stay a manual post-import step.
 

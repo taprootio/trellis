@@ -28,7 +28,8 @@
 // `remap.owner` maps a source assignee to a roster handle (SPEC §7.2) and applies to
 // both `owner` and `collaborators`; `defaults.owner` fills an unresolved owner on
 // active items only. An owner that resolves to no active member never invents one —
-// active items drop to unassigned, closed items carry the value as historical.
+// active items drop to unassigned; closed items keep a valid historical handle (after
+// remap) and drop a non-handle value that wouldn't round-trip.
 // `defaults` chiefly fills the historical metadata that header-style legacy closed
 // items lack but the schema still requires on completed/removed items (SPEC §5.1).
 // An <extractor> is { from: "yaml", key } | { from:"inline"|"header", label }
@@ -332,58 +333,54 @@ export function planImport(targetRoot, sourceRoot, mapping) {
 
     // ----- ownership (owner + collaborators) -----------------------------------
     // `remap.owner` (case-insensitive) maps a source assignee to a roster handle and
-    // applies to both owner and collaborators (one identity space). matchAssignee
-    // returns the roster member (any status) for the remapped handle, or null.
-    const matchAssignee = (rawHandle) => {
-      const s = rawHandle == null ? "" : String(rawHandle).trim();
-      return s ? (findMember(roster, remapLookup(remap.owner, s)) || null) : null;
+    // applies to both owner and collaborators (one identity space). resolveAssignee
+    // returns the target handle to store, or null:
+    //   - active item: an ACTIVE roster member's canonical handle, else null (silent —
+    //     the caller falls back to defaults / unassigned).
+    //   - closed item (historical, SPEC §5.1/§8.3): any roster member's canonical handle
+    //     (no warning); else the *remapped* value if it is a valid handle (a former
+    //     member — kept, with a warning); else null (a non-handle that would not
+    //     round-trip — dropped, with a warning). Never invents a member.
+    const resolveAssignee = (raw, kind) => {
+      const s = raw == null ? "" : String(raw).trim();
+      if (!s) return null;
+      const remapped = remapLookup(remap.owner, s);
+      const m = findMember(roster, remapped);
+      if (isActive) return m && m.status === "active" ? m.handle : null;
+      if (m) return m.handle;
+      if (isValidHandle(remapped)) {
+        warnings.push(`${src.rel}: ${kind} "${s}" is not in the roster — kept as a historical value`);
+        return remapped;
+      }
+      warnings.push(`${src.rel}: ${kind} "${s}" is not a valid handle — dropped`);
+      return null;
     };
 
-    // owner (optional): resolve via remap → active roster; fall back to `defaults.owner`
-    // (active items only); else unassigned — never inventing a member. On a closed item a
-    // matched member (incl. inactive) is kept as a historical value and an unknown handle
-    // is carried verbatim, each warned only when truly unknown (SPEC §5.1, §8.3).
-    let owner;
+    // owner (optional): on active items chain resolve → `defaults.owner` → unassigned
+    // (warn if a source owner was present but didn't resolve); on closed items
+    // resolveAssignee has already carried or dropped it as a historical value.
     const rawOwner = runExtractor(fields.owner, ctx);
-    const ownerMatch = matchAssignee(rawOwner);
-    if (ownerMatch && (ownerMatch.status === "active" || !isActive)) {
-      owner = ownerMatch.handle;
-    } else if (isActive && defaults.owner != null && String(defaults.owner).trim() !== "") {
-      const dm = matchAssignee(defaults.owner);
-      if (dm && dm.status === "active") owner = dm.handle;
-    }
-    if (owner === undefined) {
-      const present = rawOwner != null && String(rawOwner).trim() !== "";
-      if (present && isActive) {
+    let owner = resolveAssignee(rawOwner, "owner") ?? undefined;
+    if (isActive && owner === undefined) {
+      if (defaults.owner != null && String(defaults.owner).trim() !== "") {
+        owner = resolveAssignee(defaults.owner, "owner") ?? undefined;
+      }
+      if (owner === undefined && rawOwner != null && String(rawOwner).trim() !== "") {
         warnings.push(`${src.rel}: owner "${String(rawOwner).trim()}" is not an active roster member — imported unassigned`);
-      } else if (present) {
-        owner = String(rawOwner).trim(); // closed item: carry the historical value
-        warnings.push(`${src.rel}: owner "${owner}" is not in the roster — kept as a historical value`);
       }
     }
 
-    // collaborators (optional list): same per-entry resolution; active items keep active
-    // members and drop the rest with a warning; closed items keep canonical handles
-    // (incl. inactive) and carry unknowns as historical with a warning. Deduped.
+    // collaborators (optional list): per-entry resolution, deduped. Active items drop a
+    // non-member with a warning; closed items keep/drop via resolveAssignee (which warns),
+    // so there is no double-warning here.
     const collaborators = [];
     const rawCollabs = fields.collaborators ? asList(runExtractor({ ...fields.collaborators, list: true }, ctx)) : [];
     for (const c of rawCollabs) {
-      const m = matchAssignee(c);
-      if (m && (m.status === "active" || !isActive)) {
-        if (!collaborators.includes(m.handle)) collaborators.push(m.handle);
+      const h = resolveAssignee(c, "collaborator");
+      if (h != null) {
+        if (!collaborators.includes(h)) collaborators.push(h);
       } else if (isActive) {
-        warnings.push(`${src.rel}: collaborator "${c}" is not an active roster member — dropped`);
-      } else {
-        // Closed item, handle not in the roster: carry it verbatim as a historical
-        // value — but only if it is a valid handle, else it would corrupt the inline
-        // `collaborators` array (SPEC §7.2), so drop it with a warning instead.
-        const v = String(c).trim();
-        if (isValidHandle(v)) {
-          if (!collaborators.includes(v)) collaborators.push(v);
-          warnings.push(`${src.rel}: collaborator "${c}" is not in the roster — kept as a historical value`);
-        } else {
-          warnings.push(`${src.rel}: collaborator "${c}" is not a valid handle — dropped`);
-        }
+        warnings.push(`${src.rel}: collaborator "${String(c).trim()}" is not an active roster member — dropped`);
       }
     }
 
