@@ -501,18 +501,23 @@ export function readBacklog(repoRoot, cfg) {
     if (it.effort === undefined || it.effort === "") err("missing `effort`");
   };
 
-  // Active-item ownership (SPEC §5.1, §8.3): `owner` (if set) and every collaborator
-  // must be an ACTIVE roster member. Both fields are optional. Called for active items
-  // only — on closed items the values are historical and not re-validated, so a member
-  // who has since gone inactive or left the roster still validates.
-  const validateAssignees = (it, err) => {
+  // Owner/collaborator validation (SPEC §5.1, §7.2, §8.3). On **every** item the
+  // values must be syntactically valid handles — a handle is charset-constrained even
+  // when historical, so the closed-item exemption is from roster *membership*, not from
+  // being a handle (else a hand-authored `owner: Jane Doe` would pass `--check`).
+  // **Active** items additionally require an ACTIVE roster member; on closed items
+  // membership is not re-checked, so a member who has since gone inactive or left the
+  // roster still validates. Both fields are optional.
+  const validateAssignees = (it, err, active) => {
     if (it.owner !== undefined && it.owner !== "") {
-      if (!findActiveMember(roster, it.owner)) err(`owner "${it.owner}" is not an active roster member`);
+      if (!isValidHandle(it.owner)) err(`owner "${it.owner}" is not a valid handle (use letters, digits, ., _, -)`);
+      else if (active && !findActiveMember(roster, it.owner)) err(`owner "${it.owner}" is not an active roster member`);
     }
     if (it.collaborators !== undefined) {
       if (!Array.isArray(it.collaborators)) err("`collaborators` must be a list of handles");
       else for (const c of it.collaborators) {
-        if (!findActiveMember(roster, c)) err(`collaborator "${c}" is not an active roster member`);
+        if (!isValidHandle(c)) err(`collaborator "${c}" is not a valid handle (use letters, digits, ., _, -)`);
+        else if (active && !findActiveMember(roster, c)) err(`collaborator "${c}" is not an active roster member`);
       }
     }
   };
@@ -524,7 +529,7 @@ export function readBacklog(repoRoot, cfg) {
     if (!cfg.priorities.includes(it.priority)) err(`priority must be one of ${cfg.priorities.join(", ")}`);
     attachEffort(it, err);
     if (!cfg.milestones.includes(it.milestone)) err(`milestone must be one of ${cfg.milestones.join(", ")}`);
-    validateAssignees(it, err);
+    validateAssignees(it, err, true);
   }
   for (const it of completed) {
     const err = (m) => errors.push(`completed/${it._file}: ${m}`);
@@ -532,6 +537,7 @@ export function readBacklog(repoRoot, cfg) {
     checkHistorical(it, err);
     attachEffort(it, null);
     if (!isoDate(it.completed_on)) err("`completed_on` must be an ISO date (YYYY-MM-DD)");
+    validateAssignees(it, err, false);
   }
   for (const it of removed) {
     const err = (m) => errors.push(`removed/${it._file}: ${m}`);
@@ -540,6 +546,7 @@ export function readBacklog(repoRoot, cfg) {
     attachEffort(it, null);
     if (!isoDate(it.removed_on)) err("`removed_on` must be an ISO date (YYYY-MM-DD)");
     if (!it.removed_reason) err("missing `removed_reason`");
+    validateAssignees(it, err, false);
   }
 
   return { active, completed, removed, ids, errors, roster };

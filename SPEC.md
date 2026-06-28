@@ -118,7 +118,8 @@ or `removed_on`/`removed_reason`). These retained enum values are **historical**
 tooling records them as-was and does not re-validate them against the current
 config (§8.3), so milestones and scales can evolve without breaking the archive.
 `owner`/`collaborators` are likewise historical on closed items, so a member who
-has since gone `inactive` (or left the roster) does not invalidate the archive.
+has since gone `inactive` (or left the roster) does not invalidate the archive —
+though the stored value must still be a syntactically valid handle (§7.2).
 
 ### 5.2 Body
 
@@ -325,11 +326,13 @@ A conforming generator MUST:
    with actionable messages: id/filename match, required fields, enum membership,
    effort resolution, unique ids, `depends_on` referential integrity, and
    owner/collaborator roster membership. Enum membership (milestone/priority/effort)
-   and roster membership (owner/collaborators must be **active** members) are
+   and roster **membership** (owner/collaborators must be **active** members) are
    enforced for **active** items only; on completed/removed items these values are
    historical and MUST NOT fail validation if they are no longer in the current
-   config or roster (a mismatch MAY warn). A malformed `team.json` is a validation
-   error regardless.
+   config or roster (a mismatch MAY warn). `owner`/`collaborators` MUST nonetheless
+   be syntactically valid handles (§7.2) on **every** item — the closed-item
+   exemption is from membership, not from being a handle. A malformed `team.json` is
+   a validation error regardless.
 2. **Regenerate** `README.md`, the completed/removed indexes (each between its
    markers), and `backlog.json` deterministically.
 3. Support a **`--check`** mode that validates and verifies the artifacts are

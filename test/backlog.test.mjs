@@ -429,6 +429,32 @@ test("closed items keep historical owner/collaborators without re-validation", (
   }
 });
 
+test("closed items reject a non-handle owner/collaborator but allow a valid historical (non-member) handle", () => {
+  // Historical values skip roster *membership* (SPEC §8.3) but must still be valid
+  // handles (§7.2) — else a hand-authored `owner: Jane Doe` would pass --check.
+  const bad = makeRepo(ARRAY_CFG, {
+    completed: [{ id: "DEMO0001", title: "T", owner: "Jane Doe" }],
+    removed: [{ id: "DEMO0002", title: "U", collaborators: ["Not A Handle"] }],
+  });
+  try {
+    writeTeam(bad, ROSTER);
+    const errs = readBacklog(bad, loadConfig(bad).cfg).errors.join("; ");
+    assert.ok(/owner "Jane Doe" is not a valid handle/.test(errs), `expected an owner handle error in ${errs}`);
+    assert.ok(/collaborator "Not A Handle" is not a valid handle/.test(errs), `expected a collaborator handle error in ${errs}`);
+  } finally {
+    rmSync(bad, { recursive: true, force: true });
+  }
+
+  // A valid handle that is not (or no longer) a roster member still validates on a closed item.
+  const ok = makeRepo(ARRAY_CFG, { completed: [{ id: "DEMO0001", title: "T", owner: "formerEmployee", collaborators: ["alsoGone"] }] });
+  try {
+    writeTeam(ok, ROSTER);
+    assert.deepEqual(readBacklog(ok, loadConfig(ok).cfg).errors, [], "valid historical handles pass without membership");
+  } finally {
+    rmSync(ok, { recursive: true, force: true });
+  }
+});
+
 test("backlog.json carries owner/collaborators; README shows an Owner column", () => {
   const root = makeRepo(ARRAY_CFG, {
     active: [
