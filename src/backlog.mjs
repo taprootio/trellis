@@ -49,6 +49,11 @@ export function paths(repoRoot, cfg) {
     backlogJson: join(tasks, "backlog.json"),
     completedIndex: join(tasks, "completed", "index.md"),
     removedIndex: join(tasks, "removed", "index.md"),
+    // A derived, NON-gated report (SPEC §8.4), not a generated artifact: materialized
+    // from git history by `trellis history --write`, never written by the generator and
+    // never part of `--check`. Pathed here only so the deriver (src/history.mjs) and
+    // the CLI agree on its location; it is gitignored, not committed.
+    historyJson: join(tasks, "history.json"),
   };
 }
 
