@@ -40,13 +40,24 @@ function parseArgs(argv) {
     const eq = a.indexOf("=");
     const key = a.startsWith("--") && eq !== -1 ? a.slice(0, eq) : a;
     const inline = a.startsWith("--") && eq !== -1 ? a.slice(eq + 1) : null;
-    const next = () => (inline !== null ? inline : argv[++i]);
+    // A value-taking flag must get a real value: not missing, not empty, and (for the
+    // space-separated form) not the next flag — so `--out --json` errors instead of
+    // silently swallowing `--json` as the path. Use `--out=<value>` to force an
+    // unusual value that begins with `-`.
+    const next = (flag) => {
+      const v = inline !== null ? inline : argv[++i];
+      if (v === undefined || v === "" || (inline === null && v.startsWith("-"))) {
+        console.error(`error: ${flag} requires a value`);
+        process.exit(2);
+      }
+      return v;
+    };
     switch (key) {
       case "-h": case "--help": opts.help = true; break;
       case "--json": opts.json = true; break;
       case "--write": opts.write = true; break;
-      case "--repo": opts.repo = next(); break;
-      case "--out": opts.out = next(); break;
+      case "--repo": opts.repo = next("--repo"); break;
+      case "--out": opts.out = next("--out"); break;
       default:
         if (a.startsWith("-")) { console.error(`Unknown flag: ${a}`); process.exit(2); }
         if (id === undefined) id = a;
@@ -95,8 +106,12 @@ try {
     // partial file, so refuse it rather than silently ignore.
     if (id !== undefined) { console.error("error: --write materializes the whole repo; omit the <id>"); process.exit(2); }
     const res = materializeHistory(repoRoot, cfg, { out: opts.out });
-    console.log(`Wrote ${res.path} — ${res.taskCount} task${res.taskCount === 1 ? "" : "s"}, ${res.entryCount} entr${res.entryCount === 1 ? "y" : "ies"} (${res.bytes} bytes).`);
-    console.log("This is a regenerable, non-gated cache (git is authoritative); it is gitignored — regenerate at build time.");
+    if (opts.json) {
+      process.stdout.write(JSON.stringify(res, null, 2) + "\n");
+    } else {
+      console.log(`Wrote ${res.path} — ${res.taskCount} task${res.taskCount === 1 ? "" : "s"}, ${res.entryCount} entr${res.entryCount === 1 ? "y" : "ies"} (${res.bytes} bytes).`);
+      console.log("This is a regenerable, non-gated cache (git is authoritative); it is gitignored — regenerate at build time.");
+    }
   } else if (id !== undefined) {
     const { entries } = deriveTaskHistory(repoRoot, cfg, id);
     if (opts.json) process.stdout.write(JSON.stringify({ id, entries }, null, 2) + "\n");

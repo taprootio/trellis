@@ -255,6 +255,34 @@ test("CLI: --write with an id is refused (exit 2)", () => {
   });
 });
 
+test("CLI: --write --json emits a structured result", () => {
+  withRepo((root) => {
+    const { status, stdout } = runCli("--repo", root, "--write", "--json");
+    assert.equal(status, 0);
+    const res = JSON.parse(stdout);
+    assert.match(res.path, /history\.json$/);
+    assert.equal(res.taskCount, 3);
+    assert.equal(res.entryCount, 4);
+  });
+});
+
+test("CLI: a value-taking flag with no value exits 2 instead of swallowing the next flag", () => {
+  withRepo((root) => {
+    // --out would otherwise consume --json as its path, silently disabling JSON.
+    const swallowed = runCli("--repo", root, "--write", "--out", "--json");
+    assert.equal(swallowed.status, 2);
+    assert.match(swallowed.stderr, /--out requires a value/);
+    // --repo at the end of argv has no value.
+    const bareRepo = runCli("--repo");
+    assert.equal(bareRepo.status, 2);
+    assert.match(bareRepo.stderr, /--repo requires a value/);
+    // The `=` form is the escape hatch for an unusual value.
+    const ok = runCli(`--repo=${root}`, "DEMO0002", "--json");
+    assert.equal(ok.status, 0);
+    assert.equal(JSON.parse(ok.stdout).entries.length, 1);
+  });
+});
+
 test("CLI: an unknown id exits 1 with a clear error", () => {
   withRepo((root) => {
     const { status, stderr } = runCli("DEMO9999", "--repo", root);
