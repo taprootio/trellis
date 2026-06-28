@@ -1,10 +1,10 @@
 # Enabling branch protection
 
-[SPEC.md](../SPEC.md) §10 makes a gated default branch part of being
-Trellis-conformant: the default branch is **protected**, changes land via
-pull/merge request, and the generator's **`--check` is a required status check**.
-The CI workflow (`.github/workflows/backlog.yml`) provides the check; this recipe
-turns it into an enforced gate. Branch protection is a host-repo setting, not
+The Trellis spec (§10, "CI and branch protection") makes a gated default branch
+part of being Trellis-conformant: the default branch is **protected**, changes
+land via pull/merge request, and the generator's **`--check` is a required status
+check**. The CI workflow (`.github/workflows/backlog.yml`) provides the check; this
+recipe turns it into an enforced gate. Branch protection is a host-repo setting, not
 committed code, so it is enabled once per repo by an admin — it does not travel in
 a commit the way the workflow does.
 

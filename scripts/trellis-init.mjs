@@ -116,7 +116,10 @@ function report(targetRoot, summary, dryRun) {
   // Remaining warnings are benign (e.g. a missing copy source) — the scaffold
   // still completed, so they do not change the exit code.
   for (const w of summary.warnings) console.warn(`  warning: ${w}`);
-  if (!dryRun) console.log(`Done. Next: add a task under ${summary.root}/active/, then \`npx trellis generate\`.`);
+  if (!dryRun) {
+    console.log(`Done. Next: add a task under ${summary.root}/active/, then \`npx trellis generate\`.`);
+    console.log(`Then enable branch protection so the \`backlog\` check gates merges — see docs/branch-protection.md.`);
+  }
 }
 
 // Usage errors for the --import on-ramp, validated before any write: --profile /
