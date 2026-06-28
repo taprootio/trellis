@@ -83,9 +83,10 @@ front-matter).
     "title":      { "from": "h1" },
     "priority":   { "from": "inline", "label": "Priority" },
     "milestone":  { "from": "inline", "label": "Milestone" },
+    "effort":     { "from": "inline", "label": "Effort", "fallback": { "from": "inline", "label": "Size" } },
     "owner":      { "from": "inline", "label": "Owner" }
   },
-  "remap":    { "priority": { "P1": "High" }, "milestone": { "Pre-Launch": "Alpha" }, "owner": { "Jane Doe": "jane" } },
+  "remap":    { "priority": { "P1": "High" }, "milestone": { "Pre-Launch": "Alpha" }, "effort": { "S": 1, "M": 3, "L": 8 }, "owner": { "Jane Doe": "jane" } },
   "defaults": { "milestone": "Alpha", "priority": "Low", "effort": 1 },
   "summary":  { "strategy": "firstSentence" }
 }
@@ -125,12 +126,15 @@ comma/semicolon-separated value), resolved the same way as `owner`.
 ### `remap` (optional)
 
 Resolve foreign values to the target's configured vocabulary, by field
-(`priority`, `milestone`, `owner`). Keys are matched case-insensitively. A milestone
-that mixes maturity gates with feature areas (which the spec disallows — see SPEC
-§7.1) **must** be remapped to a single maturity axis; an unmapped value on an active
-item is a hard error, never a silent guess. `remap.owner` maps a source assignee
+(`priority`, `milestone`, `effort`, `owner`). Keys are matched case-insensitively. A
+milestone that mixes maturity gates with feature areas (which the spec disallows — see
+SPEC §7.1) **must** be remapped to a single maturity axis; an unmapped value on an
+active item is a hard error, never a silent guess. `remap.owner` maps a source assignee
 (e.g. a display name or legacy username) to a roster `handle` (SPEC §7.2) and applies
-to **both** `owner` and `collaborators` — they share one identity space.
+to **both** `owner` and `collaborators` — they share one identity space. `remap.effort`
+maps a foreign size token (`S`/`M`/`L`, or an off-scale number) to a canonical effort
+value (SPEC §6); paired with an `effort` extractor that falls back to a `Size:` label,
+that is how a legacy `**Size:**` field becomes Trellis effort.
 
 ### `defaults` (optional)
 
@@ -140,7 +144,10 @@ that header-style legacy closed items lack but the schema still requires on
 completed/removed items (SPEC §5.1). A defaulted value is treated like an
 extracted one. `defaults.owner` is the fallback owner for **active** items whose
 source owner doesn't resolve to an active roster member (closed items keep their
-historical owner instead).
+historical owner instead). `defaults.completed_on` / `defaults.removed_on` are an
+optional **floor** for a close date with no header that git can't recover (see
+[Import-time git and provenance](#import-time-git-and-provenance)); a defaulted close
+date is flagged in the import summary.
 
 ### `summary` (optional)
 
@@ -156,8 +163,13 @@ the title.
 - **Closed items** (completed/removed) keep their enum values as a *historical*
   snapshot — those are not re-validated against the current config (SPEC §5.1,
   §8.3) — but the metadata must be **present** (from the source or `defaults`).
-- **Close dates** are validated as real calendar dates (`YYYY-MM-DD`); an
-  impossible date like `2024-02-31` is refused rather than guessed.
+- **Close dates** (`completed_on`/`removed_on`) resolve through a fallback chain:
+  the date header/field → the source file's **last git commit date** (read at import
+  time from the *source* repo) → an optional `defaults.<field>` floor → a hard error.
+  They are validated as real calendar dates (`YYYY-MM-DD`); an impossible date like
+  `2024-02-31` is refused rather than guessed. A git-derived or defaulted date is
+  flagged, never silently passed as authored — see [Import-time git and
+  provenance](#import-time-git-and-provenance).
 - **Owners and collaborators** resolve against the target's `team.json` roster
   (SPEC §7.2). On an **active** item the resolution chain is: `remap.owner` (or a
   direct case-insensitive handle match) → `defaults.owner` → **unassigned, with a
@@ -169,6 +181,29 @@ the title.
   a non-handle value can never corrupt the stored item. Carrying owners therefore requires the target
   repo to have a `team.json` (with no roster, every owner drops or carries as
   above); curating the roster can stay a manual post-import step.
+
+### Import-time git and provenance
+
+Some legacy backlogs don't record everything the schema needs — most commonly a
+closed item with no date header, or an item whose effort lives under a `Size:` label
+or isn't recorded at all. The importer fills these as faithfully as it can and
+**reports what it inferred**, so nothing passes as authored history:
+
+- **Git is read at import time only.** When a close date has no header, the importer
+  reads the source file's last commit date from the *source* repo's git. This is the
+  one-time importer's privilege; the deterministic generator and `--check` never read
+  git (SPEC §8.4), so the gate stays reproducible.
+- **It degrades, never fails on git alone.** Missing git, a non-repo or shallow
+  source, or an uncommitted file all make the lookup return nothing — the chain then
+  falls to a `defaults.<field>` floor if configured, and only errors if neither git
+  nor a floor yields a date. The importer never invents a close date out of nothing.
+- **Inferred values are flagged.** A git-derived or floor-defaulted close date, and a
+  **closed** item whose effort fell back to `defaults.effort` (no `Effort:`/`Size:`
+  signal), each emit a per-item warning and increment a count in the import summary
+  (`N git-dated, M effort-estimated`). Provenance lives in that report — reviewed
+  before `--apply` — not in a new front-matter field: volatile git-derived data stays
+  out of the gated item files (SPEC §8.4). A higher-quality per-item effort estimate
+  is a job for the onboarding agent, not the dependency-free importer.
 
 ### Caveats
 
