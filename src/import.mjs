@@ -440,7 +440,10 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
     const resolveCloseDate = (extractor, field) => {
       const authored = toISO(runExtractor(extractor, ctx));
       if (authored) return authored;
-      const fromGit = gitDate(src.rel);
+      // Normalize through toISO so the resolver boundary is uniformly defensive: the
+      // production resolver already returns ISO-or-null, but an injected one must not be
+      // trusted to mint a `completed_on` the downstream gate would later reject.
+      const fromGit = toISO(gitDate(src.rel));
       if (fromGit) {
         warnings.push(`${src.rel}: ${field} ${fromGit} derived from git history (source had no date header)`);
         provenance.gitDated++;
