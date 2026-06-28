@@ -20,11 +20,16 @@
 //   {
 //     sources: { active|completed|removed: { dirs: [..], file: "*.md" } },
 //     fields:  { title, id, priority, effort, milestone, summary, depends_on,
-//                completed_on, removed_on, removed_reason: <extractor> },
-//     remap:   { priority: {..}, milestone: {..} },   // case-insensitive keys
+//                owner, collaborators, completed_on, removed_on, removed_reason: <extractor> },
+//     remap:   { priority: {..}, milestone: {..}, owner: {..} },   // case-insensitive keys
 //     summary: { strategy: "firstSentence" | "title" },
-//     defaults:{ milestone, priority, effort, removed_reason },  // used when the source lacks a value
+//     defaults:{ milestone, priority, effort, owner, removed_reason },  // used when the source lacks a value
 //   }
+// `remap.owner` maps a source assignee to a roster handle (SPEC §7.2) and applies to
+// both `owner` and `collaborators`; `defaults.owner` fills an unresolved owner on
+// active items only. An owner that resolves to no active member never invents one —
+// active items drop to unassigned; closed items keep a valid historical handle (after
+// remap) and drop a non-handle value that wouldn't round-trip.
 // `defaults` chiefly fills the historical metadata that header-style legacy closed
 // items lack but the schema still requires on completed/removed items (SPEC §5.1).
 // An <extractor> is { from: "yaml", key } | { from:"inline"|"header", label }
@@ -38,6 +43,8 @@ import {
   readBacklog,
   generateArtifacts,
   resolveEffort,
+  findMember,
+  isValidHandle,
   nextId,
   parseFrontMatter,
   paths,
@@ -110,6 +117,18 @@ function matchGroup(s, pattern) {
   return m ? (m[1] ?? m[0]) : undefined;
 }
 
+// Case-insensitive remap lookup → the mapped value (trimmed), or the input unchanged.
+// Shared by enum resolution (priority/milestone) and assignee resolution (owner/
+// collaborators), so all three honour `remap.<field>` the same way.
+function remapLookup(table, value) {
+  const s = String(value).trim();
+  if (table && typeof table === "object") {
+    const key = Object.keys(table).find((k) => k.toLowerCase() === s.toLowerCase());
+    if (key) return String(table[key]).trim();
+  }
+  return s;
+}
+
 // Resolve a foreign enum to a configured one: a `remap` entry (case-insensitive
 // key) wins, then a direct case-insensitive match against the allowed set;
 // otherwise an actionable error (the §7.1 milestone collapse must be an explicit
@@ -117,11 +136,7 @@ function matchGroup(s, pattern) {
 function resolveEnum(raw, remap, allowed, label) {
   if (raw == null || String(raw).trim() === "") return { error: `missing ${label}` };
   const s = String(raw).trim();
-  let mapped = s;
-  if (remap && typeof remap === "object") {
-    const key = Object.keys(remap).find((k) => k.toLowerCase() === s.toLowerCase());
-    if (key) mapped = remap[key];
-  }
+  const mapped = remapLookup(remap, s);
   const hit = allowed.find((a) => a.toLowerCase() === String(mapped).toLowerCase());
   if (hit) return { value: hit };
   return { error: `${label} "${s}" is not a configured ${label} (${allowed.join(", ")}) and has no \`remap.${label}\` entry` };
@@ -236,6 +251,7 @@ export function planImport(targetRoot, sourceRoot, mapping) {
   }
   const data = readBacklog(targetRoot, cfg);
   if (data.errors.length) return { ...empty(), cfg, root, errors: [`target backlog has errors; fix them before importing: ${data.errors.join("; ")}`] };
+  const roster = data.roster; // resolve owners/collaborators against the target roster (SPEC §7.2)
 
   const warnings = [];
   const sources = discoverSources(sourceRoot, mapping, warnings);
@@ -315,7 +331,62 @@ export function planImport(targetRoot, sourceRoot, mapping) {
 
     const srcDeps = fields.depends_on ? asList(runExtractor({ ...fields.depends_on, list: true }, ctx)) : [];
 
+    // ----- ownership (owner + collaborators) -----------------------------------
+    // `remap.owner` (case-insensitive) maps a source assignee to a roster handle and
+    // applies to both owner and collaborators (one identity space). resolveAssignee
+    // returns the target handle to store, or null:
+    //   - active item: an ACTIVE roster member's canonical handle, else null (silent —
+    //     the caller falls back to defaults / unassigned).
+    //   - closed item (historical, SPEC §5.1/§8.3): any roster member's canonical handle
+    //     (no warning); else the *remapped* value if it is a valid handle (a former
+    //     member — kept, with a warning); else null (a non-handle that would not
+    //     round-trip — dropped, with a warning). Never invents a member.
+    const resolveAssignee = (raw, kind) => {
+      const s = raw == null ? "" : String(raw).trim();
+      if (!s) return null;
+      const remapped = remapLookup(remap.owner, s);
+      const m = findMember(roster, remapped);
+      if (isActive) return m && m.status === "active" ? m.handle : null;
+      if (m) return m.handle;
+      if (isValidHandle(remapped)) {
+        warnings.push(`${src.rel}: ${kind} "${s}" is not in the roster — kept as a historical value`);
+        return remapped;
+      }
+      warnings.push(`${src.rel}: ${kind} "${s}" is not a valid handle — dropped`);
+      return null;
+    };
+
+    // owner (optional): on active items chain resolve → `defaults.owner` → unassigned
+    // (warn if a source owner was present but didn't resolve); on closed items
+    // resolveAssignee has already carried or dropped it as a historical value.
+    const rawOwner = runExtractor(fields.owner, ctx);
+    let owner = resolveAssignee(rawOwner, "owner") ?? undefined;
+    if (isActive && owner === undefined) {
+      if (defaults.owner != null && String(defaults.owner).trim() !== "") {
+        owner = resolveAssignee(defaults.owner, "owner") ?? undefined;
+      }
+      if (owner === undefined && rawOwner != null && String(rawOwner).trim() !== "") {
+        warnings.push(`${src.rel}: owner "${String(rawOwner).trim()}" is not an active roster member — imported unassigned`);
+      }
+    }
+
+    // collaborators (optional list): per-entry resolution, deduped. Active items drop a
+    // non-member with a warning; closed items keep/drop via resolveAssignee (which warns),
+    // so there is no double-warning here.
+    const collaborators = [];
+    const rawCollabs = fields.collaborators ? asList(runExtractor({ ...fields.collaborators, list: true }, ctx)) : [];
+    for (const c of rawCollabs) {
+      const h = resolveAssignee(c, "collaborator");
+      if (h != null) {
+        if (!collaborators.includes(h)) collaborators.push(h);
+      } else if (isActive) {
+        warnings.push(`${src.rel}: collaborator "${String(c).trim()}" is not an active roster member — dropped`);
+      }
+    }
+
     const fm = { id: newId, title: title || newId, status: src.status, milestone, priority, effort, depends_on: [], summary };
+    if (owner !== undefined) fm.owner = owner;
+    if (collaborators.length) fm.collaborators = collaborators;
     if (src.status === "completed") {
       const iso = toISO(runExtractor(fields.completed_on, ctx));
       if (!iso) ierr("could not parse a `completed_on` date (expected YYYY-MM-DD)"); else fm.completed_on = iso;

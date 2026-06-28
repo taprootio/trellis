@@ -298,6 +298,12 @@ test("imports the yaml-frontmatter profile clean, with dates and a dep rewrite (
   const before = snapshot(yamlSrc);
   const yaml = loadProfile("yaml-frontmatter").mapping;
   try {
+    // A roster so the fixture's owners resolve: alice/bob active, carol since gone inactive.
+    writeFileSync(join(root, "trellis/team.json"), JSON.stringify({ members: [
+      { handle: "alice", name: "Alice", status: "active" },
+      { handle: "bob", name: "Bob", status: "active" },
+      { handle: "carol", name: "Carol", status: "inactive" },
+    ] }, null, 2) + "\n");
     const { summary } = applyImport(root, yamlSrc, yaml, { dryRun: false });
     assert.deepEqual(summary.errors, []);
     assert.deepEqual(summary.counts, { active: 2, completed: 1, removed: 1, total: 4 });
@@ -315,16 +321,112 @@ test("imports the yaml-frontmatter profile clean, with dates and a dep rewrite (
     // summary synthesized from the prose when the yaml omits it
     assert.equal(logout.summary, "Tear down the session and clear the auth cookie.");
 
+    // owners resolve against the seeded roster; collaborators too
+    assert.equal(fm(root, `trellis/active/${loginId}.md`).owner, "alice");
+    assert.equal(logout.owner, "bob");
+    assert.deepEqual(logout.collaborators, ["alice"]);
+
     // completed/removed close metadata read straight from yaml
     const spec = fm(root, `trellis/completed/tasks/${newIdFor(summary.idMap, "completed/initial-spec.md")}.md`);
     assert.equal(spec.completed_on, "2025-01-15");
+    assert.equal(spec.owner, "carol", "a now-inactive owner is kept as a historical value on a closed item");
     const removed = fm(root, `trellis/removed/${newIdFor(summary.idMap, "removed/telepathy-login.md")}.md`);
     assert.equal(removed.removed_on, "2025-02-01");
     assert.equal(removed.removed_reason, "Not feasible with current hardware.");
+    assert.equal(removed.owner, "dave", "an owner absent from the roster is carried verbatim on a closed item");
 
     assert.deepEqual(snapshot(yamlSrc), before); // source untouched
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("import: remap.owner resolves a source handle; an unmapped active owner drops to unassigned + warns", () => {
+  const root = initTarget();
+  writeFileSync(join(root, "trellis/team.json"), JSON.stringify({ members: [{ handle: "ana", name: "Ana", status: "active" }] }, null, 2) + "\n");
+  const src = mkdtempSync(join(tmpdir(), "trellis-owner-"));
+  try {
+    mkdirSync(join(src, "active"), { recursive: true });
+    writeFileSync(join(src, "active", "001-mapped.md"), "# Mapped\n\nOwner: A. Person\n\nProse.\n");
+    writeFileSync(join(src, "active", "002-absent.md"), "# Absent\n\nProse.\n");
+    writeFileSync(join(src, "active", "003-unknown.md"), "# Unknown\n\nOwner: Nobody\n\nProse.\n");
+    const m = {
+      sources: { active: { dirs: ["active"], file: "*.md" } },
+      fields: { id: { from: "filename", pattern: "^(\\d+)" }, title: { from: "h1" }, owner: { from: "header", label: "Owner" } },
+      remap: { owner: { "A. Person": "ana" } },
+      defaults: { milestone: "Alpha", priority: "Low", effort: 1 }, // no defaults.owner → unmapped drops
+    };
+    const { summary } = applyImport(root, src, m, { dryRun: false });
+    assert.deepEqual(summary.errors, []);
+    assert.equal(fm(root, `trellis/active/${newIdFor(summary.idMap, "active/001-mapped.md")}.md`).owner, "ana", "remap.owner → roster handle");
+    assert.equal(fm(root, `trellis/active/${newIdFor(summary.idMap, "active/002-absent.md")}.md`).owner, undefined, "absent owner stays unassigned");
+    assert.equal(fm(root, `trellis/active/${newIdFor(summary.idMap, "active/003-unknown.md")}.md`).owner, undefined, "unmapped owner drops to unassigned (never invents a member)");
+    assert.ok(summary.warnings.some((w) => /owner "Nobody".*unassigned/.test(w)), `expected an unassigned warning, got ${JSON.stringify(summary.warnings)}`);
+    assert.ok(!summary.warnings.some((w) => /002-absent/.test(w)), "an absent owner is not warned");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});
+
+test("import: an unresolved active owner falls back to defaults.owner", () => {
+  const root = initTarget();
+  writeFileSync(join(root, "trellis/team.json"), JSON.stringify({ members: [{ handle: "lee", name: "Lee", status: "active" }] }, null, 2) + "\n");
+  const src = mkdtempSync(join(tmpdir(), "trellis-ownerdef-"));
+  try {
+    mkdirSync(join(src, "active"), { recursive: true });
+    writeFileSync(join(src, "active", "001-absent.md"), "# Absent\n\nProse.\n");
+    writeFileSync(join(src, "active", "002-unmapped.md"), "# Unmapped\n\nOwner: Someone Else\n\nProse.\n");
+    const m = {
+      sources: { active: { dirs: ["active"], file: "*.md" } },
+      fields: { id: { from: "filename", pattern: "^(\\d+)" }, title: { from: "h1" }, owner: { from: "header", label: "Owner" } },
+      defaults: { milestone: "Alpha", priority: "Low", effort: 1, owner: "lee" },
+    };
+    const { summary } = applyImport(root, src, m, { dryRun: false });
+    assert.deepEqual(summary.errors, []);
+    assert.equal(fm(root, `trellis/active/${newIdFor(summary.idMap, "active/001-absent.md")}.md`).owner, "lee", "defaults.owner fills an absent owner");
+    assert.equal(fm(root, `trellis/active/${newIdFor(summary.idMap, "active/002-unmapped.md")}.md`).owner, "lee", "defaults.owner also catches an unmapped owner before unassigning");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});
+
+test("import drops a closed-item owner/collaborator that is not a valid handle instead of carrying a non-handle", () => {
+  const root = initTarget();
+  writeFileSync(join(root, "trellis/team.json"), JSON.stringify({ members: [] }, null, 2) + "\n"); // empty roster → everything historical
+  const src = mkdtempSync(join(tmpdir(), "trellis-collab-"));
+  try {
+    mkdirSync(join(src, "completed"), { recursive: true });
+    // "Jane Doe" survives asList/extraction as one token (a space, no comma) but is not
+    // a valid handle; "validhandle" is. Only the latter may be carried — for both the
+    // scalar owner (a non-handle must not be stored) and the inline collaborators list
+    // (a non-handle would corrupt serialization).
+    writeFileSync(join(src, "completed", "001-x.md"), "# Done\n\nCreated: 2024-02-03\nOwner: Jane Doe\nCollaborators: Jane Doe; validhandle\n\nIt shipped.\n");
+    const m = {
+      sources: { completed: { dirs: ["completed"], file: "*.md" } },
+      fields: {
+        id: { from: "filename", pattern: "^(\\d+)" },
+        title: { from: "h1" },
+        completed_on: { from: "header", label: "Created" },
+        owner: { from: "header", label: "Owner" },
+        collaborators: { from: "header", label: "Collaborators" },
+      },
+      defaults: { milestone: "Alpha", priority: "Low", effort: 1 },
+    };
+    const { summary } = applyImport(root, src, m, { dryRun: false });
+    assert.deepEqual(summary.errors, []);
+    const item = fm(root, `trellis/completed/tasks/${newIdFor(summary.idMap, "completed/001-x.md")}.md`);
+    assert.equal(item.owner, undefined, "a non-handle historical owner is dropped, not stored verbatim");
+    assert.deepEqual(item.collaborators, ["validhandle"], "the non-handle token is dropped; the valid one is carried, no corruption");
+    assert.ok(summary.warnings.some((w) => /owner "Jane Doe".*not a valid handle/.test(w)), `expected a dropped-owner warning, got ${JSON.stringify(summary.warnings)}`);
+    assert.ok(summary.warnings.some((w) => /collaborator "Jane Doe".*not a valid handle/.test(w)), `expected a dropped-collaborator warning, got ${JSON.stringify(summary.warnings)}`);
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
   }
 });
 

@@ -10,7 +10,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { applyScaffold } from "../src/init.mjs";
-import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
+import { loadConfig, loadRoster, readBacklog, generateArtifacts } from "../src/backlog.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const initScript = join(sourceRoot, "scripts", "trellis-init.mjs");
@@ -36,6 +36,7 @@ test("scaffolds a fresh repo that the core validates clean", () => {
     const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
     for (const rel of [
       "trellis/backlog.config.json",
+      "trellis/team.json",
       "trellis/active/.gitkeep",
       "trellis/completed/tasks/.gitkeep",
       "trellis/README.md",
@@ -53,13 +54,70 @@ test("scaffolds a fresh repo that the core validates clean", () => {
   }
 });
 
+test("scaffolds a valid team.json stub (one active member) and mentions the roster in AGENTS", () => {
+  const root = tempRepo();
+  try {
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.ok(summary.created.includes("trellis/team.json"), "team.json is created (authored, not generated)");
+    const { roster, errors } = loadRoster(root);
+    assert.deepEqual(errors, [], "the stub roster validates");
+    assert.equal(roster.members.length, 1);
+    assert.equal(roster.members[0].status, "active");
+    assert.match(readFileSync(join(root, "AGENTS.md"), "utf8"), /trellis\/team\.json/, "AGENTS mentions the roster");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--force preserves a valid team.json instead of clobbering it (no data loss, no dangling owners)", () => {
+  // Regression: --force overwriting a real roster with the stub would drop members and
+  // leave an active `owner: alice` dangling, failing generate after a partial write.
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    writeFileSync(join(root, "trellis/team.json"), JSON.stringify({ members: [{ handle: "alice", name: "Alice", status: "active" }] }, null, 2) + "\n");
+    writeFileSync(
+      join(root, "trellis/active/DEMO0001.md"),
+      "---\nid: DEMO0001\ntitle: T\nstatus: active\nmilestone: Alpha\npriority: High\neffort: 3\ndepends_on: []\nowner: alice\nsummary: S.\n---\n\n# DEMO0001 — T\n",
+    );
+    const { summary } = applyScaffold(root, { prefix: "DEMO", force: true }, {}, sourceRoot);
+    assert.deepEqual(summary.errors, [], "force does not break the owned active task");
+    assert.ok(summary.skipped.includes("trellis/team.json"), "the valid roster is preserved (skipped), not recreated");
+    assert.deepEqual(loadRoster(root).roster.members.map((m) => m.handle), ["alice"], "members are intact, not replaced by the stub");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--force repairs a broken team.json instead of refusing", () => {
+  // A pre-existing broken roster would fail the core read; --force overwrites it with a
+  // fresh stub, so preflight must not block on it (parallel to a corrupted index).
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    writeFileSync(join(root, "trellis/team.json"), "{ broken");
+    // Without --force, the broken roster blocks (it would be kept and fail generate).
+    const refused = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.ok(refused.summary.errors.some((e) => /team\.json|backlog has errors/.test(e)), "non-force refuses a broken roster");
+    // With --force, it is overwritten and the scaffold completes.
+    const { summary } = applyScaffold(root, { prefix: "DEMO", force: true }, {}, sourceRoot);
+    assert.ok(summary.created.includes("trellis/team.json"), "force re-creates the roster");
+    assert.deepEqual(loadRoster(root).errors, [], "the restored roster is valid");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("respects --prefix in config, next id, and the AGENTS block", () => {
   const root = tempRepo();
   try {
     applyScaffold(root, { prefix: "ACME" }, {}, sourceRoot);
     const cfg = JSON.parse(readFileSync(join(root, "trellis/backlog.config.json"), "utf8"));
     assert.equal(cfg.idPrefix, "ACME");
-    assert.equal(cfg.specVersion, "2.0");
+    assert.equal(cfg.specVersion, "2.1");
     const backlog = JSON.parse(readFileSync(join(root, "trellis/backlog.json"), "utf8"));
     assert.equal(backlog.prefix, "ACME");
     assert.equal(backlog.nextId, "ACME0001");
@@ -77,6 +135,7 @@ test("is idempotent — a re-run skips every template file and stays clean", () 
     assert.deepEqual(summary.created, [], "nothing new should be created on re-run");
     assert.deepEqual(summary.appended, [], "nothing should be appended on re-run");
     assert.ok(summary.skipped.includes("trellis/backlog.config.json"));
+    assert.ok(summary.skipped.includes("trellis/team.json"));
     assert.ok(summary.skipped.includes("AGENTS.md"));
     assertCheckClean(root);
   } finally {

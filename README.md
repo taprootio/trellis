@@ -9,10 +9,10 @@ then browse the live backlog in [`trellis/README.md`](trellis/README.md).
 
 ## Onboard a repo
 
-`trellis init` scaffolds the Trellis layout into any repo — the config, the
-`trellis/` layout, the generated index, the CI check, an AGENTS.md backlog
-section, and the process playbooks — idempotently, without clobbering existing
-files:
+`trellis init` scaffolds the Trellis layout into any repo — the config, a team
+roster stub, the `trellis/` layout, the generated index, the CI check, an AGENTS.md
+backlog section, and the process playbooks — idempotently, without clobbering
+existing files:
 
 ```
 node scripts/trellis-init.mjs <target> --prefix ABC   # --dry-run to preview

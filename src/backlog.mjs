@@ -12,7 +12,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
-export const SPEC_VERSION = "2.0";
+export const SPEC_VERSION = "2.1";
 
 // The backlog root defaults to `trellis/` and is overridable per repo via the
 // config's `tasksDir` key (SPEC §2/§7). The config file itself lives at a FIXED
@@ -37,6 +37,10 @@ export function paths(repoRoot, cfg) {
   const tasks = join(repoRoot, tasksDir);
   return {
     config: join(repoRoot, CONFIG_DIR, "backlog.config.json"),
+    // The team roster lives at the FIXED config home (next to backlog.config.json),
+    // independent of tasksDir — like the config, it is authored input, not a
+    // generated artifact (SPEC §7.2).
+    team: join(repoRoot, CONFIG_DIR, "team.json"),
     tasks,
     active: join(tasks, "active"),
     completedTasks: join(tasks, "completed", "tasks"),
@@ -98,6 +102,98 @@ export function loadConfig(repoRoot) {
     warnings.push(`config \`specVersion\` ${cfg.specVersion} differs in major version from this tool's spec ${SPEC_VERSION}`);
   }
   return { cfg, warnings, errors };
+}
+
+// ------------------------------------------------------------- team roster
+// The team roster (SPEC §7.2) is an authored `team.json` at the FIXED config home
+// (next to backlog.config.json, independent of `tasksDir`), kept separate from the
+// config so the core vocab stays stable. It is OPTIONAL: an absent file is an empty
+// roster (not an error), so a repo that never assigns owners stays green. A present
+// file is validated like the config — a malformed roster is a fatal, config-class
+// error surfaced through readBacklog so `--check`/validate fail on it. Shape:
+//   { "members": [ { "handle", "name", "email"?, "status": "active"|"inactive" } ] }
+//
+// `handle` is the stable key used in front-matter (`owner`/`collaborators`); it is
+// constrained to [A-Za-z0-9._-] so it survives the inline-list serialization of
+// `collaborators`. `name`/`email` are display only — the identity model is not
+// coupled to any external provider (that is the later cross-repo direction).
+const HANDLE_RE = /^[A-Za-z0-9._-]+$/;
+const MEMBER_KEYS = new Set(["handle", "name", "email", "status"]);
+
+// The roster shape consumers use: the normalized member list plus a case-insensitive
+// handle index. Case-insensitive matching mirrors effort labels and import remap.
+export function emptyRoster() {
+  return { members: [], byHandle: new Map() };
+}
+
+// True when a string is a syntactically valid handle. The charset keeps a handle safe
+// inside the inline serialization of `collaborators` (no comma/bracket), so any writer
+// emitting a handle to a file MUST enforce it — not only the roster loader. Historical
+// (closed-item) assignees skip roster membership but still must round-trip (SPEC §7.2).
+export function isValidHandle(handle) {
+  return typeof handle === "string" && HANDLE_RE.test(handle.trim());
+}
+
+// Resolve a handle to its roster member regardless of status (case-insensitive),
+// or undefined. Used by the importer to recover the canonical handle of a now-inactive
+// member when carrying a historical owner on a closed item.
+export function findMember(roster, handle) {
+  if (!roster || typeof handle !== "string" || !handle.trim()) return undefined;
+  return roster.byHandle.get(handle.trim().toLowerCase());
+}
+
+// Resolve a handle to its roster member only when that member is ACTIVE — the check
+// behind active-item owner/collaborator validation and import resolution. Returns
+// the member (carrying its canonical handle) or undefined.
+export function findActiveMember(roster, handle) {
+  const m = findMember(roster, handle);
+  return m && m.status === "active" ? m : undefined;
+}
+
+// Load and validate the roster → { roster, warnings, errors }, mirroring loadConfig's
+// result-object idiom. Absent file → empty roster, no errors. Never throws; the
+// caller surfaces errors. Top-level extra keys are tolerated (room for the future
+// cross-repo direction); member keys are validated strictly.
+export function loadRoster(repoRoot) {
+  const warnings = [];
+  const teamPath = paths(repoRoot).team;
+  if (!existsSync(teamPath)) return { roster: emptyRoster(), warnings, errors: [] };
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(teamPath, "utf8"));
+  } catch (e) {
+    return { roster: emptyRoster(), warnings, errors: [`team.json is not valid JSON (${e.message})`] };
+  }
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { roster: emptyRoster(), warnings, errors: ["team.json must be an object with a `members` array"] };
+  }
+  if (!Array.isArray(raw.members)) {
+    return { roster: emptyRoster(), warnings, errors: ["team.json: `members` must be an array"] };
+  }
+
+  const errors = [];
+  const members = [];
+  const byHandle = new Map();
+  raw.members.forEach((m, i) => {
+    const at = `team.json member ${i + 1}`;
+    if (m == null || typeof m !== "object" || Array.isArray(m)) { errors.push(`${at}: must be an object`); return; }
+    for (const k of Object.keys(m)) if (!MEMBER_KEYS.has(k)) errors.push(`${at}: unknown key \`${k}\``);
+    const { handle, name, email, status } = m;
+    if (typeof handle !== "string" || !handle.trim()) { errors.push(`${at}: \`handle\` must be a non-empty string`); return; }
+    if (!isValidHandle(handle)) errors.push(`${at}: \`handle\` "${handle}" must use only letters, digits, ., _, -`);
+    if (typeof name !== "string" || !name.trim()) errors.push(`${at} (${handle}): \`name\` must be a non-empty string`);
+    if (email != null && typeof email !== "string") errors.push(`${at} (${handle}): \`email\` must be a string`);
+    // `status` is optional and defaults to active; a present-but-invalid value errors.
+    let st = status == null ? "active" : status;
+    if (st !== "active" && st !== "inactive") { errors.push(`${at} (${handle}): \`status\` must be "active" or "inactive"`); st = "active"; }
+    const key = handle.trim().toLowerCase();
+    if (byHandle.has(key)) { errors.push(`team.json: duplicate handle "${handle}"`); return; }
+    const member = { handle: handle.trim(), name: typeof name === "string" ? name.trim() : name, status: st };
+    if (typeof email === "string" && email.trim()) member.email = email.trim();
+    byHandle.set(key, member);
+    members.push(member);
+  });
+  return { roster: { members, byHandle }, warnings, errors };
 }
 
 // --------------------------------------------------------- effort scales
@@ -242,17 +338,17 @@ export function parseFrontMatter(text, where, errors = []) {
     if (seen.has(key)) errors.push(`${where}: duplicate key \`${key}\``);
     seen.add(key);
     const val = kv[2].trim();
-    if (key === "depends_on") {
+    if (FM_LIST_KEYS.has(key)) {
       if (val.startsWith("[")) {
-        fm.depends_on = val.replace(/^\[|\]$/g, "").split(",").map((s) => unquote(s.trim())).filter(Boolean);
+        fm[key] = val.replace(/^\[|\]$/g, "").split(",").map((s) => unquote(s.trim())).filter(Boolean);
       } else if (val === "") {
-        const deps = [];
+        const tokens = [];
         while (i + 1 < lines.length && /^\s*-\s+/.test(lines[i + 1])) {
-          deps.push(unquote(lines[++i].replace(/^\s*-\s+/, "").trim()));
+          tokens.push(unquote(lines[++i].replace(/^\s*-\s+/, "").trim()));
         }
-        fm.depends_on = deps;
+        fm[key] = tokens;
       } else {
-        fm.depends_on = [unquote(val)];
+        fm[key] = [unquote(val)];
       }
       continue;
     }
@@ -278,8 +374,13 @@ export function parseFrontMatter(text, where, errors = []) {
 export const FM_ORDER = [
   "id", "title", "status", "milestone",
   "completed_on", "removed_on",
-  "priority", "effort", "depends_on", "summary", "removed_reason",
+  "priority", "effort", "depends_on", "owner", "collaborators", "summary", "removed_reason",
 ];
+
+// Front-matter keys whose value is a list of tokens, serialized inline as
+// `key: [a, b]` and parsed back the same way (or from a `- ` block / bare scalar).
+// `depends_on` is task ids; `collaborators` is roster handles (SPEC §5.1, §7.2).
+export const FM_LIST_KEYS = new Set(["depends_on", "collaborators"]);
 
 // Quote a value the parser would otherwise misread on the way back in: an all-digit
 // string (it coerces unquoted digits to a number), one already wrapped in a quote
@@ -299,7 +400,7 @@ export function emitScalar(v) {
 export function serializeFrontMatter(fm) {
   const emit = (key) => {
     const v = fm[key];
-    if (key === "depends_on") return `depends_on: [${(v ?? []).join(", ")}]`;
+    if (FM_LIST_KEYS.has(key)) return `${key}: [${(v ?? []).join(", ")}]`;
     return `${key}: ${emitScalar(v)}`;
   };
   const keys = [...FM_ORDER.filter((k) => fm[k] !== undefined), ...Object.keys(fm).filter((k) => !FM_ORDER.includes(k))];
@@ -323,6 +424,12 @@ export function readBacklog(repoRoot, cfg) {
   const p = paths(repoRoot, cfg);
   const fileRe = new RegExp(`^(${cfg.idPrefix}\\d{${cfg.idWidth}})\\.md$`);
   const errors = [];
+
+  // The roster lives at the fixed config home; its load/validation errors are
+  // config-class and surface here so `--check`/validate fail on a malformed team.json
+  // (SPEC §7.2). An absent roster is empty — owner/collaborators stay optional.
+  const { roster, errors: rosterErrors } = loadRoster(repoRoot);
+  errors.push(...rosterErrors);
 
   const byId = new Map();
   for (const [label, dir] of [["active", p.active], ["completed/tasks", p.completedTasks], ["removed", p.removed]]) {
@@ -394,6 +501,27 @@ export function readBacklog(repoRoot, cfg) {
     if (it.effort === undefined || it.effort === "") err("missing `effort`");
   };
 
+  // Owner/collaborator validation (SPEC §5.1, §7.2, §8.3). On **every** item the
+  // values must be syntactically valid handles — a handle is charset-constrained even
+  // when historical, so the closed-item exemption is from roster *membership*, not from
+  // being a handle (else a hand-authored `owner: Jane Doe` would pass `--check`).
+  // **Active** items additionally require an ACTIVE roster member; on closed items
+  // membership is not re-checked, so a member who has since gone inactive or left the
+  // roster still validates. Both fields are optional.
+  const validateAssignees = (it, err, active) => {
+    if (it.owner !== undefined && it.owner !== "") {
+      if (!isValidHandle(it.owner)) err(`owner "${it.owner}" is not a valid handle (use letters, digits, ., _, -)`);
+      else if (active && !findActiveMember(roster, it.owner)) err(`owner "${it.owner}" is not an active roster member`);
+    }
+    if (it.collaborators !== undefined) {
+      if (!Array.isArray(it.collaborators)) err("`collaborators` must be a list of handles");
+      else for (const c of it.collaborators) {
+        if (!isValidHandle(c)) err(`collaborator "${c}" is not a valid handle (use letters, digits, ., _, -)`);
+        else if (active && !findActiveMember(roster, c)) err(`collaborator "${c}" is not an active roster member`);
+      }
+    }
+  };
+
   for (const it of active) {
     const err = (m) => errors.push(`active/${it._file}: ${m}`);
     checkCommon(it, "active", err);
@@ -401,6 +529,7 @@ export function readBacklog(repoRoot, cfg) {
     if (!cfg.priorities.includes(it.priority)) err(`priority must be one of ${cfg.priorities.join(", ")}`);
     attachEffort(it, err);
     if (!cfg.milestones.includes(it.milestone)) err(`milestone must be one of ${cfg.milestones.join(", ")}`);
+    validateAssignees(it, err, true);
   }
   for (const it of completed) {
     const err = (m) => errors.push(`completed/${it._file}: ${m}`);
@@ -408,6 +537,7 @@ export function readBacklog(repoRoot, cfg) {
     checkHistorical(it, err);
     attachEffort(it, null);
     if (!isoDate(it.completed_on)) err("`completed_on` must be an ISO date (YYYY-MM-DD)");
+    validateAssignees(it, err, false);
   }
   for (const it of removed) {
     const err = (m) => errors.push(`removed/${it._file}: ${m}`);
@@ -416,9 +546,10 @@ export function readBacklog(repoRoot, cfg) {
     attachEffort(it, null);
     if (!isoDate(it.removed_on)) err("`removed_on` must be an ISO date (YYYY-MM-DD)");
     if (!it.removed_reason) err("missing `removed_reason`");
+    validateAssignees(it, err, false);
   }
 
-  return { active, completed, removed, ids, errors };
+  return { active, completed, removed, ids, errors, roster };
 }
 
 // ------------------------------------------------------------------ ids
@@ -444,8 +575,8 @@ function activeTable(items, cfg) {
   const rank = Object.fromEntries(cfg.priorities.map((p, i) => [p, i]));
   const rows = items.slice()
     .sort((a, b) => (rank[a.priority] - rank[b.priority]) || a.id.localeCompare(b.id))
-    .map((it) => `| [${it.id}](active/${it._file}) | ${cell(it.title)} | ${it.priority} | ${cell(effortCell(it, cfg))} |`);
-  return ["| ID | Title | Priority | Effort |", "| --- | --- | --- | --- |", ...rows].join("\n");
+    .map((it) => `| [${it.id}](active/${it._file}) | ${cell(it.title)} | ${cell(it.owner ?? "")} | ${it.priority} | ${cell(effortCell(it, cfg))} |`);
+  return ["| ID | Title | Owner | Priority | Effort |", "| --- | --- | --- | --- | --- |", ...rows].join("\n");
 }
 
 function completedTable(items) {
@@ -475,6 +606,14 @@ function effortFields(a, cfg) {
   return f;
 }
 
+// Ownership fields for backlog.json (SPEC §8.2): every task carries `owner` (a
+// roster handle or null) and `collaborators` (handles, [] if none), for active and
+// closed items alike — on closed items they are a historical snapshot, not
+// re-validated against the current roster (§8.3).
+function assigneeFields(a) {
+  return { owner: a.owner || null, collaborators: a.collaborators ?? [] };
+}
+
 export function buildBacklogJson(cfg, data) {
   const backlog = {
     prefix: cfg.idPrefix,
@@ -482,9 +621,9 @@ export function buildBacklogJson(cfg, data) {
     nextId: nextId(data.ids, cfg),
     counts: { active: data.active.length, completed: data.completed.length, removed: data.removed.length },
     tasks: [
-      ...data.active.map((a) => ({ id: a.id, title: a.title, status: "active", milestone: a.milestone, priority: a.priority, effort: a.effort, ...effortFields(a, cfg), depends_on: a.depends_on ?? [], summary: a.summary })),
-      ...data.completed.map((a) => ({ id: a.id, title: a.title, status: "completed", milestone: a.milestone ?? null, priority: a.priority ?? null, effort: a.effort ?? null, ...effortFields(a, cfg), depends_on: a.depends_on ?? [], summary: a.summary ?? null, completed_on: a.completed_on ?? null })),
-      ...data.removed.map((a) => ({ id: a.id, title: a.title, status: "removed", milestone: a.milestone ?? null, priority: a.priority ?? null, effort: a.effort ?? null, ...effortFields(a, cfg), depends_on: a.depends_on ?? [], summary: a.summary ?? null, removed_on: a.removed_on ?? null, removed_reason: a.removed_reason ?? null })),
+      ...data.active.map((a) => ({ id: a.id, title: a.title, status: "active", milestone: a.milestone, priority: a.priority, effort: a.effort, ...effortFields(a, cfg), depends_on: a.depends_on ?? [], ...assigneeFields(a), summary: a.summary })),
+      ...data.completed.map((a) => ({ id: a.id, title: a.title, status: "completed", milestone: a.milestone ?? null, priority: a.priority ?? null, effort: a.effort ?? null, ...effortFields(a, cfg), depends_on: a.depends_on ?? [], ...assigneeFields(a), summary: a.summary ?? null, completed_on: a.completed_on ?? null })),
+      ...data.removed.map((a) => ({ id: a.id, title: a.title, status: "removed", milestone: a.milestone ?? null, priority: a.priority ?? null, effort: a.effort ?? null, ...effortFields(a, cfg), depends_on: a.depends_on ?? [], ...assigneeFields(a), summary: a.summary ?? null, removed_on: a.removed_on ?? null, removed_reason: a.removed_reason ?? null })),
     ],
   };
   return JSON.stringify(backlog, null, 2) + "\n";

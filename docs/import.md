@@ -82,9 +82,10 @@ front-matter).
   "fields": {
     "title":      { "from": "h1" },
     "priority":   { "from": "inline", "label": "Priority" },
-    "milestone":  { "from": "inline", "label": "Milestone" }
+    "milestone":  { "from": "inline", "label": "Milestone" },
+    "owner":      { "from": "inline", "label": "Owner" }
   },
-  "remap":    { "priority": { "P1": "High" }, "milestone": { "Pre-Launch": "Alpha" } },
+  "remap":    { "priority": { "P1": "High" }, "milestone": { "Pre-Launch": "Alpha" }, "owner": { "Jane Doe": "jane" } },
   "defaults": { "milestone": "Alpha", "priority": "Low", "effort": 1 },
   "summary":  { "strategy": "firstSentence" }
 }
@@ -101,8 +102,9 @@ see [the directory caveat](#caveats).
 ### `fields` (required)
 
 How to locate each field on a source item. Recognized fields: `id`, `title`,
-`priority`, `effort`, `milestone`, `summary`, `depends_on`, `completed_on`,
-`removed_on`, `removed_reason`. Each maps to an **extractor**:
+`priority`, `effort`, `milestone`, `summary`, `depends_on`, `owner`,
+`collaborators`, `completed_on`, `removed_on`, `removed_reason`. Each maps to an
+**extractor**:
 
 | extractor | reads |
 | --- | --- |
@@ -116,15 +118,19 @@ How to locate each field on a source item. Recognized fields: `id`, `title`,
 Any extractor may carry a `"fallback": { … }` extractor, tried when the primary
 yields nothing (e.g. `completed_on` from a `Completed:` line, falling back to
 `Created:`). Defaults: `id` → filename, `title` → `h1`. `summary` is
-[synthesized](#how-fields-are-resolved) when absent.
+[synthesized](#how-fields-are-resolved) when absent. `owner` is a single roster
+handle; `collaborators` is a list (an inline `[a, b]`, a `-` block, or a
+comma/semicolon-separated value), resolved the same way as `owner`.
 
 ### `remap` (optional)
 
-Resolve foreign enum values to the target's configured vocabulary, by field
-(`priority`, `milestone`). Keys are matched case-insensitively. A milestone that
-mixes maturity gates with feature areas (which the spec disallows — see SPEC §7.1)
-**must** be remapped to a single maturity axis; an unmapped value on an active item
-is a hard error, never a silent guess.
+Resolve foreign values to the target's configured vocabulary, by field
+(`priority`, `milestone`, `owner`). Keys are matched case-insensitively. A milestone
+that mixes maturity gates with feature areas (which the spec disallows — see SPEC
+§7.1) **must** be remapped to a single maturity axis; an unmapped value on an active
+item is a hard error, never a silent guess. `remap.owner` maps a source assignee
+(e.g. a display name or legacy username) to a roster `handle` (SPEC §7.2) and applies
+to **both** `owner` and `collaborators` — they share one identity space.
 
 ### `defaults` (optional)
 
@@ -132,7 +138,9 @@ Fill a field when the source has no value for it — chiefly the historical
 descriptive metadata (`milestone`, `priority`, `effort`, and `removed_reason`)
 that header-style legacy closed items lack but the schema still requires on
 completed/removed items (SPEC §5.1). A defaulted value is treated like an
-extracted one.
+extracted one. `defaults.owner` is the fallback owner for **active** items whose
+source owner doesn't resolve to an active roster member (closed items keep their
+historical owner instead).
 
 ### `summary` (optional)
 
@@ -150,6 +158,17 @@ the title.
   §8.3) — but the metadata must be **present** (from the source or `defaults`).
 - **Close dates** are validated as real calendar dates (`YYYY-MM-DD`); an
   impossible date like `2024-02-31` is refused rather than guessed.
+- **Owners and collaborators** resolve against the target's `team.json` roster
+  (SPEC §7.2). On an **active** item the resolution chain is: `remap.owner` (or a
+  direct case-insensitive handle match) → `defaults.owner` → **unassigned, with a
+  warning** — an owner that resolves to no active member is dropped, never invented.
+  An unresolved collaborator is likewise dropped with a warning. On a **closed**
+  item the value is historical: a member who has since gone inactive keeps their
+  canonical handle; a handle absent from the roster is kept (after `remap.owner`) only
+  if it is a valid handle — a former member — and otherwise dropped with a warning, so
+  a non-handle value can never corrupt the stored item. Carrying owners therefore requires the target
+  repo to have a `team.json` (with no roster, every owner drops or carries as
+  above); curating the roster can stay a manual post-import step.
 
 ### Caveats
 

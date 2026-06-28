@@ -10,10 +10,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   loadConfig,
+  loadRoster,
+  findActiveMember,
   readBacklog,
   resolveEffort,
   generateArtifacts,
   buildBacklogJson,
+  composeFile,
+  parseFrontMatter,
   paths,
 } from "../src/backlog.mjs";
 
@@ -296,4 +300,194 @@ test("a tasksDir that escapes the repo (absolute or `..`) is a config error", ()
       rmSync(root, { recursive: true, force: true });
     }
   }
+});
+
+// --------------------------------------------- team roster (SPEC §7.2) + ownership
+
+const writeTeam = (root, team) => writeFileSync(join(root, "trellis", "team.json"), JSON.stringify(team, null, 2));
+
+test("loadRoster reads members with a case-insensitive index; absent is an empty roster", () => {
+  withRepo(ARRAY_CFG, {}, (root) => {
+    const empty = loadRoster(root);
+    assert.deepEqual(empty.errors, []);
+    assert.equal(empty.roster.members.length, 0, "absent team.json → empty roster, no error");
+  });
+  const root = makeRepo(ARRAY_CFG, {});
+  try {
+    writeTeam(root, { members: [
+      { handle: "Alice", name: "Alice A", email: "a@x.io", status: "active" },
+      { handle: "bob", name: "Bob B" }, // status omitted → defaults to active
+    ] });
+    const { roster, errors } = loadRoster(root);
+    assert.deepEqual(errors, []);
+    assert.equal(roster.members.length, 2);
+    assert.equal(roster.byHandle.get("alice").name, "Alice A");
+    assert.equal(roster.byHandle.get("alice").email, "a@x.io");
+    assert.equal(roster.byHandle.get("bob").status, "active", "status defaults to active");
+    assert.equal(findActiveMember(roster, "ALICE").handle, "Alice", "handle match is case-insensitive, returns the canonical handle");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("loadRoster reports duplicate handles, bad status/handle, unknown keys, missing name, wrong shape", () => {
+  const cases = [
+    [{ members: [{ handle: "a", name: "A" }, { handle: "A", name: "A2" }] }, /duplicate handle/],
+    [{ members: [{ handle: "a", name: "A", status: "retired" }] }, /`status` must be "active" or "inactive"/],
+    [{ members: [{ handle: "a b", name: "A" }] }, /letters, digits/],
+    [{ members: [{ handle: "a", name: "A", role: "lead" }] }, /unknown key `role`/],
+    [{ members: [{ handle: "a" }] }, /`name` must be a non-empty string/],
+    [{ members: "nope" }, /`members` must be an array/],
+    [["a"], /must be an object with a `members` array/],
+  ];
+  for (const [team, re] of cases) {
+    const root = makeRepo(ARRAY_CFG, {});
+    try {
+      writeTeam(root, team);
+      const { errors } = loadRoster(root);
+      assert.ok(errors.some((e) => re.test(e)), `expected ${re} in ${JSON.stringify(errors)}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("loadRoster reports malformed JSON, and readBacklog surfaces it (config-class)", () => {
+  const root = makeRepo(ARRAY_CFG, {});
+  try {
+    writeFileSync(join(root, "trellis", "team.json"), "{ not json");
+    assert.ok(loadRoster(root).errors.some((e) => /not valid JSON/.test(e)));
+    const { cfg } = loadConfig(root);
+    assert.ok(readBacklog(root, cfg).errors.some((e) => /not valid JSON/.test(e)), "a broken roster fails the backlog read");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const ROSTER = { members: [
+  { handle: "alice", name: "Alice", status: "active" },
+  { handle: "bob", name: "Bob", status: "active" },
+  { handle: "carol", name: "Carol", status: "inactive" },
+] };
+
+test("active items validate owner/collaborators against the active roster", () => {
+  const ok = makeRepo(ARRAY_CFG, { active: [{ id: "DEMO0001", title: "T", effort: 3, owner: "alice", collaborators: ["bob"] }] });
+  try {
+    writeTeam(ok, ROSTER);
+    const { cfg } = loadConfig(ok);
+    assert.deepEqual(readBacklog(ok, cfg).errors, [], "an active owner + collaborator validate");
+  } finally {
+    rmSync(ok, { recursive: true, force: true });
+  }
+
+  const bad = [
+    [{ owner: "carol" }, /owner "carol" is not an active roster member/],   // inactive
+    [{ owner: "dave" }, /owner "dave" is not an active roster member/],      // unknown
+    [{ owner: "alice", collaborators: ["dave"] }, /collaborator "dave" is not an active roster member/],
+    [{ owner: "alice", collaborators: ["carol"] }, /collaborator "carol" is not an active roster member/],
+  ];
+  for (const [extra, re] of bad) {
+    const root = makeRepo(ARRAY_CFG, { active: [{ id: "DEMO0001", title: "T", effort: 3, ...extra }] });
+    try {
+      writeTeam(root, ROSTER);
+      const { cfg } = loadConfig(root);
+      const errs = readBacklog(root, cfg).errors;
+      assert.ok(errs.some((e) => re.test(e)), `expected ${re} in ${JSON.stringify(errs)}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("an active owner with no roster at all is an error (can't resolve to an active member)", () => {
+  const root = makeRepo(ARRAY_CFG, { active: [{ id: "DEMO0001", title: "T", effort: 3, owner: "alice" }] });
+  try {
+    const { cfg } = loadConfig(root); // no team.json written
+    assert.ok(readBacklog(root, cfg).errors.some((e) => /owner "alice" is not an active roster member/.test(e)));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("closed items keep historical owner/collaborators without re-validation", () => {
+  const root = makeRepo(ARRAY_CFG, {
+    completed: [{ id: "DEMO0001", title: "T", owner: "ghost", collaborators: ["alsoGone"] }],
+    removed: [{ id: "DEMO0002", title: "U", owner: "carol" }],
+  });
+  try {
+    writeTeam(root, ROSTER);
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    assert.deepEqual(data.errors, [], "historical owners (gone or inactive) are not re-validated");
+    const json = JSON.parse(buildBacklogJson(cfg, data));
+    const done = json.tasks.find((t) => t.id === "DEMO0001");
+    assert.equal(done.owner, "ghost");
+    assert.deepEqual(done.collaborators, ["alsoGone"]);
+    assert.equal(json.tasks.find((t) => t.id === "DEMO0002").owner, "carol");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("closed items reject a non-handle owner/collaborator but allow a valid historical (non-member) handle", () => {
+  // Historical values skip roster *membership* (SPEC §8.3) but must still be valid
+  // handles (§7.2) — else a hand-authored `owner: Jane Doe` would pass --check.
+  const bad = makeRepo(ARRAY_CFG, {
+    completed: [{ id: "DEMO0001", title: "T", owner: "Jane Doe" }],
+    removed: [{ id: "DEMO0002", title: "U", collaborators: ["Not A Handle"] }],
+  });
+  try {
+    writeTeam(bad, ROSTER);
+    const errs = readBacklog(bad, loadConfig(bad).cfg).errors.join("; ");
+    assert.ok(/owner "Jane Doe" is not a valid handle/.test(errs), `expected an owner handle error in ${errs}`);
+    assert.ok(/collaborator "Not A Handle" is not a valid handle/.test(errs), `expected a collaborator handle error in ${errs}`);
+  } finally {
+    rmSync(bad, { recursive: true, force: true });
+  }
+
+  // A valid handle that is not (or no longer) a roster member still validates on a closed item.
+  const ok = makeRepo(ARRAY_CFG, { completed: [{ id: "DEMO0001", title: "T", owner: "formerEmployee", collaborators: ["alsoGone"] }] });
+  try {
+    writeTeam(ok, ROSTER);
+    assert.deepEqual(readBacklog(ok, loadConfig(ok).cfg).errors, [], "valid historical handles pass without membership");
+  } finally {
+    rmSync(ok, { recursive: true, force: true });
+  }
+});
+
+test("backlog.json carries owner/collaborators; README shows an Owner column", () => {
+  const root = makeRepo(ARRAY_CFG, {
+    active: [
+      { id: "DEMO0001", title: "Owned", effort: 3, owner: "alice", collaborators: ["bob"] },
+      { id: "DEMO0002", title: "Unowned", effort: 2 },
+    ],
+  });
+  try {
+    writeTeam(root, ROSTER);
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    assert.deepEqual(data.errors, []);
+    const json = JSON.parse(buildBacklogJson(cfg, data));
+    const owned = json.tasks.find((t) => t.id === "DEMO0001");
+    assert.equal(owned.owner, "alice");
+    assert.deepEqual(owned.collaborators, ["bob"]);
+    const unowned = json.tasks.find((t) => t.id === "DEMO0002");
+    assert.equal(unowned.owner, null, "an unowned task carries owner: null");
+    assert.deepEqual(unowned.collaborators, [], "and collaborators: []");
+
+    const readme = generateArtifacts(root, cfg, data).files.find((f) => f.path.endsWith("README.md")).content;
+    assert.match(readme, /\| ID \| Title \| Owner \| Priority \| Effort \|/, "the Owner column header is present");
+    assert.match(readme, /Owned \| alice \|/, "the owner handle renders in the Owner column");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("serializeFrontMatter/parseFrontMatter round-trip owner and collaborators", () => {
+  const text = composeFile({ id: "DEMO0001", title: "T", status: "active", depends_on: [], owner: "alice", collaborators: ["bob", "carol"] }, "# DEMO0001 — T\n");
+  assert.match(text, /^owner: alice$/m);
+  assert.match(text, /^collaborators: \[bob, carol\]$/m);
+  const parsed = parseFrontMatter(text, "x", []);
+  assert.equal(parsed.owner, "alice");
+  assert.deepEqual(parsed.collaborators, ["bob", "carol"]);
 });

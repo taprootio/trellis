@@ -13,7 +13,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, loadConfig, readBacklog, generateArtifacts, attachEffortScale } from "./backlog.mjs";
+import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, loadConfig, loadRoster, readBacklog, generateArtifacts, attachEffortScale } from "./backlog.mjs";
 
 // The config home is fixed at `trellis/backlog.config.json` (CONFIG_DIR),
 // independent of `tasksDir`. A fresh scaffold writes a config that omits
@@ -24,6 +24,9 @@ import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, loadConfig, readB
 // tree/marker/generated paths derive from the effective config's root, while the
 // config path stays fixed.
 const CONFIG_REL = `${CONFIG_DIR}/backlog.config.json`;
+// The team roster sits next to the config at the FIXED config home (SPEC §7.2),
+// independent of tasksDir — it is authored input, not a generated artifact.
+const TEAM_REL = `${CONFIG_DIR}/team.json`;
 const tasksRootOf = (cfg) => (cfg && cfg.tasksDir) || DEFAULT_TASKS_DIR;
 
 // Default per-repo vocabulary, overridable via options (CLI flags / prompts).
@@ -145,7 +148,16 @@ function preflight(targetRoot, options, force) {
   }
   const root = tasksRootOf(cfg); // a kept config may relocate the tree via tasksDir
   const data = readBacklog(targetRoot, cfg);
-  if (data.errors.length) return [`target backlog has errors; fix them before init: ${data.errors.join("; ")}`];
+  // --force overwrites team.json with a fresh stub, so a pre-existing broken roster
+  // must not block (mirrors force overwriting a broken config/index below). Item
+  // errors still block — items are never overwritten. readBacklog bundles the roster
+  // errors into data.errors, so subtract exactly those under force.
+  let dataErrors = data.errors;
+  if (force) {
+    const rosterErrors = new Set(loadRoster(targetRoot).errors);
+    dataErrors = dataErrors.filter((e) => !rosterErrors.has(e));
+  }
+  if (dataErrors.length) return [`target backlog has errors; fix them before init: ${dataErrors.join("; ")}`];
 
   // A generated index we will KEEP must already carry its begin→end marker pair,
   // in order (begin before end), or the core can't fill it and the repo would
@@ -178,6 +190,17 @@ function configContent(o) {
       priorities: o.priorities,
       effort: o.effort,
     },
+    null,
+    2,
+  ) + "\n";
+}
+
+// The team roster stub (SPEC §7.2): one example active member showing the shape
+// (`handle`/`name`/optional `email`/`status`). Authored, not generated; left for the
+// repo to edit. An unused roster keeps the scaffold --check-green (no task owns it).
+function teamContent() {
+  return JSON.stringify(
+    { members: [{ handle: "example", name: "Example Member", email: "example@example.com", status: "active" }] },
     null,
     2,
   ) + "\n";
@@ -256,6 +279,9 @@ Markdown files with YAML front-matter; ids are \`${o.prefix}\` + ${o.idWidth} di
 - Per-repo vocabulary (id prefix, milestones, priorities, effort) lives in
   \`trellis/backlog.config.json\` (the backlog root is \`trellis/\` by default;
   override it with a \`tasksDir\` key).
+- The team roster lives in \`trellis/team.json\` (members with a \`handle\`, \`name\`,
+  optional \`email\`, and \`status\`). A task may set an optional \`owner\` (one handle)
+  and \`collaborators\` (handles); on active items they must be active roster members.
 - After adding, moving, or editing an item, regenerate with \`npx trellis generate\`;
   CI runs \`npx trellis check\`.
 - \`main\` is protected — work on a branch, open a PR, and let the backlog check
@@ -287,6 +313,7 @@ ${end}
 function templateFiles(o, sourceRoot, root) {
   const files = [
     { rel: CONFIG_REL, content: configContent(o) },
+    { rel: TEAM_REL, content: teamContent() },
     { rel: `${root}/active/.gitkeep`, content: "" },
     { rel: `${root}/completed/tasks/.gitkeep`, content: "" },
     { rel: `${root}/README.md`, content: readmeSkeleton() },
@@ -329,11 +356,16 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   for (const f of files) {
     const abs = join(targetRoot, f.rel);
     const exists = existsSync(abs);
-    actions.push({
-      rel: f.rel,
-      content: f.content,
-      action: exists && !force ? "skip" : "create",
-    });
+    let action = exists && !force ? "skip" : "create";
+    // team.json holds authored roster data with no flag source, so a VALID existing
+    // roster is preserved even under --force — overwriting it would drop real members
+    // and could leave active owners dangling (a partial, broken scaffold). Only an
+    // absent or broken roster is (re)written with the stub. Mirrors the AGENTS block,
+    // which --force also never clobbers.
+    if (f.rel === TEAM_REL && exists && loadRoster(targetRoot).errors.length === 0) {
+      action = "skip";
+    }
+    actions.push({ rel: f.rel, content: f.content, action });
   }
 
   // AGENTS.md: create if absent, append the block if present without it, else skip.

@@ -1,5 +1,5 @@
 {
-  "description": "Taproot's planning/ai-backlog: bold-inline (**Field:**) metadata on active items, header-style (Created:/Completed:) closed items, numeric-prefix filenames, P1–P3 priorities, and milestones that mix maturity gates with feature areas. The proven reference profile (TRL0009 imports it).",
+  "description": "Taproot's planning/ai-backlog: bold-inline (**Field:**) metadata on active items, header-style (Created:/Completed:) closed items, numeric-prefix filenames, P1–P3 priorities, and milestones that mix maturity gates with feature areas. The `remap.owner` entries are placeholders — edit them to your target repo's roster handles (team.json). The proven reference profile (TRL0009 imports it).",
   "sources": {
     "active": { "dirs": ["active"], "file": "*.md" },
     "completed": { "dirs": ["completed"], "file": "*.md" },
@@ -11,6 +11,8 @@
     "priority": { "from": "inline", "label": "Priority" },
     "effort": { "from": "inline", "label": "Effort" },
     "milestone": { "from": "inline", "label": "Milestone" },
+    "owner": { "from": "inline", "label": "Owner" },
+    "collaborators": { "from": "inline", "label": "Collaborators" },
     "depends_on": { "from": "inline", "label": "Depends on" },
     "completed_on": { "from": "header", "label": "Completed", "fallback": { "from": "header", "label": "Created" } },
     "removed_on": { "from": "header", "label": "Removed" },
@@ -18,7 +20,8 @@
   },
   "remap": {
     "priority": { "P1": "High", "P2": "Medium", "P3": "Low" },
-    "milestone": { "Pre-Launch": "Alpha", "MCP Servers": "Beta", "Post-Launch": "v1", "Back-Burner": "Future", "Legal Research": "Future" }
+    "milestone": { "Pre-Launch": "Alpha", "MCP Servers": "Beta", "Post-Launch": "v1", "Back-Burner": "Future", "Legal Research": "Future" },
+    "owner": { "Jane Doe": "jane", "John Smith": "john" }
   },
   "defaults": { "milestone": "Alpha", "priority": "Low", "effort": 1 },
   "summary": { "strategy": "firstSentence" }
