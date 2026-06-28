@@ -14,7 +14,7 @@
 import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
-import { DEFAULTS, applyScaffold, resolveOptions, validateOptions } from "../src/init.mjs";
+import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource } from "../src/init.mjs";
 import { applyImport } from "../src/import.mjs";
 import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
 
@@ -32,6 +32,8 @@ Flags:
   --import <path>       after scaffolding, import an existing backlog at <path>
   --profile <name>      source-mapping profile for --import (trellis import --list-profiles)
   --mapping <file>      mapping file (JSON) for --import (alternative to --profile)
+  --retire-source <p>   history-preservingly git-rm an imported source tree at <p>
+                        (a separate, later step — see below; cannot combine with --import)
   --force               overwrite existing files instead of skipping
   --dry-run             report what would change without writing
   -h, --help            show this help
@@ -39,6 +41,11 @@ Flags:
 With --import, provide exactly one of --profile or --mapping; a relative <path>
 resolves against the target repo. --dry-run previews the scaffold without writing;
 preview the import plan itself with "trellis import --dry-run" on the initialized repo.
+
+--retire-source removes the old source tree once the import is green and committed:
+it stages a "git rm -r <p>" (history preserved) and leaves the deletion for you to
+review and commit — it does not scaffold, import, or commit. Run it on its own, after
+the import, never in the same command (--dry-run lists the files without touching git).
 `;
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -60,6 +67,7 @@ function parseArgs(argv) {
       case "--import": opts.import = next(); break;
       case "--profile": opts.profile = next(); break;
       case "--mapping": opts.mapping = next(); break;
+      case "--retire-source": opts.retireSource = next(); break;
       case "--prefix": opts.prefix = next(); break;
       case "--id-width": opts.idWidth = Number(next()); break;
       case "--milestones": opts.milestones = csv(next()); break;
@@ -77,8 +85,9 @@ function parseArgs(argv) {
 
 async function promptMissing(opts) {
   // Only prompt for the two the task calls out (prefix, milestones), and only
-  // when interactive and not a dry run.
-  if (opts.dryRun || !process.stdin.isTTY) return;
+  // when interactive and not a dry run. A retire-only run doesn't scaffold, so it
+  // never needs the vocabulary.
+  if (opts.dryRun || opts.retireSource || !process.stdin.isTTY) return;
   if (opts.prefix && opts.milestones) return;
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -142,6 +151,15 @@ function importFlagErrors(opts) {
   return errors;
 }
 
+// --retire-source is a separate, later step — never automatic mid-import (TRL0027), so
+// it cannot share a run with --import.
+function retireFlagErrors(opts) {
+  if (opts.retireSource && opts.import) {
+    return ["--retire-source cannot be combined with --import — retire the source in a separate run after the import is committed"];
+  }
+  return [];
+}
+
 // Concise report for the follow-on import (mirrors the trellis import CLI). Fatal
 // errors never claim success; otherwise echo counts + the id map so the user can
 // review before committing.
@@ -171,6 +189,24 @@ function reportImport(targetRoot, summary) {
   console.log(`Done. Review ${summary.root}/, then commit.`);
 }
 
+// Report for --retire-source. A refusal (errors) never claims success; otherwise echo
+// the staged-but-uncommitted removal and steer the user to review + commit.
+function reportRetire(summary, dryRun) {
+  if (summary.errors.length) {
+    console.error(`Refused to retire ${summary.path ? `"${summary.path}"` : "the source"} — nothing changed:`);
+    for (const e of summary.errors) console.error(`  - ${e}`);
+    return;
+  }
+  const n = summary.removed.length;
+  const files = `${n} tracked file${n === 1 ? "" : "s"}`;
+  if (dryRun) {
+    console.log(`Would retire "${summary.path}" — git rm ${files} (dry run, nothing changed).`);
+    return;
+  }
+  console.log(`Retired "${summary.path}" — staged the removal of ${files} with git rm.`);
+  console.log("Review with `git status`, then commit. Git preserves the history.");
+}
+
 const { target, opts } = parseArgs(process.argv.slice(2));
 if (opts.help) { process.stdout.write(HELP); process.exit(0); }
 
@@ -182,7 +218,7 @@ if (optErrors.length) {
   process.exit(2);
 }
 
-const flagErrors = importFlagErrors(opts);
+const flagErrors = [...importFlagErrors(opts), ...retireFlagErrors(opts)];
 if (flagErrors.length) {
   for (const e of flagErrors) console.error(`error: ${e}`);
   process.exit(2);
@@ -190,6 +226,15 @@ if (flagErrors.length) {
 
 const targetRoot = resolve(target);
 const dryRun = !!opts.dryRun;
+
+// --retire-source: a deliberate, standalone step run after the import is committed. It
+// does not scaffold or import — it stages a history-preserving `git rm` of the source.
+if (opts.retireSource) {
+  const { summary: ret } = retireSource(targetRoot, opts.retireSource, { dryRun });
+  reportRetire(ret, dryRun);
+  process.exit(ret.errors.length ? 1 : 0);
+}
+
 const { summary } = applyScaffold(targetRoot, opts, { dryRun }, sourceRoot);
 report(targetRoot, summary, dryRun);
 // A failed scaffold (refusal or generate failure) is fatal and blocks any import.

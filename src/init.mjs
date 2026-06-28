@@ -13,6 +13,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join, relative, isAbsolute } from "node:path";
+import { execFileSync } from "node:child_process";
 import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, loadConfig, loadRoster, readBacklog, generateArtifacts, attachEffortScale } from "./backlog.mjs";
 
 // The config home is fixed at `trellis/backlog.config.json` (CONFIG_DIR),
@@ -531,4 +532,86 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false } = {}, so
   }
 
   return { options, summary };
+}
+
+// --------------------------------------------------------- retire source
+// Run git rooted at repoRoot with an arg array (NO shell). Mirrors src/history.mjs:
+// capture stderr so the caller can classify a failure; never inherit it.
+function git(repoRoot, args) {
+  return execFileSync("git", ["-C", repoRoot, ...args], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+// First line of the most useful diagnostic from a failed git call.
+function gitErr(e) {
+  const s = (e && e.stderr ? String(e.stderr) : e && e.message ? e.message : String(e)).trim();
+  return s.split("\n")[0] || "git error";
+}
+
+// History-preserving retirement of an imported source tree (TRL0027). Stages a
+// `git rm -r` of <sourcePath> and leaves the deletion for the user to review and
+// commit — it never creates a commit, mirroring how scaffold/import leave changes for
+// review. Deliberately separate from import: run it as a late step once the import is
+// green and committed, so the source tree is intact if anything rolls back.
+//
+// Refuses (writes nothing) unless the path is inside the repo, exists, the repo is a
+// git work tree, and the path is git-tracked — a history-preserving removal needs a
+// tracked path (git keeps the file's history after the staged deletion is committed),
+// and an untracked path has no history to preserve. `dryRun` lists the tracked files
+// without touching git. Returns { summary: { path, removed, errors, warnings } }.
+export function retireSource(targetRoot, sourcePath, { dryRun = false } = {}) {
+  const summary = { path: null, removed: [], errors: [], warnings: [] };
+  if (!sourcePath || !String(sourcePath).trim()) {
+    summary.errors.push("--retire-source requires a path");
+    return { summary };
+  }
+  const abs = isAbsolute(sourcePath) ? sourcePath : join(targetRoot, sourcePath);
+  const rel = relative(targetRoot, abs);
+  // Stay inside the repo — never `git rm` a path outside the tree we were pointed at,
+  // and never the repo root itself (empty rel).
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    summary.errors.push(`refusing to retire "${sourcePath}" — it is outside the repo (or is the repo root)`);
+    return { summary };
+  }
+  summary.path = rel;
+  if (!existsSync(abs)) {
+    summary.errors.push(`nothing to retire at "${rel}" (path does not exist)`);
+    return { summary };
+  }
+  // Must be a git work tree — retirement is history-preserving, so it needs git.
+  try {
+    if (git(targetRoot, ["rev-parse", "--is-inside-work-tree"]).trim() !== "true") throw new Error("not a work tree");
+  } catch (e) {
+    summary.errors.push(e && e.code === "ENOENT" ? "git is not available on PATH" : `not a git work tree: ${targetRoot}`);
+    return { summary };
+  }
+  // The path must be tracked: `ls-files` lists exactly the tracked files under <rel>.
+  // An untracked source has no history to preserve, and `git rm` would fail anyway.
+  let tracked;
+  try {
+    tracked = git(targetRoot, ["ls-files", "-z", "--", rel]).split("\0").filter(Boolean);
+  } catch (e) {
+    summary.errors.push(`git ls-files failed: ${gitErr(e)}`);
+    return { summary };
+  }
+  if (!tracked.length) {
+    summary.errors.push(`"${rel}" is not tracked by git — nothing to retire (commit the import first; a history-preserving removal needs a tracked path)`);
+    return { summary };
+  }
+  if (dryRun) {
+    summary.removed = tracked;
+    return { summary };
+  }
+  // `git rm -r` stages the deletion (index + working tree); the user reviews and commits.
+  try {
+    git(targetRoot, ["rm", "-r", "-q", "--", rel]);
+  } catch (e) {
+    summary.errors.push(`git rm failed: ${gitErr(e)}`);
+    return { summary };
+  }
+  summary.removed = tracked;
+  return { summary };
 }

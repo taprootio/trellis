@@ -31,6 +31,34 @@ function assertCheckClean(root) {
   assert.deepEqual(stale.map((f) => f.path), [], "no generated artifact should be stale");
 }
 
+// Isolated git invocation for the --retire-source tests — no global/system config so
+// the host's settings can't change behavior; identity + signing set locally per repo.
+const GIT_ENV = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_TERMINAL_PROMPT: "0" };
+function git(root, args) {
+  return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", env: { ...process.env, ...GIT_ENV } });
+}
+
+// A throwaway git repo (main branch, local identity, signing off).
+function gitRepo() {
+  const root = tempRepo();
+  git(root, ["init", "-q", "-b", "main"]);
+  git(root, ["config", "user.name", "Tester"]);
+  git(root, ["config", "user.email", "tester@example.com"]);
+  git(root, ["config", "commit.gpgsign", "false"]);
+  return root;
+}
+
+// Run the init CLI under the isolated git env; capture status/stdout/stderr rather than
+// throwing on a non-zero exit.
+function runInit(root, args) {
+  try {
+    const stdout = execFileSync(process.execPath, [initScript, root, ...args], { encoding: "utf8", env: { ...process.env, ...GIT_ENV } });
+    return { status: 0, stdout, stderr: "" };
+  } catch (e) {
+    return { status: e.status, stdout: String(e.stdout || ""), stderr: String(e.stderr || "") };
+  }
+}
+
 test("scaffolds a fresh repo that the core validates clean", () => {
   const root = tempRepo();
   try {
@@ -684,6 +712,101 @@ test("a fresh scaffold (init writes its own AGENTS.md) reports no reconcile note
   try {
     const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
     assert.deepEqual(summary.reconcile, [], "init's own output never self-flags");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---- --retire-source (TRL0027): history-preserving, stage-only, never mid-import ----
+
+test("--retire-source stages a git rm of a tracked source tree without committing", () => {
+  const root = gitRepo();
+  try {
+    mkdirSync(join(root, "planning/legacy"), { recursive: true });
+    writeFileSync(join(root, "planning/legacy/a.md"), "old task a\n");
+    writeFileSync(join(root, "planning/legacy/b.md"), "old task b\n");
+    git(root, ["add", "-A"]);
+    git(root, ["commit", "-q", "-m", "import legacy backlog"]);
+    const headBefore = git(root, ["rev-parse", "HEAD"]).trim();
+
+    const { status, stdout } = runInit(root, ["--retire-source", "planning/legacy"]);
+    assert.equal(status, 0, "a successful retirement exits 0");
+    assert.match(stdout, /Retired "planning\/legacy"/);
+    assert.match(stdout, /2 tracked files/);
+
+    assert.equal(existsSync(join(root, "planning/legacy/a.md")), false, "files are removed from the working tree");
+    const porcelain = git(root, ["status", "--porcelain"]);
+    assert.match(porcelain, /^D {2}planning\/legacy\/a\.md$/m, "the deletion is staged");
+    assert.equal(git(root, ["rev-parse", "HEAD"]).trim(), headBefore, "retirement does not create a commit");
+    assert.equal(git(root, ["cat-file", "-t", `${headBefore}:planning/legacy/a.md`]).trim(), "blob", "history is preserved at HEAD");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--retire-source --dry-run lists the files and changes nothing", () => {
+  const root = gitRepo();
+  try {
+    mkdirSync(join(root, "planning/legacy"), { recursive: true });
+    writeFileSync(join(root, "planning/legacy/a.md"), "old task a\n");
+    git(root, ["add", "-A"]);
+    git(root, ["commit", "-q", "-m", "import legacy backlog"]);
+
+    const { status, stdout } = runInit(root, ["--retire-source", "planning/legacy", "--dry-run"]);
+    assert.equal(status, 0);
+    assert.match(stdout, /Would retire "planning\/legacy"/);
+    assert.match(stdout, /dry run/);
+    assert.ok(existsSync(join(root, "planning/legacy/a.md")), "a dry run leaves the files in place");
+    assert.equal(git(root, ["status", "--porcelain"]).trim(), "", "a dry run stages nothing");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--retire-source refuses an untracked path (nothing changed)", () => {
+  const root = gitRepo();
+  try {
+    mkdirSync(join(root, "planning/legacy"), { recursive: true });
+    writeFileSync(join(root, "planning/legacy/a.md"), "never committed\n");
+    const { status, stderr } = runInit(root, ["--retire-source", "planning/legacy"]);
+    assert.equal(status, 1, "a refusal exits 1");
+    assert.match(stderr, /not tracked by git/);
+    assert.ok(existsSync(join(root, "planning/legacy/a.md")), "the untracked file is left untouched");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--retire-source refuses a path outside the repo", () => {
+  const root = gitRepo();
+  try {
+    const { status, stderr } = runInit(root, ["--retire-source", "../outside"]);
+    assert.equal(status, 1);
+    assert.match(stderr, /outside the repo/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--retire-source in a non-git directory fails cleanly", () => {
+  const root = tempRepo(); // not a git repo
+  try {
+    mkdirSync(join(root, "planning/legacy"), { recursive: true });
+    writeFileSync(join(root, "planning/legacy/a.md"), "a\n");
+    const { status, stderr } = runInit(root, ["--retire-source", "planning/legacy"]);
+    assert.equal(status, 1);
+    assert.match(stderr, /not a git work tree/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--retire-source cannot be combined with --import", () => {
+  const root = gitRepo();
+  try {
+    const { status, stderr } = runInit(root, ["--retire-source", "planning/legacy", "--import", "old", "--profile", "yaml-frontmatter"]);
+    assert.equal(status, 2, "a usage error exits 2");
+    assert.match(stderr, /--retire-source cannot be combined with --import/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
