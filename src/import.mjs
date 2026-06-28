@@ -433,38 +433,46 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
     const fm = { id: newId, title: title || newId, status: src.status, milestone, priority, effort, depends_on: [], summary };
     if (owner !== undefined) fm.owner = owner;
     if (collaborators.length) fm.collaborators = collaborators;
-    // Close-date resolution with a fallback chain (SPEC §5.1 requires an ISO date):
-    //   header/yaml extractor → git last-commit date of the source file → a
-    //   `defaults.<field>` floor → hard error. A git-derived or defaulted date is
-    //   flagged (a per-item warning + a summary count) so it never passes as authored.
+    // Close-date resolution (SPEC §5.1 requires an ISO date). A date field that is
+    // PRESENT but malformed is a hard error — never papered over by the fallback chain;
+    // only an ABSENT field falls through: extractor → git last-commit date → a
+    // `defaults.<field>` floor → unresolved. A git-derived or defaulted date is flagged
+    // (a per-item warning + a summary count) so it never passes as authored.
     const resolveCloseDate = (extractor, field) => {
-      const authored = toISO(runExtractor(extractor, ctx));
-      if (authored) return authored;
-      // Normalize through toISO so the resolver boundary is uniformly defensive: the
-      // production resolver already returns ISO-or-null, but an injected one must not be
-      // trusted to mint a `completed_on` the downstream gate would later reject.
+      const raw = runExtractor(extractor, ctx);
+      if (raw != null && String(raw).trim() !== "") {
+        const authored = toISO(raw);
+        return authored
+          ? { date: authored }
+          : { error: `${field} "${String(raw).trim()}" is not an ISO date (expected YYYY-MM-DD)` };
+      }
+      // Absent: normalize each fallback through toISO so the resolver boundary is
+      // uniformly defensive — the production resolver returns ISO-or-null, but an
+      // injected one must not mint a date the downstream gate would later reject.
       const fromGit = toISO(gitDate(src.rel));
       if (fromGit) {
         warnings.push(`${src.rel}: ${field} ${fromGit} derived from git history (source had no date header)`);
         provenance.gitDated++;
-        return fromGit;
+        return { date: fromGit };
       }
       const floor = toISO(defaults[field]);
       if (floor) {
         warnings.push(`${src.rel}: ${field} ${floor} from defaults.${field} (no date header, no git date)`);
         provenance.dateDefaulted++;
-        return floor;
+        return { date: floor };
       }
-      return null;
+      return { date: null };
     };
     if (src.status === "completed") {
-      const date = resolveCloseDate(fields.completed_on, "completed_on");
-      if (!date) ierr("could not resolve a `completed_on` date (no date header, no git commit date, no `defaults.completed_on`)");
-      else fm.completed_on = date;
+      const r = resolveCloseDate(fields.completed_on, "completed_on");
+      if (r.error) ierr(r.error);
+      else if (!r.date) ierr("could not resolve a `completed_on` date (no date header, no git commit date, no `defaults.completed_on`)");
+      else fm.completed_on = r.date;
     } else if (src.status === "removed") {
-      const date = resolveCloseDate(fields.removed_on, "removed_on");
-      if (!date) ierr("could not resolve a `removed_on` date (no date header, no git commit date, no `defaults.removed_on`)");
-      else fm.removed_on = date;
+      const r = resolveCloseDate(fields.removed_on, "removed_on");
+      if (r.error) ierr(r.error);
+      else if (!r.date) ierr("could not resolve a `removed_on` date (no date header, no git commit date, no `defaults.removed_on`)");
+      else fm.removed_on = r.date;
       const reason = runExtractor(fields.removed_reason, ctx) || (mapping.defaults && mapping.defaults.removed_reason);
       if (!reason) ierr("missing `removed_reason` (no field value and no `defaults.removed_reason`)"); else fm.removed_reason = String(reason).trim();
     }

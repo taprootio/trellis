@@ -163,13 +163,13 @@ the title.
 - **Closed items** (completed/removed) keep their enum values as a *historical*
   snapshot — those are not re-validated against the current config (SPEC §5.1,
   §8.3) — but the metadata must be **present** (from the source or `defaults`).
-- **Close dates** (`completed_on`/`removed_on`) resolve through a fallback chain:
-  the date header/field → the source file's **last git commit date** (read at import
-  time from the *source* repo) → an optional `defaults.<field>` floor → a hard error.
-  They are validated as real calendar dates (`YYYY-MM-DD`); an impossible date like
-  `2024-02-31` is refused rather than guessed. A git-derived or defaulted date is
-  flagged, never silently passed as authored — see [Import-time git and
-  provenance](#import-time-git-and-provenance).
+- **Close dates** (`completed_on`/`removed_on`) resolve through a fallback chain when
+  the field is **absent**: the date header/field → the source file's **last git commit
+  date** (read at import time from the *source* repo) → an optional `defaults.<field>`
+  floor → a hard error. A field that is **present but malformed** (e.g. an impossible
+  `2024-02-31`) is refused outright — never papered over by git or a floor. A
+  git-derived or defaulted date is flagged, never silently passed as authored — see
+  [Import-time git and provenance](#import-time-git-and-provenance).
 - **Owners and collaborators** resolve against the target's `team.json` roster
   (SPEC §7.2). On an **active** item the resolution chain is: `remap.owner` (or a
   direct case-insensitive handle match) → `defaults.owner` → **unassigned, with a

@@ -674,6 +674,37 @@ test("the default resolver reads a real git commit date (integration)", (t) => {
   }
 });
 
+test("a present-but-invalid authored close date is refused, not papered over by git or a floor", () => {
+  const root = initTarget();
+  const src = mkdtempSync(join(tmpdir(), "trellis-baddate-"));
+  try {
+    mkdirSync(join(src, "completed"), { recursive: true });
+    writeFileSync(join(src, "completed", "044-bad-date.md"), "# Impossible date\n\nCompleted: 2024-02-31\n**Effort:** 2\n\nThe author wrote a bad date.\n");
+    const m = {
+      sources: { completed: { dirs: ["completed"], file: "*.md" } },
+      fields: {
+        id: { from: "filename", pattern: "^(\\d+)" },
+        title: { from: "h1" },
+        effort: { from: "inline", label: "Effort" },
+        completed_on: { from: "header", label: "Completed" },
+      },
+      // A valid git date AND a floor default are both available — neither may rescue a
+      // present-but-malformed authored date; it must be refused.
+      defaults: { milestone: "Alpha", priority: "Low", effort: 1, completed_on: "2020-01-01" },
+    };
+    const gitDate = () => "2023-09-14";
+    const plan = planImport(root, src, m, { gitDate });
+    assert.ok(plan.errors.some((e) => /completed_on .*not an ISO date/.test(e)), `expected a malformed-date error, got ${JSON.stringify(plan.errors)}`);
+    const { summary } = applyImport(root, src, m, { dryRun: false, gitDate });
+    assert.ok(summary.errors.length > 0, "the import is refused");
+    assert.equal(summary.provenance.gitDated, 0, "git is not consulted for a present-but-invalid date");
+    assertCheckClean(root); // nothing written
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------- TRL0026: Size → effort
 test("Size: feeds effort when Effort: is absent (profile fallback extractor)", () => {
   const root = initTarget();
