@@ -85,7 +85,8 @@ const { id, opts } = parseArgs(process.argv.slice(2));
 if (opts.help) { process.stdout.write(HELP); process.exit(0); }
 
 const repoRoot = resolve(opts.repo || ".");
-const { cfg, errors } = loadConfig(repoRoot);
+const { cfg, warnings, errors } = loadConfig(repoRoot);
+for (const w of warnings) console.warn(`warning: ${w}`);
 if (errors.length) { console.error(`error: config: ${errors.join("; ")}`); process.exit(2); }
 
 try {
