@@ -64,10 +64,11 @@ test("scaffolds the branch-protection recipe and pins the required-check context
     assert.ok(existsSync(join(root, "docs/branch-protection.md")), "branch-protection.md is scaffolded");
     const recipe = readFileSync(join(root, "docs/branch-protection.md"), "utf8");
     assert.match(recipe, /`backlog`/, "the recipe names the pinned check context");
+    assert.match(recipe, /not `?Backlog Hygiene/, "the recipe warns to require the job name `backlog`, not the workflow display name");
     assert.match(recipe, /gh api/, "the recipe carries the GitHub gh api snippet");
     // Portable into a repo that has no SPEC.md / is not Trellis itself: no repo-root
     // relative spec link, no Trellis author branch prefix.
-    assert.doesNotMatch(recipe, /\]\(\.\.\/SPEC\.md\)/, "no repo-root-relative SPEC link that dangles in an onboarded repo");
+    assert.doesNotMatch(recipe, /\]\([^)]*SPEC\.md\)/, "no SPEC link of any shape (would dangle in an onboarded repo with no SPEC.md)");
     assert.doesNotMatch(recipe, /\bje\//, "no Trellis author branch prefix leaks into the copied recipe");
 
     // The emitted workflow pins the job with an explicit `name: backlog`, so the
