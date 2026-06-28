@@ -13,7 +13,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | ID | Title | Owner | Priority | Effort |
 | --- | --- | --- | --- | --- |
 | [TRL0009](active/TRL0009.md) | Dogfood — onboard an existing repo end-to-end |  | Medium | 🐡 Trout · 3 |
-| [TRL0027](active/TRL0027.md) | trellis init — retire and reconcile a legacy backlog on adopt |  | Medium | 🐡 Trout · 3 |
 
 ### v1
 
