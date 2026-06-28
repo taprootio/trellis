@@ -21,6 +21,7 @@ import {
   materializeHistory,
   HistoryError,
 } from "../src/history.mjs";
+import { historyOp, TrellisError } from "../src/mcp.mjs";
 
 const CFG = { specVersion: "2.2", idPrefix: "DEMO", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1, 2, 3, 5, 8, 13, 21] };
 
@@ -269,6 +270,43 @@ test("CLI: a non-git repo exits 1, not a stack trace", () => {
     const { status, stderr } = runCli("--repo", root);
     assert.equal(status, 1);
     assert.match(stderr, /not a git work tree/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ----------------------------------------------------------------- MCP op
+// The MCP `history` adapter (src/mcp.mjs) is exercised here, alongside the git
+// fixture it needs (mcp.test.mjs scaffolds non-git repos).
+test("MCP history: by id returns { id, entries }", () => {
+  withRepo((root) => {
+    const res = historyOp(root, { id: "DEMO0001" });
+    assert.equal(res.id, "DEMO0001");
+    assert.equal(res.entries.length, 3);
+  });
+});
+
+test("MCP history: omitting id (or empty) returns the whole-repo shape", () => {
+  withRepo((root) => {
+    const all = historyOp(root, {});
+    assert.equal(all.generated, true);
+    assert.deepEqual(Object.keys(all.tasks), ["DEMO0001", "DEMO0002", "DEMO0003"]);
+    // An empty-string id is treated as omitted, not as an invalid id.
+    assert.deepEqual(historyOp(root, { id: "  " }), all);
+  });
+});
+
+test("MCP history: an unknown id surfaces as a TrellisError (not_found)", () => {
+  withRepo((root) => {
+    assert.throws(() => historyOp(root, { id: "DEMO9999" }), (e) => e instanceof TrellisError && e.code === "not_found");
+  });
+});
+
+test("MCP history: a non-git repo surfaces as a TrellisError", () => {
+  const root = mkdtempSync(join(tmpdir(), "trellis-nogit-mcp-"));
+  try {
+    write(root, "trellis/backlog.config.json", JSON.stringify(CFG, null, 2) + "\n");
+    assert.throws(() => historyOp(root, {}), (e) => e instanceof TrellisError && e.code === "not_a_git_repo");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

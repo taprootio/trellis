@@ -31,6 +31,7 @@ import {
 } from "./backlog.mjs";
 import { applyImport } from "./import.mjs";
 import { loadProfile } from "./profiles.mjs";
+import { deriveTaskHistory, deriveAllHistory, HistoryError } from "./history.mjs";
 
 // A domain error the transport maps to an MCP tool error (isError result) rather
 // than a protocol failure. `code` is a short slug for programmatic handling.
@@ -412,6 +413,28 @@ export function importOp(repoRoot, args = {}) {
   return { ...summary, dryRun };
 }
 
+// history — read-only git-derived task history (SPEC §8.4). By id → { id, entries };
+// omit id → { generated, tasks } keyed by id (the same shape `trellis history --write`
+// materializes, so a client reads the tool result and the file identically). Each
+// entry is { id, commit, date, author, subject, reason }, newest-first. NEVER writes
+// and is NOT part of `--check` — history is volatile and git is authoritative. Uses
+// loadCfg (not loadClean): like get_task/list_tasks it is a tolerant read, and history
+// is a forensic tool that should work even on a backlog that doesn't fully validate.
+// The deriver's HistoryError (no git, not a work tree, bad/unknown id) maps to a
+// TrellisError so the transport returns an isError result, not a stack trace.
+export function historyOp(repoRoot, { id } = {}) {
+  const cfg = loadCfg(repoRoot);
+  try {
+    if (id !== undefined && id !== null && String(id).trim() !== "") {
+      return deriveTaskHistory(repoRoot, cfg, id);
+    }
+    return deriveAllHistory(repoRoot, cfg);
+  } catch (e) {
+    if (e instanceof HistoryError) throw new TrellisError(e.message, e.code);
+    throw e;
+  }
+}
+
 // Dispatch table for the transport: tool name → (repoRoot, args) → result.
 export const OPS = {
   list_tasks: listTasks,
@@ -422,4 +445,5 @@ export const OPS = {
   validate: validateOp,
   regenerate: regenerateOp,
   import: importOp,
+  history: historyOp,
 };
