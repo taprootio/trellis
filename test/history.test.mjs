@@ -194,6 +194,32 @@ test("materializeHistory honours an explicit --out path", () => {
   });
 });
 
+test("a regex-metacharacter id prefix (e.g. T+) is matched literally, not as a pattern", () => {
+  const root = mkdtempSync(join(tmpdir(), "trellis-prefix-"));
+  try {
+    const cfg = { specVersion: "2.2", idPrefix: "T+", idWidth: 3, milestones: ["Alpha"], priorities: ["High"], effort: [1] };
+    write(root, "trellis/backlog.config.json", JSON.stringify(cfg, null, 2) + "\n");
+    mkdirSync(join(root, "trellis/active"), { recursive: true });
+    mkdirSync(join(root, "trellis/completed/tasks"), { recursive: true });
+    mkdirSync(join(root, "trellis/removed"), { recursive: true });
+    git(root, ["init", "-q", "-b", "main"]);
+    git(root, ["config", "user.name", "Committer"]);
+    git(root, ["config", "user.email", "c@example.com"]);
+    write(root, "trellis/active/T+001.md", "---\nid: T+001\n---\n\nbody\n");
+    // A decoy the UNescaped regex (`T+` = "one or more T") would wrongly accept.
+    write(root, "trellis/active/T001.md", "---\nid: T001\n---\n\ndecoy\n");
+    commit(root, "2026-02-01T10:00:00-08:00", "Ada <ada@example.com>", "T+001: create");
+
+    const loaded = loadConfig(root).cfg;
+    assert.deepEqual(taskIds(root, loaded).map((t) => t.id), ["T+001"], "only the literal-prefix file is a task; the decoy is ignored");
+    assert.equal(resolveTaskFile(root, loaded, "T+001").status, "active");
+    assert.throws(() => resolveTaskFile(root, loaded, "T001"), HistoryError, "an id that only the unescaped pattern would accept is rejected");
+    assert.equal(deriveTaskHistory(root, loaded, "T+001").entries.length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a non-git directory throws a typed HistoryError", () => {
   const root = mkdtempSync(join(tmpdir(), "trellis-nogit-"));
   try {

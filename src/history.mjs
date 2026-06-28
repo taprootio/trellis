@@ -86,8 +86,14 @@ function hasHead(repoRoot) {
   }
 }
 
+// Escape regex metacharacters so a configured idPrefix is matched literally — a
+// prefix like `T+` must mean two characters, not "one or more T". Mirrors
+// src/pr-title.mjs. (The core validator's own id regexes in src/backlog.mjs and
+// src/mcp.mjs share this gap; hardening them is tracked separately.)
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 function idRegex(cfg) {
-  return new RegExp(`^${cfg.idPrefix}\\d{${cfg.idWidth}}$`);
+  return new RegExp(`^${escapeRe(cfg.idPrefix)}\\d{${cfg.idWidth}}$`);
 }
 
 // Resolve an id to its current file by probing the three status dirs, newest status
@@ -112,7 +118,7 @@ export function resolveTaskFile(repoRoot, cfg, id) {
 // doesn't fully validate. Sorted by id for a stable key order in history.json.
 export function taskIds(repoRoot, cfg) {
   const p = paths(repoRoot, cfg);
-  const fileRe = new RegExp(`^(${cfg.idPrefix}\\d{${cfg.idWidth}})\\.md$`);
+  const fileRe = new RegExp(`^(${escapeRe(cfg.idPrefix)}\\d{${cfg.idWidth}})\\.md$`);
   const out = [];
   for (const [status, dir] of [["active", p.active], ["completed", p.completedTasks], ["removed", p.removed]]) {
     if (!existsSync(dir)) continue;
