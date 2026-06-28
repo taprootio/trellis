@@ -500,3 +500,173 @@ test("CLI: an explicit --dry-run wins over --apply and writes nothing", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// --------------------------------------------------- TRL0026: close-date fallback
+const hasGit = () => {
+  try { execFileSync("git", ["--version"], { stdio: "ignore" }); return true; }
+  catch { return false; }
+};
+
+test("git-date fallback dates a header-less completed item, flags it, and counts it", () => {
+  const root = initTarget();
+  const src = mkdtempSync(join(tmpdir(), "trellis-gitdate-"));
+  try {
+    mkdirSync(join(src, "completed"), { recursive: true });
+    // No Completed:/Created: header anywhere — the only date signal is git.
+    writeFileSync(join(src, "completed", "040-no-date.md"), "# A dateless done thing\n\n**Effort:** 3\n\nIt shipped, but nobody wrote a date.\n");
+    const m = {
+      sources: { completed: { dirs: ["completed"], file: "*.md" } },
+      fields: {
+        id: { from: "filename", pattern: "^(\\d+)" },
+        title: { from: "h1" },
+        effort: { from: "inline", label: "Effort" },
+        completed_on: { from: "header", label: "Completed", fallback: { from: "header", label: "Created" } },
+      },
+      defaults: { milestone: "Alpha", priority: "Low", effort: 1 },
+    };
+    // Inject a deterministic resolver so the test needs no real repo.
+    const gitDate = () => "2023-09-14";
+    const { summary } = applyImport(root, src, m, { dryRun: false, gitDate });
+    assert.deepEqual(summary.errors, []);
+    const item = fm(root, `trellis/completed/tasks/${newIdFor(summary.idMap, "completed/040-no-date.md")}.md`);
+    assert.equal(item.completed_on, "2023-09-14", "completed_on filled from the git commit date");
+    assert.equal(summary.provenance.gitDated, 1, "the git-dated item is counted");
+    assert.equal(summary.provenance.dateDefaulted, 0);
+    assert.ok(summary.warnings.some((w) => /040-no-date.*completed_on 2023-09-14 derived from git/.test(w)), `expected a git-dated warning, got ${JSON.stringify(summary.warnings)}`);
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});
+
+test("a header date still wins over git — git is only a fallback", () => {
+  const root = initTarget();
+  const src = mkdtempSync(join(tmpdir(), "trellis-headerwins-"));
+  try {
+    mkdirSync(join(src, "completed"), { recursive: true });
+    writeFileSync(join(src, "completed", "043-dated.md"), "# A dated thing\n\nCompleted: 2022-03-04\n**Effort:** 2\n\nIt shipped with a date.\n");
+    const m = {
+      sources: { completed: { dirs: ["completed"], file: "*.md" } },
+      fields: {
+        id: { from: "filename", pattern: "^(\\d+)" },
+        title: { from: "h1" },
+        effort: { from: "inline", label: "Effort" },
+        completed_on: { from: "header", label: "Completed" },
+      },
+      defaults: { milestone: "Alpha", priority: "Low", effort: 1 },
+    };
+    const gitDate = () => "2099-12-31"; // would be obviously wrong if it leaked through
+    const { summary } = applyImport(root, src, m, { dryRun: false, gitDate });
+    assert.deepEqual(summary.errors, []);
+    const item = fm(root, `trellis/completed/tasks/${newIdFor(summary.idMap, "completed/043-dated.md")}.md`);
+    assert.equal(item.completed_on, "2022-03-04", "the authored header date is used, not git");
+    assert.equal(summary.provenance.gitDated, 0, "an authored date is not counted as git-dated");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});
+
+test("falls back to a defaults.completed_on floor when neither header nor git yields a date", () => {
+  const root = initTarget();
+  const src = mkdtempSync(join(tmpdir(), "trellis-datefloor-"));
+  try {
+    mkdirSync(join(src, "completed"), { recursive: true });
+    writeFileSync(join(src, "completed", "041-no-date.md"), "# Another dateless thing\n\n**Effort:** 2\n\nNo date, and not in git either.\n");
+    const m = {
+      sources: { completed: { dirs: ["completed"], file: "*.md" } },
+      fields: {
+        id: { from: "filename", pattern: "^(\\d+)" },
+        title: { from: "h1" },
+        effort: { from: "inline", label: "Effort" },
+        completed_on: { from: "header", label: "Completed" },
+      },
+      defaults: { milestone: "Alpha", priority: "Low", effort: 1, completed_on: "2020-01-01" },
+    };
+    const gitDate = () => null; // simulate a non-repo / uncommitted source
+    const { summary } = applyImport(root, src, m, { dryRun: false, gitDate });
+    assert.deepEqual(summary.errors, []);
+    const item = fm(root, `trellis/completed/tasks/${newIdFor(summary.idMap, "completed/041-no-date.md")}.md`);
+    assert.equal(item.completed_on, "2020-01-01", "completed_on filled from the floor default");
+    assert.equal(summary.provenance.dateDefaulted, 1);
+    assert.equal(summary.provenance.gitDated, 0);
+    assert.ok(summary.warnings.some((w) => /041-no-date.*from defaults\.completed_on/.test(w)), `expected a date-defaulted warning, got ${JSON.stringify(summary.warnings)}`);
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});
+
+test("refuses a header-less completed item when there is no git date and no floor default", () => {
+  const root = initTarget();
+  const src = mkdtempSync(join(tmpdir(), "trellis-nodate-"));
+  try {
+    mkdirSync(join(src, "completed"), { recursive: true });
+    writeFileSync(join(src, "completed", "042-no-date.md"), "# Hopeless\n\n**Effort:** 1\n\nNo date anywhere.\n");
+    const m = {
+      sources: { completed: { dirs: ["completed"], file: "*.md" } },
+      fields: {
+        id: { from: "filename", pattern: "^(\\d+)" },
+        title: { from: "h1" },
+        effort: { from: "inline", label: "Effort" },
+        completed_on: { from: "header", label: "Completed" },
+      },
+      defaults: { milestone: "Alpha", priority: "Low", effort: 1 }, // no completed_on floor
+    };
+    const gitDate = () => null;
+    const plan = planImport(root, src, m, { gitDate });
+    assert.ok(plan.errors.some((e) => e.includes("completed_on")), `expected a completed_on error, got ${JSON.stringify(plan.errors)}`);
+    const { summary } = applyImport(root, src, m, { dryRun: false, gitDate });
+    assert.ok(summary.errors.length > 0);
+    assertCheckClean(root); // nothing written
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});
+
+test("the default resolver reads a real git commit date (integration)", (t) => {
+  if (!hasGit()) return t.skip("git not available");
+  const root = initTarget();
+  const src = mkdtempSync(join(tmpdir(), "trellis-realgit-"));
+  try {
+    mkdirSync(join(src, "completed"), { recursive: true });
+    writeFileSync(join(src, "completed", "050-committed.md"), "# A committed done thing\n\n**Effort:** 2\n\nShipped and committed.\n");
+    // Build a source git repo and commit the item with a pinned author date. Neutralize
+    // any global/system git config so the pinned date and a local identity always win.
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_DATE: "2021-07-08T12:00:00", GIT_COMMITTER_DATE: "2021-07-08T12:00:00",
+      GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null",
+    };
+    const g = (...args) => execFileSync("git", ["-C", src, ...args], { stdio: "ignore", env });
+    g("init", "-q");
+    g("config", "user.email", "t@example.com");
+    g("config", "user.name", "Tester");
+    g("add", ".");
+    g("commit", "-q", "-m", "import source");
+    // No injected gitDate → the production resolver runs real git against `src`.
+    const m = {
+      sources: { completed: { dirs: ["completed"], file: "*.md" } },
+      fields: {
+        id: { from: "filename", pattern: "^(\\d+)" },
+        title: { from: "h1" },
+        effort: { from: "inline", label: "Effort" },
+        completed_on: { from: "header", label: "Completed" },
+      },
+      defaults: { milestone: "Alpha", priority: "Low", effort: 1 },
+    };
+    const { summary } = applyImport(root, src, m, { dryRun: false });
+    assert.deepEqual(summary.errors, []);
+    const item = fm(root, `trellis/completed/tasks/${newIdFor(summary.idMap, "completed/050-committed.md")}.md`);
+    assert.equal(item.completed_on, "2021-07-08", "completed_on derived from the pinned commit date");
+    assert.equal(summary.provenance.gitDated, 1);
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});

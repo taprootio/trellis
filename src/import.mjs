@@ -38,6 +38,7 @@
 
 import { readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { join, relative, dirname, isAbsolute } from "node:path";
+import { execFileSync } from "node:child_process";
 import {
   loadConfig,
   readBacklog,
@@ -86,6 +87,27 @@ function toISO(raw) {
   const dt = new Date(Date.UTC(y, month - 1, day));
   if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== month - 1 || dt.getUTCDate() !== day) return null;
   return `${m[1]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+// Most-recent commit author-date (YYYY-MM-DD) for a source path, read against the
+// source repo — the git-commit-date fallback for a legacy close-date with no header
+// (SPEC §5.1 requires an ISO date; many legacy closed items have none). Import-time
+// ONLY: git lives here in the importer, never in the generator/`--check` (SPEC §8.4),
+// mirroring src/history.mjs. Returns null on ANY failure (no git on PATH, not a repo,
+// an unborn HEAD, a shallow clone missing the commit, or a path never committed) so
+// the caller degrades to the next fallback instead of throwing. `--follow` tracks the
+// date across renames (e.g. a legacy active→completed move). No shell; arg array only.
+function gitCommitDate(repoRoot, relPath) {
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", repoRoot, "log", "-1", "--follow", "--format=%ad", "--date=short", "--", relPath],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 16 * 1024 * 1024 },
+    ).trim();
+    return toISO(out); // "" (path not committed) or a bad value → null
+  } catch {
+    return null;
+  }
 }
 
 // ------------------------------------------------------------- extraction
@@ -230,10 +252,10 @@ function validateMapping(mapping) {
 // Build the full import plan WITHOUT touching disk: resolve every field, assign
 // fresh ids, rewrite dependencies, and collect per-item errors + warnings. Read
 // access is limited to the source tree and the target's config/backlog.
-export function planImport(targetRoot, sourceRoot, mapping) {
+export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   // A factory (not a shared literal) so each early return gets its own arrays/objects
   // and results can never alias one another.
-  const empty = () => ({ cfg: null, root: null, items: [], idMap: [], counts: { active: 0, completed: 0, removed: 0, total: 0 }, warnings: [], errors: [] });
+  const empty = () => ({ cfg: null, root: null, items: [], idMap: [], counts: { active: 0, completed: 0, removed: 0, total: 0 }, provenance: { gitDated: 0, dateDefaulted: 0, effortEstimated: 0 }, warnings: [], errors: [] });
 
   const mapErrors = validateMapping(mapping);
   if (mapErrors.length) return { ...empty(), errors: mapErrors };
@@ -265,6 +287,11 @@ export function planImport(targetRoot, sourceRoot, mapping) {
 
   const errors = [];
   const items = [];
+  // Provenance of inferred values, surfaced in the import summary (not in the items —
+  // volatile git data stays out of the gated files, SPEC §8.4). `gitDate` is injected
+  // in tests; in production it reads the source repo's git (import-time only).
+  const provenance = { gitDated: 0, dateDefaulted: 0, effortEstimated: 0 };
+  const gitDate = opts.gitDate || ((rel) => gitCommitDate(sourceRoot, rel));
   const bySourceId = new Map(); // source id → [newId, …]; >1 ⇒ a collision (ambiguous for deps)
 
   for (const src of sources) {
@@ -387,12 +414,35 @@ export function planImport(targetRoot, sourceRoot, mapping) {
     const fm = { id: newId, title: title || newId, status: src.status, milestone, priority, effort, depends_on: [], summary };
     if (owner !== undefined) fm.owner = owner;
     if (collaborators.length) fm.collaborators = collaborators;
+    // Close-date resolution with a fallback chain (SPEC §5.1 requires an ISO date):
+    //   header/yaml extractor → git last-commit date of the source file → a
+    //   `defaults.<field>` floor → hard error. A git-derived or defaulted date is
+    //   flagged (a per-item warning + a summary count) so it never passes as authored.
+    const resolveCloseDate = (extractor, field) => {
+      const authored = toISO(runExtractor(extractor, ctx));
+      if (authored) return authored;
+      const fromGit = gitDate(src.rel);
+      if (fromGit) {
+        warnings.push(`${src.rel}: ${field} ${fromGit} derived from git history (source had no date header)`);
+        provenance.gitDated++;
+        return fromGit;
+      }
+      const floor = toISO(defaults[field]);
+      if (floor) {
+        warnings.push(`${src.rel}: ${field} ${floor} from defaults.${field} (no date header, no git date)`);
+        provenance.dateDefaulted++;
+        return floor;
+      }
+      return null;
+    };
     if (src.status === "completed") {
-      const iso = toISO(runExtractor(fields.completed_on, ctx));
-      if (!iso) ierr("could not parse a `completed_on` date (expected YYYY-MM-DD)"); else fm.completed_on = iso;
+      const date = resolveCloseDate(fields.completed_on, "completed_on");
+      if (!date) ierr("could not resolve a `completed_on` date (no date header, no git commit date, no `defaults.completed_on`)");
+      else fm.completed_on = date;
     } else if (src.status === "removed") {
-      const iso = toISO(runExtractor(fields.removed_on, ctx));
-      if (!iso) ierr("could not parse a `removed_on` date (expected YYYY-MM-DD)"); else fm.removed_on = iso;
+      const date = resolveCloseDate(fields.removed_on, "removed_on");
+      if (!date) ierr("could not resolve a `removed_on` date (no date header, no git commit date, no `defaults.removed_on`)");
+      else fm.removed_on = date;
       const reason = runExtractor(fields.removed_reason, ctx) || (mapping.defaults && mapping.defaults.removed_reason);
       if (!reason) ierr("missing `removed_reason` (no field value and no `defaults.removed_reason`)"); else fm.removed_reason = String(reason).trim();
     }
@@ -417,7 +467,7 @@ export function planImport(targetRoot, sourceRoot, mapping) {
   const counts = { active: 0, completed: 0, removed: 0, total: items.length };
   for (const it of items) counts[it.status]++;
   const idMap = items.map((it) => ({ sourceFile: it.sourceRel, sourceId: it.sourceId, newId: it.newId, status: it.status }));
-  return { cfg, root, items, idMap, counts, warnings, errors };
+  return { cfg, root, items, idMap, counts, provenance, warnings, errors };
 }
 
 // The four generated-artifact paths, repo-relative under the backlog root.
@@ -430,11 +480,12 @@ function generatedRels(root) {
 // the backlog is --check-green. On ANY failure, roll back (remove the new items,
 // restore the artifacts) so a rejected import leaves the target exactly as it was.
 // `dryRun` returns the plan without writing. The source tree is never written.
-export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false } = {}) {
-  const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, root: null, warnings: [], errors: [] };
-  const plan = planImport(targetRoot, sourceRoot, mapping);
+export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, gitDate } = {}) {
+  const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, provenance: null, root: null, warnings: [], errors: [] };
+  const plan = planImport(targetRoot, sourceRoot, mapping, { gitDate });
   summary.idMap = plan.idMap;
   summary.counts = plan.counts;
+  summary.provenance = plan.provenance;
   summary.root = plan.root;
   summary.warnings = plan.warnings;
   if (plan.errors.length) { summary.errors.push(...plan.errors); return { summary }; }

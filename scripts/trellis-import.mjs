@@ -80,6 +80,14 @@ function report(targetRoot, summary, dryRun) {
   const verb = dryRun ? "Would import" : "Imported";
   console.log(`${verb} ${c.total} item${c.total === 1 ? "" : "s"} into ${targetRoot}${dryRun ? " (dry run)" : ""}`);
   console.log(`  counts: ${c.active} active, ${c.completed} completed, ${c.removed} removed`);
+  const pv = summary.provenance;
+  if (pv && (pv.gitDated || pv.dateDefaulted || pv.effortEstimated)) {
+    const parts = [];
+    if (pv.gitDated) parts.push(`${pv.gitDated} git-dated`);
+    if (pv.dateDefaulted) parts.push(`${pv.dateDefaulted} date-defaulted`);
+    if (pv.effortEstimated) parts.push(`${pv.effortEstimated} effort-estimated`);
+    console.log(`  estimated: ${parts.join(", ")}`);
+  }
   if (summary.idMap.length) {
     console.log("  id map:");
     for (const m of summary.idMap) console.log(`    ${m.sourceId} (${m.sourceFile}) → ${m.newId}`);
