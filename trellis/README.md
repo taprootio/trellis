@@ -33,7 +33,4 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | [TRL0012](active/TRL0012.md) | Static-site deploy of the viewer |  | Low | Swordfish · 8 |
 | [TRL0013](active/TRL0013.md) | Access control / SSO for the deployed viewer |  | Low | Tuna · 5 |
 
-## Next task ID
-
-`TRL0026`
 <!-- END GENERATED:MILESTONES -->

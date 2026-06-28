@@ -1,6 +1,6 @@
 # Trellis Backlog Spec
 
-**Version:** 2.2.0 · **Status:** stable
+**Version:** 2.3.0 · **Status:** stable
 
 Trellis is a tool-agnostic convention for running a software backlog as plain
 files in a git repository. Work items are Markdown files with YAML front-matter;
@@ -61,8 +61,8 @@ An id is a configured **prefix** followed by a zero-padded **number** of a
 configured width — e.g. with prefix `AB` and width 4, `AB0042`.
 
 - The id MUST match the item's filename (`AB0042` ⇄ `AB0042.md`).
-- Ids are assigned monotonically from the **Next task ID** published in the
-  generated `README.md`.
+- Ids are assigned monotonically from the `nextId` published in the generated
+  `backlog.json` (§8.2).
 - An id is permanent and globally unique across all three directories. It MUST
   NOT be reused, even after an item is removed.
 
@@ -283,9 +283,9 @@ Reports derived from a source *outside* the item files that is inherently volati
 A human index. Item tables are emitted between the markers
 `<!-- BEGIN GENERATED:MILESTONES -->` and `<!-- END GENERATED:MILESTONES -->`;
 content outside the markers is author-owned and preserved. Active items are
-grouped by milestone (config order) and sorted by priority then id. The block
-also publishes the **Next task ID**. Text between the markers MUST NOT be
-hand-edited.
+grouped by milestone (config order) and sorted by priority then id. The next id
+is not published here — `backlog.json` carries it (§8.2). Text between the markers
+MUST NOT be hand-edited.
 
 The completed and removed indexes (`completed/index.md`, `removed/index.md`) are
 generated the same way, each between its own `BEGIN/END GENERATED` markers, as a
