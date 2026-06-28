@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
 import { planImport, applyImport } from "../src/import.mjs";
 import { loadProfile, listProfiles } from "../src/profiles.mjs";
-import { loadConfig, readBacklog, generateArtifacts, parseFrontMatter } from "../src/backlog.mjs";
+import { loadConfig, readBacklog, generateArtifacts, parseFrontMatter, nextId } from "../src/backlog.mjs";
 
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtures = join(projectRoot, "test", "fixtures");
@@ -80,6 +80,29 @@ test("dry-run reports the full plan, writes nothing, and leaves the source untou
     assertCheckClean(root);
     // … and the source is byte-identical
     assert.deepEqual(snapshot(legacySrc), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("ids continue from the core `nextId` when importing into a non-empty target", () => {
+  const root = initTarget();
+  try {
+    // First import fills the target (TAP0001…TAP0005).
+    applyImport(root, legacySrc, mapping, {});
+    assertCheckClean(root);
+
+    // The next id is whatever the core computes from the existing item ids — the
+    // README no longer carries it (SPEC §8.1/§8.2), so a second import must start
+    // there, proving allocation is core-sourced, not parsed from the README.
+    const { cfg } = loadConfig(root);
+    const expected = nextId(readBacklog(root, cfg).ids, cfg);
+    const { summary } = applyImport(root, legacySrc, mapping, {});
+    assert.deepEqual(summary.errors, []);
+    const assigned = summary.idMap.map((m) => m.newId).sort();
+    assert.equal(assigned[0], expected, "first imported id continues the core sequence");
+    assert.ok(assigned.every((id) => id > "TAP0005"), "no id collides with the first import");
+    assertCheckClean(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -23,7 +23,7 @@ import {
 } from "../src/history.mjs";
 import { historyOp, TrellisError } from "../src/mcp.mjs";
 
-const CFG = { specVersion: "2.2", idPrefix: "DEMO", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1, 2, 3, 5, 8, 13, 21] };
+const CFG = { specVersion: "2.3", idPrefix: "DEMO", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1, 2, 3, 5, 8, 13, 21] };
 
 // Isolated git invocation: no global/system config so the host's settings can't
 // change behavior; user identity + signing are set locally per repo.
@@ -197,7 +197,7 @@ test("materializeHistory honours an explicit --out path", () => {
 test("a regex-metacharacter id prefix (e.g. T+) is matched literally, not as a pattern", () => {
   const root = mkdtempSync(join(tmpdir(), "trellis-prefix-"));
   try {
-    const cfg = { specVersion: "2.2", idPrefix: "T+", idWidth: 3, milestones: ["Alpha"], priorities: ["High"], effort: [1] };
+    const cfg = { specVersion: "2.3", idPrefix: "T+", idWidth: 3, milestones: ["Alpha"], priorities: ["High"], effort: [1] };
     write(root, "trellis/backlog.config.json", JSON.stringify(cfg, null, 2) + "\n");
     mkdirSync(join(root, "trellis/active"), { recursive: true });
     mkdirSync(join(root, "trellis/completed/tasks"), { recursive: true });
