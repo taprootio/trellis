@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0026",
   "counts": {
-    "active": 11,
-    "completed": 14,
+    "active": 10,
+    "completed": 15,
     "removed": 0
   },
   "tasks": [
@@ -174,20 +174,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Remove the redundant generated \"Next task ID\" section from the README and point the spec at backlog.json's nextId (plus the MCP next_id tool) as the single published source."
-    },
-    {
-      "id": "TRL0025",
-      "title": "Git-derived task history and a materialized history.json",
-      "status": "active",
-      "milestone": "Beta",
-      "priority": "Medium",
-      "effort": 5,
-      "effortLabel": "Tuna",
-      "effortImage": "assets/effort/tuna.svg",
-      "depends_on": [],
-      "owner": null,
-      "collaborators": [],
-      "summary": "Derive a lightweight per-task history (who changed it, when, why) from git and materialize it as a non-gated history.json the future viewer can read without a git runtime."
     },
     {
       "id": "TRL0001",
@@ -422,6 +408,21 @@
       "collaborators": [],
       "summary": "Add a configured team roster (active/historical members) plus optional owner and collaborators task fields, validated like the existing enums and importable via the mapping, so the backlog records who is responsible for each item.",
       "completed_on": "2026-06-27"
+    },
+    {
+      "id": "TRL0025",
+      "title": "Git-derived task history and a materialized history.json",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Derive a lightweight per-task history (who changed it, when, why) from git and materialize it as a non-gated history.json the future viewer can read without a git runtime.",
+      "completed_on": "2026-06-28"
     }
   ]
 }

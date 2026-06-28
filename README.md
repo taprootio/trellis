@@ -41,20 +41,37 @@ and import in one step on a fresh repo, use
 profiles, and the full getting-started guide are in
 [`docs/import.md`](docs/import.md).
 
+## Track task history
+
+`trellis history` reconstructs a per-task change log from git — who changed an
+item, when, and why — surviving the active→completed move via `git log --follow`:
+
+```
+node scripts/trellis-history.mjs <id>      # one task; omit <id> for the whole repo
+node scripts/trellis-history.mjs --write   # materialize trellis/history.json for a static viewer
+```
+
+Entries are `{ id, commit, date, author, subject, reason }`, newest-first, where
+`reason` is a `Trellis-Reason:` commit trailer when present, else the commit
+subject. This is a **derived, non-gated report** (SPEC §8.4): volatile and
+non-authoritative (git is the record), so it is **not** part of `backlog:check`,
+and the materialized `history.json` is gitignored — regenerate it at build time.
+
 ## Operate over MCP
 
 The backlog operations are also exposed as MCP tools, so any MCP-aware client
-(Claude, Cursor, Windsurf, Codex, …) can list, read, create, move, validate, and
-regenerate tasks in a repo:
+(Claude, Cursor, Windsurf, Codex, …) can list, read, create, move, validate,
+regenerate, and read the history of tasks in a repo:
 
 ```
 node scripts/trellis-mcp.mjs --repo <path>   # serves over stdio; defaults to cwd
 ```
 
 Tools: `list_tasks`, `get_task`, `next_id`, `create_task`, `move_task`,
-`validate`, `regenerate`, `import` — each reuses the same core as the CLI, so
-results carry the `backlog.json` shape (except `import`, which returns an import
-summary — counts, id map, created/generated paths). Mutating tools regenerate and
-validate before returning, rolling back on failure; `import` is dry-run unless
-`apply:true` (see [`docs/import.md`](docs/import.md)). The process loops
-(work-a-task, review) ship separately as MCP prompts in TRL0006.
+`validate`, `regenerate`, `import`, `history` — each reuses the same core as the
+CLI, so results carry the `backlog.json` shape (except `import`, which returns an
+import summary, and `history`, which returns git-derived change entries). Mutating
+tools regenerate and validate before returning, rolling back on failure; `import`
+is dry-run unless `apply:true` (see [`docs/import.md`](docs/import.md)); `history`
+is read-only. The process loops (work-a-task, review) ship separately as MCP
+prompts in TRL0006.

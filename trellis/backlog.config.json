@@ -1,5 +1,5 @@
 {
-  "specVersion": "2.1",
+  "specVersion": "2.2",
   "idPrefix": "TRL",
   "idWidth": 4,
   "milestones": ["Alpha", "Beta", "v1", "Future"],

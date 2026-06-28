@@ -1,2 +1,6 @@
 node_modules/
 .DS_Store
+
+# Derived, non-gated report (SPEC §8.4): materialized from git by `trellis history
+# --write`, regenerable at build time, never authoritative. Not committed.
+trellis/history.json

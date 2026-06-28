@@ -119,6 +119,13 @@ export const TOOLS = {
       apply: z.boolean().optional().describe("write items and regenerate; omit or false for a dry-run (the default)"),
     },
   },
+  history: {
+    description: "Read-only git-derived task history (SPEC §8.4). With an id → { id, entries }; omit id → { generated, tasks } keyed by id. Each entry is { id, commit, date, author, subject, reason } newest-first, where reason is the Trellis-Reason commit trailer when present, else the subject. Derived from git (requires a work tree); volatile and non-authoritative — never part of backlog:check, never writes.",
+    inputSchema: {
+      ...repoRootArg,
+      id: z.string().optional().describe("a task id; omit to derive the whole repo"),
+    },
+  },
 };
 
 function registerTools(server, defaultRoot) {

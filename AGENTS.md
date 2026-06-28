@@ -15,7 +15,7 @@ Any AI assistant or human working here should read this file first, then
   hand-edit them (or any text between the `BEGIN/END GENERATED` markers).
 - Per-repo vocabulary (id prefix, milestones, priorities, effort) lives in
   [`trellis/backlog.config.json`](trellis/backlog.config.json); this repo targets
-  `specVersion 2.1`. The backlog root is `trellis/` by default (overridable via the
+  `specVersion 2.2`. The backlog root is `trellis/` by default (overridable via the
   config's `tasksDir` key); the config file's own location is fixed there.
 - The team roster lives in [`trellis/team.json`](trellis/team.json) (members with a
   `handle`, `name`, optional `email`, and `status`). Tasks may set an optional

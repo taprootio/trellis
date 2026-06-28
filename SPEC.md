@@ -1,6 +1,6 @@
 # Trellis Backlog Spec
 
-**Version:** 2.1.0 · **Status:** stable
+**Version:** 2.2.0 · **Status:** stable
 
 Trellis is a tool-agnostic convention for running a software backlog as plain
 files in a git repository. Work items are Markdown files with YAML front-matter;
@@ -275,6 +275,8 @@ external identity provider; cross-repo identity is left to future work.
 These are derived from the item files and config on every generator run. They
 MUST be deterministic — identical inputs produce byte-identical output, with no
 timestamps or other volatile fields — so that `--check` (§8.3) is stable in CI.
+Reports derived from a source *outside* the item files that is inherently volatile
+(e.g. git history) are a separate, **non-gated** class — see §8.4.
 
 ### 8.1 `README.md`
 
@@ -340,6 +342,34 @@ A conforming generator MUST:
    the CI gate.
 4. **Warn** when `specVersion` is absent or its major version differs from the
    spec version the generator implements (§9).
+
+### 8.4 Derived, non-gated reports
+
+Not every useful derivation belongs to the gated, deterministic set above. A
+**derived report** is computed from a source *outside* the item files — typically
+volatile (commit timestamps, author names) — so it cannot be byte-identical across
+runs and is therefore handled separately from §8.1–§8.3. Such reports:
+
+- are **regenerable** and **not authoritative** — the upstream source is (for a
+  git-derived report, git itself);
+- are produced **on demand or at build time** (e.g. a CI step before a static-site
+  deploy), **not** by the generator on every edit;
+- SHOULD NOT be committed; a repo that does commit one MUST mark it generated (e.g.
+  a top-level `"generated": true`) and keep it out of `--check`.
+
+A conforming generator's **`--check` MUST NOT depend on git history** or any other
+volatile source. Derived reports are **optional** and do not affect conformance
+(§11).
+
+**`history.json`** is the reference derived report: a per-repo change log keyed by
+task id, materialized for a viewer with no git runtime at serve time. It lives under
+the backlog root (`<tasksDir>/history.json`) when materialized. Each id maps to a
+list of entries `{ id, commit, date, author, subject, reason }`, newest-first,
+reconstructed with `git log --follow` over the task file so history survives the
+active→completed move. `reason` is the value of a `Trellis-Reason:` commit trailer
+when present, otherwise the commit subject. An item imported into a repo carries
+history from its import commit forward; a single-commit or empty history is valid,
+not an error.
 
 ## 9. Versioning and compatibility
 
