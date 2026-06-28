@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0028",
   "counts": {
-    "active": 10,
-    "completed": 17,
+    "active": 9,
+    "completed": 18,
     "removed": 0
   },
   "tasks": [
@@ -145,22 +145,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
-    },
-    {
-      "id": "TRL0026",
-      "title": "Importer — resolve legacy close-dates and effort faithfully",
-      "status": "active",
-      "milestone": "Beta",
-      "priority": "High",
-      "effort": 5,
-      "effortLabel": "Tuna",
-      "effortImage": "assets/effort/tuna.svg",
-      "depends_on": [
-        "TRL0021"
-      ],
-      "owner": null,
-      "collaborators": [],
-      "summary": "Give the importer a git-date fallback for legacy close-dates and a Size→effort mapping, flagging any estimated effort so historical values stay honest."
     },
     {
       "id": "TRL0027",
@@ -459,6 +443,23 @@
       "owner": null,
       "collaborators": [],
       "summary": "Derive a lightweight per-task history (who changed it, when, why) from git and materialize it as a non-gated history.json the future viewer can read without a git runtime.",
+      "completed_on": "2026-06-28"
+    },
+    {
+      "id": "TRL0026",
+      "title": "Importer — resolve legacy close-dates and effort faithfully",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "High",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [
+        "TRL0021"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Give the importer a git-date fallback for legacy close-dates and a Size→effort mapping, flagging any estimated effort so historical values stay honest.",
       "completed_on": "2026-06-28"
     }
   ]

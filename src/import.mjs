@@ -38,6 +38,7 @@
 
 import { readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { join, relative, dirname, isAbsolute } from "node:path";
+import { execFileSync } from "node:child_process";
 import {
   loadConfig,
   readBacklog,
@@ -86,6 +87,27 @@ function toISO(raw) {
   const dt = new Date(Date.UTC(y, month - 1, day));
   if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== month - 1 || dt.getUTCDate() !== day) return null;
   return `${m[1]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+// Most-recent commit author-date (YYYY-MM-DD) for a source path, read against the
+// source repo — the git-commit-date fallback for a legacy close-date with no header
+// (SPEC §5.1 requires an ISO date; many legacy closed items have none). Import-time
+// ONLY: git lives here in the importer, never in the generator/`--check` (SPEC §8.4),
+// mirroring src/history.mjs. Returns null on ANY failure (no git on PATH, not a repo,
+// an unborn HEAD, a shallow clone missing the commit, or a path never committed) so
+// the caller degrades to the next fallback instead of throwing. `--follow` tracks the
+// date across renames (e.g. a legacy active→completed move). No shell; arg array only.
+function gitCommitDate(repoRoot, relPath) {
+  try {
+    const out = execFileSync(
+      "git",
+      ["-C", repoRoot, "log", "-1", "--follow", "--format=%ad", "--date=short", "--", relPath],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 16 * 1024 * 1024 },
+    ).trim();
+    return toISO(out); // "" (path not committed) or a bad value → null
+  } catch {
+    return null;
+  }
 }
 
 // ------------------------------------------------------------- extraction
@@ -230,10 +252,10 @@ function validateMapping(mapping) {
 // Build the full import plan WITHOUT touching disk: resolve every field, assign
 // fresh ids, rewrite dependencies, and collect per-item errors + warnings. Read
 // access is limited to the source tree and the target's config/backlog.
-export function planImport(targetRoot, sourceRoot, mapping) {
+export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   // A factory (not a shared literal) so each early return gets its own arrays/objects
   // and results can never alias one another.
-  const empty = () => ({ cfg: null, root: null, items: [], idMap: [], counts: { active: 0, completed: 0, removed: 0, total: 0 }, warnings: [], errors: [] });
+  const empty = () => ({ cfg: null, root: null, items: [], idMap: [], counts: { active: 0, completed: 0, removed: 0, total: 0 }, provenance: { gitDated: 0, dateDefaulted: 0, effortEstimated: 0 }, warnings: [], errors: [] });
 
   const mapErrors = validateMapping(mapping);
   if (mapErrors.length) return { ...empty(), errors: mapErrors };
@@ -265,6 +287,11 @@ export function planImport(targetRoot, sourceRoot, mapping) {
 
   const errors = [];
   const items = [];
+  // Provenance of inferred values, surfaced in the import summary (not in the items —
+  // volatile git data stays out of the gated files, SPEC §8.4). `gitDate` is injected
+  // in tests; in production it reads the source repo's git (import-time only).
+  const provenance = { gitDated: 0, dateDefaulted: 0, effortEstimated: 0 };
+  const gitDate = opts.gitDate || ((rel) => gitCommitDate(sourceRoot, rel));
   const bySourceId = new Map(); // source id → [newId, …]; >1 ⇒ a collision (ambiguous for deps)
 
   for (const src of sources) {
@@ -304,15 +331,34 @@ export function planImport(targetRoot, sourceRoot, mapping) {
     const priority = resolveOrCarry(withDefault(runExtractor(fields.priority, ctx), "priority"), remap.priority, cfg.priorities, "priority");
     const milestone = resolveOrCarry(withDefault(runExtractor(fields.milestone, ctx), "milestone"), remap.milestone, cfg.milestones, "milestone");
 
-    const rawEffort = withDefault(runExtractor(fields.effort, ctx), "effort");
-    const eff = resolveEffort(cfg, rawEffort);
+    // Effort: a real `Effort:`/`Size:` signal (the profile's effort extractor may chain
+    // `Effort` → `Size`) is remapped through `remap.effort` (a foreign size → a canonical
+    // value, mirroring remap.priority/milestone) then resolved. With NO signal we fall to
+    // `defaults.effort`; on a CLOSED item that default is frozen history, so flag it
+    // estimated (a per-item warning + a summary count) — nothing passes as authored. A
+    // present-but-unresolved signal on a closed item is kept as a historical value with a
+    // warning (SPEC §5.1, §8.3); active items must resolve.
+    const rawEffort = runExtractor(fields.effort, ctx);
+    const hasEffort = rawEffort != null && String(rawEffort).trim() !== "";
     let effort;
-    if (!eff.error) effort = eff.value;
-    else if (isActive) ierr(`effort: ${eff.error}`);
-    else {
-      const has = rawEffort != null && String(rawEffort).trim() !== "";
-      if (has) warnings.push(`${src.rel}: effort "${rawEffort}" not resolved — kept as a historical value`);
-      effort = has ? rawEffort : undefined;
+    if (hasEffort) {
+      const eff = resolveEffort(cfg, remapLookup(remap.effort, rawEffort));
+      if (!eff.error) effort = eff.value;
+      else if (isActive) ierr(`effort: ${eff.error}`);
+      else { warnings.push(`${src.rel}: effort "${rawEffort}" not resolved — kept as a historical value`); effort = String(rawEffort).trim(); }
+    } else {
+      const eff = resolveEffort(cfg, defaults.effort);
+      if (!eff.error) {
+        effort = eff.value;
+        if (!isActive) {
+          warnings.push(`${src.rel}: effort ${effort} estimated (no \`Effort:\`/\`Size:\` signal — used defaults.effort)`);
+          provenance.effortEstimated++;
+        }
+      } else if (isActive) {
+        ierr(`effort: ${eff.error}`);
+      }
+      // closed + no/invalid `defaults.effort` → effort stays undefined → the missing
+      // historical-metadata check below reports it.
     }
 
     // Closed items still require the descriptive metadata as a historical snapshot
@@ -387,12 +433,46 @@ export function planImport(targetRoot, sourceRoot, mapping) {
     const fm = { id: newId, title: title || newId, status: src.status, milestone, priority, effort, depends_on: [], summary };
     if (owner !== undefined) fm.owner = owner;
     if (collaborators.length) fm.collaborators = collaborators;
+    // Close-date resolution (SPEC §5.1 requires an ISO date). A date field that is
+    // PRESENT but malformed is a hard error — never papered over by the fallback chain;
+    // only an ABSENT field falls through: extractor → git last-commit date → a
+    // `defaults.<field>` floor → unresolved. A git-derived or defaulted date is flagged
+    // (a per-item warning + a summary count) so it never passes as authored.
+    const resolveCloseDate = (extractor, field) => {
+      const raw = runExtractor(extractor, ctx);
+      if (raw != null && String(raw).trim() !== "") {
+        const authored = toISO(raw);
+        return authored
+          ? { date: authored }
+          : { error: `${field} "${String(raw).trim()}" is not an ISO date (expected YYYY-MM-DD)` };
+      }
+      // Absent: normalize each fallback through toISO so the resolver boundary is
+      // uniformly defensive — the production resolver returns ISO-or-null, but an
+      // injected one must not mint a date the downstream gate would later reject.
+      const fromGit = toISO(gitDate(src.rel));
+      if (fromGit) {
+        warnings.push(`${src.rel}: ${field} ${fromGit} derived from git history (source had no date header)`);
+        provenance.gitDated++;
+        return { date: fromGit };
+      }
+      const floor = toISO(defaults[field]);
+      if (floor) {
+        warnings.push(`${src.rel}: ${field} ${floor} from defaults.${field} (no date header, no git date)`);
+        provenance.dateDefaulted++;
+        return { date: floor };
+      }
+      return { date: null };
+    };
     if (src.status === "completed") {
-      const iso = toISO(runExtractor(fields.completed_on, ctx));
-      if (!iso) ierr("could not parse a `completed_on` date (expected YYYY-MM-DD)"); else fm.completed_on = iso;
+      const r = resolveCloseDate(fields.completed_on, "completed_on");
+      if (r.error) ierr(r.error);
+      else if (!r.date) ierr("could not resolve a `completed_on` date (no date header, no git commit date, no `defaults.completed_on`)");
+      else fm.completed_on = r.date;
     } else if (src.status === "removed") {
-      const iso = toISO(runExtractor(fields.removed_on, ctx));
-      if (!iso) ierr("could not parse a `removed_on` date (expected YYYY-MM-DD)"); else fm.removed_on = iso;
+      const r = resolveCloseDate(fields.removed_on, "removed_on");
+      if (r.error) ierr(r.error);
+      else if (!r.date) ierr("could not resolve a `removed_on` date (no date header, no git commit date, no `defaults.removed_on`)");
+      else fm.removed_on = r.date;
       const reason = runExtractor(fields.removed_reason, ctx) || (mapping.defaults && mapping.defaults.removed_reason);
       if (!reason) ierr("missing `removed_reason` (no field value and no `defaults.removed_reason`)"); else fm.removed_reason = String(reason).trim();
     }
@@ -417,7 +497,7 @@ export function planImport(targetRoot, sourceRoot, mapping) {
   const counts = { active: 0, completed: 0, removed: 0, total: items.length };
   for (const it of items) counts[it.status]++;
   const idMap = items.map((it) => ({ sourceFile: it.sourceRel, sourceId: it.sourceId, newId: it.newId, status: it.status }));
-  return { cfg, root, items, idMap, counts, warnings, errors };
+  return { cfg, root, items, idMap, counts, provenance, warnings, errors };
 }
 
 // The four generated-artifact paths, repo-relative under the backlog root.
@@ -430,11 +510,12 @@ function generatedRels(root) {
 // the backlog is --check-green. On ANY failure, roll back (remove the new items,
 // restore the artifacts) so a rejected import leaves the target exactly as it was.
 // `dryRun` returns the plan without writing. The source tree is never written.
-export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false } = {}) {
-  const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, root: null, warnings: [], errors: [] };
-  const plan = planImport(targetRoot, sourceRoot, mapping);
+export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, gitDate } = {}) {
+  const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, provenance: null, root: null, warnings: [], errors: [] };
+  const plan = planImport(targetRoot, sourceRoot, mapping, { gitDate });
   summary.idMap = plan.idMap;
   summary.counts = plan.counts;
+  summary.provenance = plan.provenance;
   summary.root = plan.root;
   summary.warnings = plan.warnings;
   if (plan.errors.length) { summary.errors.push(...plan.errors); return { summary }; }

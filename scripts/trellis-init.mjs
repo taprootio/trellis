@@ -148,6 +148,14 @@ function reportImport(targetRoot, summary) {
   }
   const c = summary.counts || { total: 0, active: 0, completed: 0, removed: 0 };
   console.log(`Imported ${c.total} item${c.total === 1 ? "" : "s"} (${c.active} active, ${c.completed} completed, ${c.removed} removed).`);
+  const pv = summary.provenance;
+  if (pv && (pv.gitDated || pv.dateDefaulted || pv.effortEstimated)) {
+    const parts = [];
+    if (pv.gitDated) parts.push(`${pv.gitDated} git-dated`);
+    if (pv.dateDefaulted) parts.push(`${pv.dateDefaulted} date-defaulted`);
+    if (pv.effortEstimated) parts.push(`${pv.effortEstimated} effort-estimated`);
+    console.log(`  estimated: ${parts.join(", ")}`);
+  }
   if (summary.idMap.length) {
     console.log("  id map:");
     for (const m of summary.idMap) console.log(`    ${m.sourceId} (${m.sourceFile}) → ${m.newId}`);

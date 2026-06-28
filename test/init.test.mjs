@@ -15,6 +15,7 @@ import { loadConfig, loadRoster, readBacklog, generateArtifacts } from "../src/b
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const initScript = join(sourceRoot, "scripts", "trellis-init.mjs");
 const yamlSrc = join(sourceRoot, "test", "fixtures", "yaml-frontmatter");
+const legacySrc = join(sourceRoot, "test", "fixtures", "legacy-backlog");
 const tempRepo = () => mkdtempSync(join(tmpdir(), "trellis-init-"));
 
 // Assert the scaffolded repo is --check-green: every generated artifact on disk
@@ -531,6 +532,25 @@ test("init --import scaffolds then imports an existing backlog in one command", 
     assert.match(out, /Imported 4 items/);
     assert.ok(existsSync(join(root, "trellis/active/ONB0001.md")), "an imported active item exists");
     assert.ok(existsSync(join(root, "trellis/completed/tasks/ONB0003.md")), "an imported completed item exists");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("init --import surfaces inferred-value provenance in its summary", () => {
+  const root = tempRepo();
+  try {
+    // The legacy-backlog fixture's completed item carries a date header but no effort, so
+    // the taproot profile fills it from defaults.effort and flags it — exercising the
+    // provenance summary on the init --import on-ramp (no git needed).
+    const out = execFileSync(
+      process.execPath,
+      [initScript, root, "--prefix", "ONB", "--import", legacySrc, "--profile", "taproot-ai-backlog"],
+      { encoding: "utf8" },
+    );
+    assert.match(out, /Imported 5 items/);
+    assert.match(out, /estimated: .*effort-estimated/, "init --import echoes the import provenance summary");
     assertCheckClean(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
