@@ -6,9 +6,9 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0026",
+  "nextId": "TRL0028",
   "counts": {
-    "active": 8,
+    "active": 10,
     "completed": 17,
     "removed": 0
   },
@@ -57,7 +57,9 @@
       "depends_on": [
         "TRL0003",
         "TRL0020",
-        "TRL0021"
+        "TRL0021",
+        "TRL0026",
+        "TRL0027"
       ],
       "owner": null,
       "collaborators": [],
@@ -143,6 +145,39 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
+    },
+    {
+      "id": "TRL0026",
+      "title": "Importer — resolve legacy close-dates and effort faithfully",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "High",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [
+        "TRL0021"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Give the importer a git-date fallback for legacy close-dates and a Size→effort mapping, flagging any estimated effort so historical values stay honest."
+    },
+    {
+      "id": "TRL0027",
+      "title": "trellis init — retire and reconcile a legacy backlog on adopt",
+      "status": "active",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
+      "depends_on": [
+        "TRL0003",
+        "TRL0021"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Let `trellis init` report stale backlog guidance for the agent to rewrite, and add an opt-in, history-preserving retirement of the imported source tree."
     },
     {
       "id": "TRL0001",
