@@ -385,10 +385,14 @@ Conformant repositories MUST gate the default branch so the index cannot drift:
 - The default branch is **protected**; changes land via pull/merge request.
 - The generator's **`--check` is a required status check** that must pass before
   merge.
+- The required check is identified by a **stable, pinned context name** (the CI
+  job/check name). It MUST NOT drift without the protection rule being updated to
+  match, so that renaming a workflow or job cannot silently drop the gate.
 
 This is forge-agnostic — GitHub branch protection, GitLab merge-request
 pipelines, Bitbucket, or Azure DevOps all satisfy it. Setup specifics are left to
-the consumer's onboarding tooling.
+the consumer's onboarding tooling, which SHOULD provide a forge-appropriate setup
+recipe.
 
 ## 11. Conformance
 

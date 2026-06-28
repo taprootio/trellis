@@ -33,7 +33,8 @@ For the front-matter schema, status lifecycle, effort scales, the generator /
   validate and regenerate. CI runs `npm run backlog:check` (`--check`).
 - `main` is **protected** — do not commit to it directly. Work on a branch
   (`je/<id>/<slug>` for task work), open a PR, and let the required backlog check
-  gate the merge.
+  (the pinned `backlog` job) gate the merge. Setup recipe, including non-GitHub
+  forges: [`docs/branch-protection.md`](docs/branch-protection.md).
 - Commit messages and PR descriptions carry **no AI/co-author attribution** —
   never add `Co-Authored-By:` trailers or "Generated with …" footers.
 - Closing a task: move it to `completed/tasks/`, set `status: completed` +
