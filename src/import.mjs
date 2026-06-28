@@ -331,15 +331,34 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
     const priority = resolveOrCarry(withDefault(runExtractor(fields.priority, ctx), "priority"), remap.priority, cfg.priorities, "priority");
     const milestone = resolveOrCarry(withDefault(runExtractor(fields.milestone, ctx), "milestone"), remap.milestone, cfg.milestones, "milestone");
 
-    const rawEffort = withDefault(runExtractor(fields.effort, ctx), "effort");
-    const eff = resolveEffort(cfg, rawEffort);
+    // Effort: a real `Effort:`/`Size:` signal (the profile's effort extractor may chain
+    // `Effort` → `Size`) is remapped through `remap.effort` (a foreign size → a canonical
+    // value, mirroring remap.priority/milestone) then resolved. With NO signal we fall to
+    // `defaults.effort`; on a CLOSED item that default is frozen history, so flag it
+    // estimated (a per-item warning + a summary count) — nothing passes as authored. A
+    // present-but-unresolved signal on a closed item is kept as a historical value with a
+    // warning (SPEC §5.1, §8.3); active items must resolve.
+    const rawEffort = runExtractor(fields.effort, ctx);
+    const hasEffort = rawEffort != null && String(rawEffort).trim() !== "";
     let effort;
-    if (!eff.error) effort = eff.value;
-    else if (isActive) ierr(`effort: ${eff.error}`);
-    else {
-      const has = rawEffort != null && String(rawEffort).trim() !== "";
-      if (has) warnings.push(`${src.rel}: effort "${rawEffort}" not resolved — kept as a historical value`);
-      effort = has ? rawEffort : undefined;
+    if (hasEffort) {
+      const eff = resolveEffort(cfg, remapLookup(remap.effort, rawEffort));
+      if (!eff.error) effort = eff.value;
+      else if (isActive) ierr(`effort: ${eff.error}`);
+      else { warnings.push(`${src.rel}: effort "${rawEffort}" not resolved — kept as a historical value`); effort = String(rawEffort).trim(); }
+    } else {
+      const eff = resolveEffort(cfg, defaults.effort);
+      if (!eff.error) {
+        effort = eff.value;
+        if (!isActive) {
+          warnings.push(`${src.rel}: effort ${effort} estimated (no \`Effort:\`/\`Size:\` signal — used defaults.effort)`);
+          provenance.effortEstimated++;
+        }
+      } else if (isActive) {
+        ierr(`effort: ${eff.error}`);
+      }
+      // closed + no/invalid `defaults.effort` → effort stays undefined → the missing
+      // historical-metadata check below reports it.
     }
 
     // Closed items still require the descriptive metadata as a historical snapshot

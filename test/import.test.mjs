@@ -670,3 +670,99 @@ test("the default resolver reads a real git commit date (integration)", (t) => {
     rmSync(src, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------- TRL0026: Size → effort
+test("Size: feeds effort when Effort: is absent (profile fallback extractor)", () => {
+  const root = initTarget();
+  const src = mkdtempSync(join(tmpdir(), "trellis-size-"));
+  try {
+    mkdirSync(join(src, "active"), { recursive: true });
+    writeFileSync(join(src, "active", "060-sized.md"), "# A sized task\n\n**Priority:** P2\n**Milestone:** Pre-Launch\n**Size:** 8\n\nProse.\n");
+    const m = {
+      sources: { active: { dirs: ["active"], file: "*.md" } },
+      fields: {
+        id: { from: "filename", pattern: "^(\\d+)" },
+        title: { from: "h1" },
+        priority: { from: "inline", label: "Priority" },
+        milestone: { from: "inline", label: "Milestone" },
+        effort: { from: "inline", label: "Effort", fallback: { from: "inline", label: "Size" } },
+      },
+      remap: { priority: { P2: "Medium" }, milestone: { "Pre-Launch": "Alpha" } },
+      defaults: { effort: 1 },
+    };
+    const { summary } = applyImport(root, src, m, { dryRun: false });
+    assert.deepEqual(summary.errors, []);
+    const item = fm(root, `trellis/active/${newIdFor(summary.idMap, "active/060-sized.md")}.md`);
+    assert.equal(item.effort, 8, "effort read from the Size fallback, not the flat default");
+    assert.equal(summary.provenance.effortEstimated, 0, "a real Size signal is not an estimate");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});
+
+test("remap.effort maps a foreign size label to a canonical effort value", () => {
+  const root = initTarget();
+  const src = mkdtempSync(join(tmpdir(), "trellis-remapeffort-"));
+  try {
+    mkdirSync(join(src, "active"), { recursive: true });
+    writeFileSync(join(src, "active", "061-large.md"), "# A large task\n\n**Priority:** P1\n**Milestone:** Pre-Launch\n**Size:** L\n\nProse.\n");
+    const m = {
+      sources: { active: { dirs: ["active"], file: "*.md" } },
+      fields: {
+        id: { from: "filename", pattern: "^(\\d+)" },
+        title: { from: "h1" },
+        priority: { from: "inline", label: "Priority" },
+        milestone: { from: "inline", label: "Milestone" },
+        effort: { from: "inline", label: "Size" },
+      },
+      remap: { priority: { P1: "High" }, milestone: { "Pre-Launch": "Alpha" }, effort: { S: 1, M: 3, L: 8 } },
+      defaults: { effort: 1 },
+    };
+    const { summary } = applyImport(root, src, m, { dryRun: false });
+    assert.deepEqual(summary.errors, []);
+    assert.equal(fm(root, `trellis/active/${newIdFor(summary.idMap, "active/061-large.md")}.md`).effort, 8, "L → 8 via remap.effort");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});
+
+test("a closed item with no effort signal is filled from defaults.effort and flagged estimated; an active one is not", () => {
+  const root = initTarget();
+  const src = mkdtempSync(join(tmpdir(), "trellis-effortest-"));
+  try {
+    mkdirSync(join(src, "completed"), { recursive: true });
+    mkdirSync(join(src, "active"), { recursive: true });
+    writeFileSync(join(src, "completed", "070-done.md"), "# A done thing\n\nCompleted: 2024-05-06\n\nNo effort recorded.\n");
+    writeFileSync(join(src, "active", "071-live.md"), "# A live thing\n\n**Priority:** P3\n**Milestone:** Pre-Launch\n\nNo effort recorded.\n");
+    const m = {
+      sources: { active: { dirs: ["active"], file: "*.md" }, completed: { dirs: ["completed"], file: "*.md" } },
+      fields: {
+        id: { from: "filename", pattern: "^(\\d+)" },
+        title: { from: "h1" },
+        priority: { from: "inline", label: "Priority" },
+        milestone: { from: "inline", label: "Milestone" },
+        effort: { from: "inline", label: "Effort" },
+        completed_on: { from: "header", label: "Completed" },
+      },
+      remap: { priority: { P3: "Low" }, milestone: { "Pre-Launch": "Alpha" } },
+      defaults: { milestone: "Alpha", priority: "Low", effort: 2 },
+    };
+    const { summary } = applyImport(root, src, m, { dryRun: false });
+    assert.deepEqual(summary.errors, []);
+    const done = fm(root, `trellis/completed/tasks/${newIdFor(summary.idMap, "completed/070-done.md")}.md`);
+    const live = fm(root, `trellis/active/${newIdFor(summary.idMap, "active/071-live.md")}.md`);
+    assert.equal(done.effort, 2, "closed item filled from defaults.effort");
+    assert.equal(live.effort, 2, "active item also filled from defaults.effort");
+    assert.equal(summary.provenance.effortEstimated, 1, "only the closed item is counted as estimated");
+    assert.ok(summary.warnings.some((w) => /070-done.*effort 2 estimated/.test(w)), `expected a closed effort-estimate warning, got ${JSON.stringify(summary.warnings)}`);
+    assert.ok(!summary.warnings.some((w) => /071-live.*estimated/.test(w)), "an active item's defaulted effort is not flagged");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});
