@@ -116,6 +116,13 @@ function report(targetRoot, summary, dryRun) {
   // Remaining warnings are benign (e.g. a missing copy source) — the scaffold
   // still completed, so they do not change the exit code.
   for (const w of summary.warnings) console.warn(`  warning: ${w}`);
+  // Reconciliation checklist (TRL0027): stale backlog guidance for the agent to
+  // rewrite. Advisory and report-only — init never edited these — so, like warnings,
+  // it does not affect the exit code.
+  if (summary.reconcile && summary.reconcile.length) {
+    console.log(`  reconcile (${summary.reconcile.length}) — pre-Trellis backlog guidance to rewrite by hand (init left these untouched):`);
+    for (const r of summary.reconcile) console.log(`    - ${r.file}: ${r.note}`);
+  }
   if (!dryRun) {
     console.log(`Done. Next: add a task under ${summary.root}/active/, then \`npx trellis generate\`.`);
     console.log(`Then enable branch protection so the \`backlog\` check gates merges — see docs/branch-protection.md.`);

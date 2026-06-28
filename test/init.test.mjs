@@ -594,3 +594,97 @@ test("init rejects --import without a profile/mapping, and --profile without --i
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ---- reconciliation report (TRL0027): report-only, never edits author prose ----
+
+test("reports a stale 'AI Backlog' guidance section and leaves the file byte-for-byte unchanged", () => {
+  const root = tempRepo();
+  try {
+    const guide = "# AI guidelines\n\n## AI Backlog\n\nTasks live in `docs/tasks/` — edit the YAML there.\n";
+    writeFileSync(join(root, "AI_GUIDELINES.md"), guide);
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    const notes = summary.reconcile.filter((r) => r.file === "AI_GUIDELINES.md");
+    assert.equal(notes.length, 1, "the stale AI Backlog section is flagged once");
+    assert.match(notes[0].note, /AI Backlog/, "the note names the offending section");
+    assert.match(notes[0].note, /trellis\//, "the note points at the new root");
+    assert.equal(readFileSync(join(root, "AI_GUIDELINES.md"), "utf8"), guide, "init must not touch the file");
+    assert.deepEqual(summary.warnings, [], "a reconcile note is not a scaffold warning");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("flags an author backlog section in AGENTS.md but never the Trellis block init appends", () => {
+  const root = tempRepo();
+  try {
+    writeFileSync(join(root, "AGENTS.md"), "# AGENTS\n\n## Backlog\n\nSee `docs/tasks/` for the task files.\n");
+    const first = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot).summary;
+    const a1 = first.reconcile.filter((r) => r.file === "AGENTS.md");
+    assert.equal(a1.length, 1, "the author's Backlog section is flagged");
+    assert.match(a1[0].note, /"Backlog"/, "the note names the author heading");
+    assert.doesNotMatch(a1[0].note, /Trellis\)/, "the note is not the appended '## Backlog (Trellis)' block");
+    assert.ok(readFileSync(join(root, "AGENTS.md"), "utf8").includes("<!-- BEGIN TRELLIS -->"), "the block was appended");
+
+    // Idempotent re-run: the block is now present, yet the scan still flags only the
+    // author section — the stripped Trellis block (which has its own "Backlog" heading)
+    // is never re-flagged.
+    const a2 = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot).summary.reconcile.filter((r) => r.file === "AGENTS.md");
+    assert.equal(a2.length, 1, "the re-run flags the author section once, not the Trellis block");
+    assert.doesNotMatch(a2[0].note, /Trellis\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("does not flag a backlog section that already points at the new root", () => {
+  const root = tempRepo();
+  try {
+    writeFileSync(join(root, "AI_GUIDELINES.md"), "## Backlog\n\nManaged with Trellis under `trellis/`.\n");
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.deepEqual(summary.reconcile.filter((r) => r.file === "AI_GUIDELINES.md"), [], "an already-reconciled section is not flagged");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("flags a doc that references the imported source path, and only when --import is given", () => {
+  const root = tempRepo();
+  try {
+    // No backlog *heading*, so signal (a) stays silent and this isolates the import-path signal.
+    writeFileSync(join(root, "CLAUDE.md"), "# Project notes\n\nOld tasks live under planning/legacy until migrated.\n");
+
+    const withImport = applyScaffold(root, { prefix: "DEMO", import: "planning/legacy" }, {}, sourceRoot).summary;
+    const notes = withImport.reconcile.filter((r) => r.file === "CLAUDE.md");
+    assert.equal(notes.length, 1, "the doc referencing the import path is flagged");
+    assert.match(notes[0].note, /planning\/legacy/, "the note names the imported path");
+
+    const noImport = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot).summary;
+    assert.deepEqual(noImport.reconcile.filter((r) => r.file === "CLAUDE.md"), [], "without --import the import-path signal does not fire");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the init CLI prints a Reconcile section for stale guidance", () => {
+  const root = tempRepo();
+  try {
+    writeFileSync(join(root, "AI_GUIDELINES.md"), "## AI Backlog\n\nTasks are in `docs/tasks/`.\n");
+    const out = execFileSync(process.execPath, [initScript, root, "--prefix", "DEMO"], { encoding: "utf8" });
+    assert.match(out, /reconcile \(\d+\)/, "the CLI prints a reconcile header with a count");
+    assert.match(out, /AI_GUIDELINES\.md/, "the CLI names the offending file");
+    assert.match(out, /AI Backlog/, "the CLI names the offending section");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a fresh scaffold (init writes its own AGENTS.md) reports no reconcile notes", () => {
+  const root = tempRepo();
+  try {
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.deepEqual(summary.reconcile, [], "init's own output never self-flags");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

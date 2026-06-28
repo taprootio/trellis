@@ -12,7 +12,7 @@
 // future MCP tool (TRL0004) can share it.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, isAbsolute } from "node:path";
 import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, loadConfig, loadRoster, readBacklog, generateArtifacts, attachEffortScale } from "./backlog.mjs";
 
 // The config home is fixed at `trellis/backlog.config.json` (CONFIG_DIR),
@@ -337,6 +337,65 @@ function templateFiles(o, sourceRoot, root) {
   return { files, warnings };
 }
 
+// -------------------------------------------------------- reconciliation
+// Root guidance files an onboarding agent typically keeps backlog instructions in.
+// Bounded on purpose: a precise, low-false-positive scan beats a broad one, since
+// the output is a checklist a human acts on (TRL0027).
+const RECONCILE_FILES = ["AGENTS.md", "AI_GUIDELINES.md", "CLAUDE.md"];
+
+// Strip Trellis's own appended block from AGENTS.md so the scan never flags the
+// guidance init itself just wrote — only the author's surrounding prose is examined.
+function stripTrellisBlock(text) {
+  const [begin, end] = AGENTS_MARKERS;
+  const bi = text.indexOf(begin);
+  if (bi === -1) return text;
+  const ei = text.indexOf(end, bi);
+  if (ei === -1) return text;
+  return text.slice(0, bi) + text.slice(ei + end.length);
+}
+
+// READ-ONLY scan for stale, pre-Trellis backlog guidance the agent should rewrite
+// by hand. `init` reports; it never edits or deletes author prose (TRL0027). Returns
+// [{ file, note }]. `root` is the effective backlog root; `importSource` (when set) is
+// the repo-relative path just imported — a reference to it is the strongest signal a
+// doc points at the now-retired backlog. Precision over recall: a false positive is
+// only a line the agent skips.
+export function scanReconcile(targetRoot, { root = DEFAULT_TASKS_DIR, importSource } = {}) {
+  const notes = [];
+  const headingRe = /^[ \t]*#{1,6}[ \t]+(.*\bbacklog\b.*)$/im;
+  for (const file of RECONCILE_FILES) {
+    const abs = join(targetRoot, file);
+    if (!existsSync(abs)) continue;
+    const authorText = file === "AGENTS.md" ? stripTrellisBlock(readFileSync(abs, "utf8")) : readFileSync(abs, "utf8");
+
+    // (a) A backlog-ish heading in author prose that doesn't already point at the new
+    // root — likely guidance still describing the old backlog. Suppress once the
+    // author content references `<root>/`, i.e. it has already been reconciled.
+    const m = authorText.match(headingRe);
+    if (m && !authorText.includes(`${root}/`)) {
+      notes.push({ file, note: `has a "${m[1].trim()}" section that looks like pre-Trellis backlog guidance — rewrite it to point at ${root}/ (init only appends its own block; it won't touch this)` });
+    }
+
+    // (b) A reference to the just-imported source path — the doc names the backlog
+    // location that import copied out of and --retire-source can now remove.
+    if (importSource && authorText.includes(importSource)) {
+      notes.push({ file, note: `references the imported backlog path "${importSource}" — update or remove that reference now that items live under ${root}/` });
+    }
+  }
+  return notes;
+}
+
+// The just-imported source as a repo-relative path, or undefined when no --import was
+// given or the source sits outside the repo (it can't be named as a repo path then,
+// so signal (b) above doesn't apply).
+function importSourceRel(targetRoot, importOpt) {
+  if (!importOpt) return undefined;
+  const abs = isAbsolute(importOpt) ? importOpt : join(targetRoot, importOpt);
+  const rel = relative(targetRoot, abs);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return undefined;
+  return rel;
+}
+
 // ----------------------------------------------------------------- plan
 // Compute the per-file actions without touching disk. `action` is one of
 // create | skip | append (append is AGENTS.md only). force turns skip → create.
@@ -390,7 +449,12 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
     }
   }
 
-  return { options: o, resolved, actions, warnings, root };
+  // Read-only reconciliation scan (TRL0027): stale backlog guidance for the agent to
+  // rewrite by hand. Advisory — kept separate from `warnings` (scaffold mechanics) and
+  // from `errors` (it never blocks).
+  const reconcile = scanReconcile(targetRoot, { root, importSource: importSourceRel(targetRoot, opts.import) });
+
+  return { options: o, resolved, actions, warnings, root, reconcile };
 }
 
 // ---------------------------------------------------------------- apply
@@ -400,12 +464,13 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false } = {}, so
   // `errors` is fatal (the run did not produce a --check-green scaffold);
   // `warnings` is benign (e.g. a missing copy source). The CLI keys its exit code
   // and "Refused" banner off `errors`, never off `warnings`.
-  const summary = { created: [], skipped: [], appended: [], generated: [], warnings: [], errors: [] };
+  const summary = { created: [], skipped: [], appended: [], generated: [], reconcile: [], warnings: [], errors: [] };
 
   // planScaffold only reads, so the target stays untouched through every check
   // below — a rejected run leaves nothing behind. It also resolves the options
   // (no need to resolve again here).
-  const { options, resolved, actions, warnings, root } = planScaffold(targetRoot, opts, sourceRoot);
+  const { options, resolved, actions, warnings, root, reconcile } = planScaffold(targetRoot, opts, sourceRoot);
+  summary.reconcile = reconcile; // advisory, populated even on a refusal (the CLI only prints it on success)
   const GENERATED = generatedFiles(root); // artifact rel-paths under the effective backlog root
   summary.root = root; // surfaced so the CLI can point at the actual scaffold root
 
