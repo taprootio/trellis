@@ -8,7 +8,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { loadConfig } from "../src/backlog.mjs";
 import {
@@ -199,6 +200,75 @@ test("a non-git directory throws a typed HistoryError", () => {
     const { cfg } = loadConfig(root);
     assert.throws(() => deriveAllHistory(root, cfg), (e) => e instanceof HistoryError && e.code === "not_a_git_repo");
     assert.throws(() => deriveTaskHistory(root, cfg, "DEMO0001"), (e) => e instanceof HistoryError && e.code === "not_a_git_repo");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ----------------------------------------------------------------- CLI
+// End-to-end smoke tests of the script wrapper, matching the precedent in
+// import.test.mjs / init.test.mjs (spawn the script, assert stdout + exit code).
+const historyScript = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "trellis-history.mjs");
+function runCli(...args) {
+  try {
+    const stdout = execFileSync(process.execPath, [historyScript, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return { status: 0, stdout, stderr: "" };
+  } catch (e) {
+    return { status: e.status ?? 1, stdout: e.stdout ?? "", stderr: e.stderr ?? "" };
+  }
+}
+
+test("CLI: <id> --json emits the structured entries", () => {
+  withRepo((root) => {
+    const { status, stdout } = runCli("DEMO0001", "--repo", root, "--json");
+    assert.equal(status, 0);
+    const parsed = JSON.parse(stdout);
+    assert.equal(parsed.id, "DEMO0001");
+    assert.equal(parsed.entries.length, 3);
+  });
+});
+
+test("CLI: whole-repo human summary lists every task", () => {
+  withRepo((root) => {
+    const { status, stdout } = runCli("--repo", root);
+    assert.equal(status, 0);
+    assert.match(stdout, /3 tasks, 4 entries/);
+    assert.match(stdout, /DEMO0003\s+\(no recorded history\)/);
+  });
+});
+
+test("CLI: --write materializes history.json and reports it", () => {
+  withRepo((root) => {
+    const { status, stdout } = runCli("--repo", root, "--write");
+    assert.equal(status, 0);
+    assert.match(stdout, /Wrote .*history\.json/);
+    assert.ok(existsSync(join(root, "trellis", "history.json")));
+  });
+});
+
+test("CLI: --write with an id is refused (exit 2)", () => {
+  withRepo((root) => {
+    const { status, stderr } = runCli("DEMO0001", "--repo", root, "--write");
+    assert.equal(status, 2);
+    assert.match(stderr, /--write materializes the whole repo/);
+  });
+});
+
+test("CLI: an unknown id exits 1 with a clear error", () => {
+  withRepo((root) => {
+    const { status, stderr } = runCli("DEMO9999", "--repo", root);
+    assert.equal(status, 1);
+    assert.match(stderr, /no task file for id DEMO9999/);
+  });
+});
+
+test("CLI: a non-git repo exits 1, not a stack trace", () => {
+  const root = mkdtempSync(join(tmpdir(), "trellis-nogit-cli-"));
+  try {
+    write(root, "trellis/backlog.config.json", JSON.stringify(CFG, null, 2) + "\n");
+    const { status, stderr } = runCli("--repo", root);
+    assert.equal(status, 1);
+    assert.match(stderr, /not a git work tree/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
