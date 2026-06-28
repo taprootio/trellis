@@ -49,6 +49,7 @@ const COPY_FILES = [
   "docs/playbooks/work-task.md",
   "docs/playbooks/code-review.md",
   "docs/playbooks/pr-draft.md",
+  "docs/branch-protection.md",
   ".github/pull_request_template.md",
 ];
 
@@ -242,8 +243,12 @@ function removedSkeleton() {
 }
 
 function workflowContent() {
-  // Job name `backlog` is the pinned required-check context (TRL0014). The check
-  // runs via the Trellis package (TRL0010); it is red until that ships.
+  // The job's explicit `name: backlog` is the pinned required-check context
+  // (TRL0014, SPEC §10): the stable name a branch-protection rule requires, so a
+  // workflow/job rename can't silently drop the gate. It is distinct from the
+  // workflow's display name (`Backlog Hygiene`). Enable the gate against this
+  // context with docs/branch-protection.md. The check runs via the Trellis package
+  // (TRL0010); it is red until that ships.
   return `name: Backlog Hygiene
 on:
   pull_request:
@@ -251,6 +256,7 @@ on:
     branches: [main]
 jobs:
   backlog:
+    name: backlog
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -285,7 +291,8 @@ Markdown files with YAML front-matter; ids are \`${o.prefix}\` + ${o.idWidth} di
 - After adding, moving, or editing an item, regenerate with \`npx trellis generate\`;
   CI runs \`npx trellis check\`.
 - \`main\` is protected — work on a branch, open a PR, and let the backlog check
-  gate the merge.
+  (the pinned \`backlog\` job) gate the merge. Enable the gate with the recipe in
+  \`docs/branch-protection.md\` (GitHub plus GitLab/Bitbucket/Azure DevOps).
 - Commit messages and PR descriptions carry no AI/co-author attribution — never
   add \`Co-Authored-By:\` trailers or "Generated with …" footers.
 

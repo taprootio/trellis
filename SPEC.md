@@ -388,7 +388,14 @@ Conformant repositories MUST gate the default branch so the index cannot drift:
 
 This is forge-agnostic — GitHub branch protection, GitLab merge-request
 pipelines, Bitbucket, or Azure DevOps all satisfy it. Setup specifics are left to
-the consumer's onboarding tooling.
+the consumer's onboarding tooling, which SHOULD provide a forge-appropriate setup
+recipe.
+
+Where a forge identifies the required check by name (e.g. a GitHub Actions job
+name), keeping that name stable and pinned — and updating the protection rule in
+lockstep if it ever changes — keeps a workflow or job rename from silently
+dropping the gate. This is operational guidance for keeping the required check
+effective, not an additional conformance requirement.
 
 ## 11. Conformance
 
