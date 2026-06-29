@@ -756,6 +756,7 @@ test("--retire-source --dry-run lists the files and changes nothing", () => {
     assert.equal(status, 0);
     assert.match(stdout, /Would retire "planning\/legacy"/);
     assert.match(stdout, /dry run/);
+    assert.match(stdout, /planning\/legacy\/a\.md/, "a dry run lists the files that would be removed");
     assert.ok(existsSync(join(root, "planning/legacy/a.md")), "a dry run leaves the files in place");
     assert.equal(git(root, ["status", "--porcelain"]).trim(), "", "a dry run stages nothing");
   } finally {
@@ -821,6 +822,22 @@ test("a valueless --retire-source is a usage error, never a silent scaffold", ()
       assert.match(stderr, /--retire-source requires a path/);
     }
     assert.equal(existsSync(join(root, "trellis")), false, "a valueless retire flag scaffolds nothing");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--retire-source does not swallow a following flag as its path", () => {
+  const root = gitRepo();
+  try {
+    // `--retire-source --dry-run` omits the path; the parser must treat --dry-run as the
+    // next flag (→ a missing-path usage error), not consume it as a path named "--dry-run"
+    // while silently dropping the dry run and staging a real git rm.
+    const { status, stderr } = runInit(root, ["--retire-source", "--dry-run"]);
+    assert.equal(status, 2, "a missing path is a usage error");
+    assert.match(stderr, /--retire-source requires a path/);
+    assert.equal(git(root, ["status", "--porcelain"]).trim(), "", "nothing is staged");
+    assert.equal(existsSync(join(root, "trellis")), false, "and nothing is scaffolded");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

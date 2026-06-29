@@ -52,14 +52,25 @@ const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function parseArgs(argv) {
   const opts = {};
-  const csv = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
+  const csv = (s) => (s == null ? [] : s.split(",").map((x) => x.trim()).filter(Boolean));
   let target = ".";
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const eq = a.indexOf("=");
     const key = a.startsWith("--") && eq !== -1 ? a.slice(0, eq) : a;
     const inline = a.startsWith("--") && eq !== -1 ? a.slice(eq + 1) : null;
-    const next = () => (inline !== null ? inline : argv[++i]);
+    // Read a flag's value. `--flag=value` always uses the inline value; with the space
+    // form, a following long-option token (`--x`) means the value was OMITTED — do not
+    // swallow it. So `--retire-source --dry-run` is a missing path (caught as a usage
+    // error) instead of a path literally named "--dry-run" with --dry-run silently lost,
+    // which would turn an intended preview into a real staged `git rm`.
+    const next = () => {
+      if (inline !== null) return inline;
+      const v = argv[i + 1];
+      if (v === undefined || v.startsWith("--")) return undefined;
+      i++;
+      return v;
+    };
     switch (key) {
       case "-h": case "--help": opts.help = true; break;
       case "--force": opts.force = true; break;
@@ -203,7 +214,10 @@ function reportRetire(summary, dryRun) {
   const n = summary.removed.length;
   const files = `${n} tracked file${n === 1 ? "" : "s"}`;
   if (dryRun) {
-    console.log(`Would retire "${summary.path}" — git rm ${files} (dry run, nothing changed).`);
+    // List the files: a dry run stages nothing, so there is no `git status` to inspect —
+    // the report is the only place the user sees exactly what would be removed.
+    console.log(`Would retire "${summary.path}" — git rm ${files} (dry run, nothing changed):`);
+    for (const f of summary.removed) console.log(`    ${f}`);
     return;
   }
   console.log(`Retired "${summary.path}" — staged the removal of ${files} with git rm.`);
