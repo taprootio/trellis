@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { applyScaffold } from "../src/init.mjs";
+import { applyScaffold, shouldPromptVocab } from "../src/init.mjs";
 import { loadConfig, loadRoster, readBacklog, generateArtifacts } from "../src/backlog.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -868,4 +868,16 @@ test("--retire-source does not consume a short option (-h) as its path", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("shouldPromptVocab never prompts for a retire-only run, even a valueless one", () => {
+  // The bug this guards: a valueless --retire-source leaves opts.retireSource === undefined
+  // (key present), so a truthiness check would still prompt. Keyed on presence, it must not.
+  assert.equal(shouldPromptVocab({ retireSource: undefined }, true), false, "valueless --retire-source skips prompts");
+  assert.equal(shouldPromptVocab({ retireSource: "planning/old" }, true), false, "a normal retire run skips prompts");
+  // Sanity: a normal interactive run with missing vocab still prompts; the usual skips hold.
+  assert.equal(shouldPromptVocab({}, true), true, "missing vocab on an interactive run prompts");
+  assert.equal(shouldPromptVocab({ prefix: "X", milestones: ["A"] }, true), false, "nothing missing → no prompt");
+  assert.equal(shouldPromptVocab({}, false), false, "non-interactive never prompts");
+  assert.equal(shouldPromptVocab({ dryRun: true }, true), false, "a dry run never prompts");
 });

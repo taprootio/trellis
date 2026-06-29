@@ -14,7 +14,7 @@
 import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
-import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource } from "../src/init.mjs";
+import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
 import { applyImport } from "../src/import.mjs";
 import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
 
@@ -96,11 +96,10 @@ function parseArgs(argv) {
 }
 
 async function promptMissing(opts) {
-  // Only prompt for the two the task calls out (prefix, milestones), and only
-  // when interactive and not a dry run. A retire-only run doesn't scaffold, so it
-  // never needs the vocabulary.
-  if (opts.dryRun || opts.retireSource || !process.stdin.isTTY) return;
-  if (opts.prefix && opts.milestones) return;
+  // Prompt for the two the task calls out (prefix, milestones) only when one is missing
+  // on an interactive, non-dry, non-retire run — see shouldPromptVocab (keyed on flag
+  // presence so a valueless --retire-source doesn't prompt before erroring).
+  if (!shouldPromptVocab(opts, process.stdin.isTTY)) return;
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     if (!opts.prefix) {

@@ -96,6 +96,17 @@ export function validateOptions(o) {
   return errors;
 }
 
+// Whether the init CLI should interactively prompt for the missing vocabulary
+// (prefix/milestones). It must NOT prompt for a dry run, a retire-only run, or a
+// non-interactive stdin — and only when something is actually missing. The retire check
+// is keyed on the flag's PRESENCE, not a truthy value: a valueless `--retire-source`
+// (a usage error) must not prompt for scaffold vocabulary it will never use before it
+// reports the missing path. Pure (takes isTTY) so it is unit-testable without a terminal.
+export function shouldPromptVocab(opts, isTTY) {
+  if (opts.dryRun || "retireSource" in opts || !isTTY) return false;
+  return !opts.prefix || !opts.milestones;
+}
+
 // Derive scaffold options from an existing (already-validated) config, so a kept
 // config — not the supplied flags — governs the rendered templates and AGENTS
 // block. Otherwise a repo with `idPrefix: DEMO` could get an AGENTS block saying
