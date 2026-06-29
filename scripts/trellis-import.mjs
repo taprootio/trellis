@@ -16,10 +16,10 @@ import { resolve } from "node:path";
 import { applyImport } from "../src/import.mjs";
 import { loadProfile, loadMappingFile, listProfiles } from "../src/profiles.mjs";
 
-const HELP = `trellis import — import an existing backlog into Trellis
+const HELP = `ai-trellis import — import an existing backlog into Trellis
 
 Usage:
-  node scripts/trellis-import.mjs <source> (--profile <name> | --mapping <file>) [flags]
+  ai-trellis import <source> (--profile <name> | --mapping <file>) [flags]
 
 Flags:
   --profile <name>   built-in source-mapping profile (see --list-profiles)
@@ -93,7 +93,7 @@ function report(targetRoot, summary, dryRun) {
     for (const m of summary.idMap) console.log(`    ${m.sourceId} (${m.sourceFile}) → ${m.newId}`);
   }
   if (summary.generated.length) console.log(`  ${dryRun ? "regenerate" : "generated"} (${summary.generated.length}): ${summary.generated.join(", ")}`);
-  for (const w of summary.warnings) console.warn(`  warning: ${w}`);
+  for (const w of summary.warnings) console.log(`  warning: ${w}`);
   if (!dryRun) console.log(`Done. Review ${summary.root}/, then commit.`);
   else console.log("Dry run — nothing written. Re-run with --apply to write.");
 }

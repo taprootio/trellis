@@ -17,7 +17,7 @@ import { lintPrTitle } from "../src/pr-title.mjs";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const { cfg, warnings, errors: cfgErrors } = loadConfig(repoRoot);
-for (const w of warnings) console.warn(`warning: ${w}`);
+for (const w of warnings) console.log(`warning: ${w}`);
 if (cfgErrors.length) {
   console.error("Cannot lint the PR title:\n" + cfgErrors.map((e) => "  - " + e).join("\n"));
   process.exit(1);

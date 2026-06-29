@@ -15,10 +15,10 @@ import { resolve } from "node:path";
 import { loadConfig } from "../src/backlog.mjs";
 import { deriveTaskHistory, deriveAllHistory, materializeHistory, HistoryError } from "../src/history.mjs";
 
-const HELP = `trellis history — git-derived per-task history
+const HELP = `ai-trellis history — git-derived per-task history
 
 Usage:
-  node scripts/trellis-history.mjs [<id>] [flags]
+  ai-trellis history [<id>] [flags]
 
 Flags:
   --repo <path>   repo root to derive from (default: cwd)

@@ -74,7 +74,7 @@ JSON
 ## Other forges
 
 The same two requirements — a protected default branch and a required check —
-map onto every major forge. The "check" is whichever CI job runs `trellis check`
+map onto every major forge. The "check" is whichever CI job runs `ai-trellis check`
 (named `backlog` here); on forges without GitHub-style named contexts, the gate is
 "the pipeline/build must succeed."
 
@@ -85,7 +85,7 @@ map onto every major forge. The "check" is whichever CI job runs `trellis check`
   through merge requests) and **Allowed to merge** to the appropriate role.
 - **Required check** — *Settings → Merge requests*: enable **Pipelines must
   succeed** so an MR can't merge unless its pipeline (the job running
-  `trellis check`) passes; optionally require approvals. Scriptable via
+  `ai-trellis check`) passes; optionally require approvals. Scriptable via
   `PUT /projects/:id` with `only_allow_merge_if_pipeline_succeeds: true` and
   `POST /projects/:id/protected_branches`.
 
@@ -95,7 +95,7 @@ map onto every major forge. The "check" is whichever CI job runs `trellis check`
   restriction on the default branch — **Prevent changes without a pull request**
   (and prevent direct pushes).
 - **Required check** — in the same restriction, add the merge check **require
-  passing builds** (minimum 1). The Pipelines step that runs `trellis check`
+  passing builds** (minimum 1). The Pipelines step that runs `ai-trellis check`
   reports its build status via the Build Status API; require a minimum number of
   approvals if desired.
 
@@ -105,7 +105,7 @@ map onto every major forge. The "check" is whichever CI job runs `trellis check`
   policies*. Adding any policy blocks direct pushes; add **Require a minimum
   number of reviewers** to force PRs.
 - **Required check** — add a **Build validation** policy that references the
-  pipeline running `trellis check` (set it Required). If the pipeline reports via
+  pipeline running `ai-trellis check` (set it Required). If the pipeline reports via
   the Status API instead, use a **Status checks** policy referencing that context.
 
 ## Verify the gate

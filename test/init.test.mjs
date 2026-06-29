@@ -454,8 +454,8 @@ test("the conventions contract travels into an onboarded repo without leaking Tr
     const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
     assert.match(agents, /Loop contract/, "AGENTS declares a Loop contract block");
     assert.match(agents, /`branch-naming`/, "declares the branch-naming seam the playbooks read");
-    assert.match(agents, /npx trellis generate/, "regenerate value is the package command");
-    assert.match(agents, /npx trellis check/, "check value is the package command");
+    assert.match(agents, /npx ai-trellis generate/, "regenerate value is the package command");
+    assert.match(agents, /npx ai-trellis check/, "check value is the package command");
     assert.doesNotMatch(agents, /npm run backlog:/, "Trellis's own npm scripts must not leak into an onboarded contract");
     assert.doesNotMatch(agents, /\bje\//, "Trellis's author branch prefix must not leak");
 

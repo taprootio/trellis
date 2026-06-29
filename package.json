@@ -1,9 +1,25 @@
 {
-  "name": "trellis",
-  "private": true,
+  "name": "ai-trellis",
+  "version": "0.1.0",
   "type": "module",
   "description": "Trellis — a tool-agnostic toolkit for file-based backlogs; dogfoods its own conventions.",
+  "bin": {
+    "ai-trellis": "./scripts/trellis.mjs",
+    "trellis": "./scripts/trellis.mjs",
+    "trellis-mcp": "./scripts/trellis-mcp.mjs"
+  },
+  "files": [
+    "scripts/",
+    "src/",
+    "profiles/",
+    "trellis/playbooks/",
+    "trellis/branch-protection.md",
+    ".github/pull_request_template.md",
+    "README.md",
+    "SPEC.md"
+  ],
   "scripts": {
+    "trellis": "node scripts/trellis.mjs",
     "backlog:readme": "node scripts/backlog-readme.mjs",
     "backlog:check": "node scripts/backlog-readme.mjs --check",
     "trellis:init": "node scripts/trellis-init.mjs",

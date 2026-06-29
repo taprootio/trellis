@@ -19,7 +19,7 @@ node scripts/trellis-init.mjs <target> --prefix ABC   # --dry-run to preview
 ```
 
 It does not vendor the generator; the onboarded repo runs Trellis via the
-package (the scaffolded CI calls `npx trellis check`), which ships in TRL0010.
+package (the scaffolded CI calls `npx ai-trellis check`), which ships in TRL0010.
 
 ## Import an existing backlog
 

@@ -38,8 +38,8 @@ completeness:
 ## How a repo declares its values
 
 `trellis init` writes a "Loop contract" block into the onboarded repo's
-`AGENTS.md` with that repo's values (e.g. `npx trellis generate` / `npx trellis
-check`, a branch pattern, the attribution policy). A repo edits those values to
+`AGENTS.md` with that repo's values (e.g. `npx ai-trellis generate` /
+`npx ai-trellis check`, a branch pattern, the attribution policy). A repo edits those values to
 match its own tooling; the playbooks need no change to follow them, because they
 only ever name the seam point.
 
