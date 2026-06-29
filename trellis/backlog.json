@@ -6,9 +6,9 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0030",
+  "nextId": "TRL0031",
   "counts": {
-    "active": 8,
+    "active": 9,
     "completed": 21,
     "removed": 0
   },
@@ -147,6 +147,20 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
+    },
+    {
+      "id": "TRL0030",
+      "title": "Harden packaged onboarding after Taproot dogfood",
+      "status": "active",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 2,
+      "effortLabel": "Goldfish",
+      "effortEmoji": "🐠",
+      "depends_on": [],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Address the small but release-blocking dogfood issues from Taproot onboarding: publish under `ai-trellis`, make packaged commands target-aware, order CLI output deterministically, and clarify import retirement."
     },
     {
       "id": "TRL0001",

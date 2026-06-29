@@ -20,6 +20,7 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | --- | --- | --- | --- | --- |
 | [TRL0010](active/TRL0010.md) | Packaging, versioned spec, and docs |  | High | Tuna · 5 |
 | [TRL0011](active/TRL0011.md) | Test suite and CI for CLI and MCP server |  | High | Tuna · 5 |
+| [TRL0030](active/TRL0030.md) | Harden packaged onboarding after Taproot dogfood |  | High | 🐠 Goldfish · 2 |
 | [TRL0019](active/TRL0019.md) | MCP server HTTP transport (port/host) + per-repo resource addressing |  | Medium | Tuna · 5 |
 
 ### Future
