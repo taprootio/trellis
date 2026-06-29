@@ -84,3 +84,21 @@ test("successful CLI reports advisory warnings before the final line on stdout",
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("packaged pr-title uses the target repo vocabulary", () => {
+  const root = tempRepo();
+  const other = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    const res = spawnSync(
+      process.execPath,
+      [cliScript, "pr-title", "--target", root],
+      { cwd: other, encoding: "utf8", env: { ...process.env, PR_TITLE: "DEMO0001: add package cli" } },
+    );
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /PR title OK/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+  }
+});

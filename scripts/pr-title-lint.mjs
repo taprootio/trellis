@@ -3,18 +3,59 @@
 // pr-title workflow on every pull_request.
 //
 //   PR_TITLE="TRL0016: add the lint" node scripts/pr-title-lint.mjs
+//   PR_TITLE="DEMO0001: add the lint" ai-trellis pr-title --repo <target>
 //
 // Reads the title from $PR_TITLE (set from the pull_request event title) and the
-// id vocabulary from this repo's backlog.config.json, then exits non-zero on any
+// id vocabulary from the target repo's backlog.config.json, then exits non-zero on any
 // violation. Logic lives in src/pr-title.mjs so it stays dependency-free and
 // `node --test`-able.
 
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { loadConfig } from "../src/backlog.mjs";
 import { lintPrTitle } from "../src/pr-title.mjs";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const HELP = `ai-trellis pr-title — lint a pull request title
+
+Usage:
+  PR_TITLE="TASK0001: concise title" ai-trellis pr-title [--repo <target>]
+
+Flags:
+  --repo <target>    repo root whose Trellis id vocabulary should be used (default: cwd)
+  --target <target>  alias for --repo
+  -h, --help         show this help
+`;
+
+function parseArgs(argv) {
+  const opts = { repo: process.cwd() };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    const eq = a.indexOf("=");
+    const key = a.startsWith("--") && eq !== -1 ? a.slice(0, eq) : a;
+    const inline = a.startsWith("--") && eq !== -1 ? a.slice(eq + 1) : null;
+    const next = (flag) => {
+      const v = inline !== null ? inline : argv[++i];
+      if (v === undefined || v === "" || (inline === null && v.startsWith("-"))) {
+        console.error(`error: ${flag} requires a value`);
+        process.exit(2);
+      }
+      return v;
+    };
+    switch (key) {
+      case "-h": case "--help": opts.help = true; break;
+      case "--repo": case "--target": opts.repo = next(key); break;
+      default:
+        if (a.startsWith("-")) { console.error(`Unknown flag: ${a}`); process.exit(2); }
+        console.error(`Unexpected argument: ${a}`);
+        process.exit(2);
+    }
+  }
+  return opts;
+}
+
+const opts = parseArgs(process.argv.slice(2));
+if (opts.help) { process.stdout.write(HELP); process.exit(0); }
+
+const repoRoot = resolve(opts.repo);
 
 const { cfg, warnings, errors: cfgErrors } = loadConfig(repoRoot);
 for (const w of warnings) console.log(`warning: ${w}`);
