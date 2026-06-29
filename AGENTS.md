@@ -34,16 +34,16 @@ For the front-matter schema, status lifecycle, effort scales, the generator /
 - `main` is **protected** — do not commit to it directly. Work on a branch
   (`je/<id>/<slug>` for task work), open a PR, and let the required backlog check
   (the pinned `backlog` job) gate the merge. Setup recipe, including non-GitHub
-  forges: [`docs/branch-protection.md`](docs/branch-protection.md).
+  forges: [`trellis/branch-protection.md`](trellis/branch-protection.md).
 - Commit messages and PR descriptions carry **no AI/co-author attribution** —
   never add `Co-Authored-By:` trailers or "Generated with …" footers.
 - Closing a task: move it to `completed/tasks/`, set `status: completed` +
   `completed_on`, and regenerate (the completed index is generated) — in the same
   change. Full rules in SPEC.md §4–§5.
 - To take a task from `active/` to ready-for-review, follow
-  [`docs/playbooks/work-task.md`](docs/playbooks/work-task.md) — refine with the
+  [`trellis/playbooks/work-task.md`](trellis/playbooks/work-task.md) — refine with the
   user, plan, branch, work, review, hand off.
-- Code reviews follow [`docs/playbooks/code-review.md`](docs/playbooks/code-review.md):
+- Code reviews follow [`trellis/playbooks/code-review.md`](trellis/playbooks/code-review.md):
   ground in these conventions first, then report findings as the canonical JSON
   array (`file` / `line` / `severity` blocker·warning·nit / `suggestion`).
 
@@ -51,7 +51,7 @@ For the front-matter schema, status lifecycle, effort scales, the generator /
 
 The universal playbooks name **seam points**; this block is where Trellis (the
 reference instance) declares their values. See
-[`docs/playbooks/conventions.md`](docs/playbooks/conventions.md) for the contract.
+[`trellis/playbooks/conventions.md`](trellis/playbooks/conventions.md) for the contract.
 
 | seam point | this repo's value |
 | --- | --- |

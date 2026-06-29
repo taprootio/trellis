@@ -45,12 +45,20 @@ const AGENTS_MARKERS = ["<!-- BEGIN TRELLIS -->", "<!-- END TRELLIS -->"];
 // Process files copied verbatim from the Trellis install (sourceRoot). Their
 // value is the loop, not the exact command names; the AGENTS block below carries
 // the authoritative `npx trellis` commands for the onboarded repo.
+//
+// The playbooks and branch-protection guide scaffold into the FIXED Trellis home
+// (CONFIG_DIR), alongside backlog.config.json / team.json and independent of
+// tasksDir — never into `docs/`, which a repo's static-site generator often
+// publishes (TRL0028). They travel with the config, not the task tree, and the
+// generator (which scans only active/, completed/tasks/, removed/) ignores them.
+// The `.github/` files stay where forge convention requires. The source path and
+// scaffold destination are the same rel — this repo dogfoods the layout it emits.
 const COPY_FILES = [
-  "docs/playbooks/conventions.md",
-  "docs/playbooks/work-task.md",
-  "docs/playbooks/code-review.md",
-  "docs/playbooks/pr-draft.md",
-  "docs/branch-protection.md",
+  `${CONFIG_DIR}/playbooks/conventions.md`,
+  `${CONFIG_DIR}/playbooks/work-task.md`,
+  `${CONFIG_DIR}/playbooks/code-review.md`,
+  `${CONFIG_DIR}/playbooks/pr-draft.md`,
+  `${CONFIG_DIR}/branch-protection.md`,
   ".github/pull_request_template.md",
 ];
 
@@ -259,7 +267,7 @@ function workflowContent() {
   // (TRL0014, SPEC §10): the stable name a branch-protection rule requires, so a
   // workflow/job rename can't silently drop the gate. It is distinct from the
   // workflow's display name (`Backlog Hygiene`). Enable the gate against this
-  // context with docs/branch-protection.md. The check runs via the Trellis package
+  // context with trellis/branch-protection.md. The check runs via the Trellis package
   // (TRL0010); it is red until that ships.
   return `name: Backlog Hygiene
 on:
@@ -304,14 +312,14 @@ Markdown files with YAML front-matter; ids are \`${o.prefix}\` + ${o.idWidth} di
   CI runs \`npx trellis check\`.
 - \`main\` is protected — work on a branch, open a PR, and let the backlog check
   (the pinned \`backlog\` job) gate the merge. Enable the gate with the recipe in
-  \`docs/branch-protection.md\` (GitHub plus GitLab/Bitbucket/Azure DevOps).
+  \`trellis/branch-protection.md\` (GitHub plus GitLab/Bitbucket/Azure DevOps).
 - Commit messages and PR descriptions carry no AI/co-author attribution — never
   add \`Co-Authored-By:\` trailers or "Generated with …" footers.
 
 ### Loop contract
 
-The playbooks in \`docs/playbooks/\` are universal; they name **seam points** and
-read this repo's values from here. See \`docs/playbooks/conventions.md\` for the
+The playbooks in \`trellis/playbooks/\` are universal; they name **seam points** and
+read this repo's values from here. See \`trellis/playbooks/conventions.md\` for the
 contract, then set these to match your tooling:
 
 | seam point | this repo's value |
@@ -322,7 +330,7 @@ contract, then set these to match your tooling:
 | \`gates\` | \`npx trellis check\` (plus this repo's tests/lint) |
 | \`attribution\` | none — no \`Co-Authored-By:\` trailers or "Generated with …" footers |
 
-See \`docs/playbooks/\` for the work-a-task and code-review loops.
+See \`trellis/playbooks/\` for the work-a-task and code-review loops.
 ${end}
 `;
 }

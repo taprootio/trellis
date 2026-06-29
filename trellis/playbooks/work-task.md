@@ -52,7 +52,7 @@ so `main` stays clean.
    see AGENTS.md). When the work lands, close the task out: move it to
    `completed/tasks/`, set `status: completed` + `completed_on`, regenerate
    (SPEC §4–§5).
-9. **Request a review.** Run `docs/playbooks/code-review.md` over the branch and
+9. **Request a review.** Run `trellis/playbooks/code-review.md` over the branch and
    capture its canonical JSON findings. Make it an **independent** pass — ideally a
    separate agent or session, or at minimum re-ground from scratch — since author
    self-review tends to rubber-stamp.
@@ -61,7 +61,7 @@ so `main` stays clean.
     remain. Keep the gates green.
 11. **Hand off for review.** Tell the user it's ready: the branch name, what
     shipped, the review outcome, and the push + PR commands (PR body via
-    `docs/playbooks/pr-draft.md`). Do **not** push or merge — that's the user's.
+    `trellis/playbooks/pr-draft.md`). Do **not** push or merge — that's the user's.
 
 ## Notes
 

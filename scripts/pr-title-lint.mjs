@@ -28,7 +28,7 @@ const { ok, errors } = lintPrTitle(title, cfg);
 if (!ok) {
   console.error(`PR title does not conform to the standard:\n  title: ${JSON.stringify(title)}`);
   for (const e of errors) console.error("  - " + e);
-  console.error("\nSee .github/pull_request_template.md / docs/playbooks/pr-draft.md.");
+  console.error("\nSee .github/pull_request_template.md / trellis/playbooks/pr-draft.md.");
   process.exit(1);
 }
 console.log(`PR title OK: ${title}`);

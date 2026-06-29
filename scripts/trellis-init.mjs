@@ -145,7 +145,7 @@ function report(targetRoot, summary, dryRun) {
   }
   if (!dryRun) {
     console.log(`Done. Next: add a task under ${summary.root}/active/, then \`npx trellis generate\`.`);
-    console.log(`Then enable branch protection so the \`backlog\` check gates merges — see docs/branch-protection.md.`);
+    console.log(`Then enable branch protection so the \`backlog\` check gates merges — see trellis/branch-protection.md.`);
   }
 }
 
