@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0030",
   "counts": {
-    "active": 9,
-    "completed": 20,
+    "active": 8,
+    "completed": 21,
     "removed": 0
   },
   "tasks": [
@@ -147,22 +147,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
-    },
-    {
-      "id": "TRL0029",
-      "title": "Importer — strip the source id prefix from imported titles",
-      "status": "active",
-      "milestone": "Beta",
-      "priority": "Medium",
-      "effort": 2,
-      "effortLabel": "Goldfish",
-      "effortEmoji": "🐠",
-      "depends_on": [
-        "TRL0021"
-      ],
-      "owner": null,
-      "collaborators": [],
-      "summary": "When an imported item's H1 begins with its own source id, drop that leading token so titles read cleanly (\"001 README Truth Pass\" → \"README Truth Pass\")."
     },
     {
       "id": "TRL0001",
@@ -496,6 +480,23 @@
       "owner": null,
       "collaborators": [],
       "summary": "Move the scaffolded playbooks and branch-protection guide under trellis/ so onboarding never writes into a repo's published docs/ directory.",
+      "completed_on": "2026-06-29"
+    },
+    {
+      "id": "TRL0029",
+      "title": "Importer — strip the source id prefix from imported titles",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 2,
+      "effortLabel": "Goldfish",
+      "effortEmoji": "🐠",
+      "depends_on": [
+        "TRL0021"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "When an imported item's H1 begins with its own source id, drop that leading token so titles read cleanly (\"001 README Truth Pass\" → \"README Truth Pass\").",
       "completed_on": "2026-06-29"
     }
   ]

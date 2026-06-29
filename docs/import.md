@@ -159,6 +159,17 @@ yields nothing (e.g. `completed_on` from a `Completed:` line, falling back to
 handle; `collaborators` is a list (an inline `[a, b]`, a `-` block, or a
 comma/semicolon-separated value), resolved the same way as `owner`.
 
+The `title` field accepts one extra option, `"stripIdPrefix": true`: when the
+resolved title begins with the item's **own** source id followed by a separator —
+whitespace, optionally around a single `. : - – —` — that leading token is dropped,
+so a foreign `# 001 README Truth Pass` (source id `001`) imports as `README Truth
+Pass`. The cleaned title also heads the rebuilt body. It is matched **exactly**
+against the source id and only when a real whitespace break follows, so id `04` never
+bites into a `047 …` title, an unbroken `001README` is left intact, and a genuinely
+number-leading title (`2024 Roadmap` under a different id) is untouched. Off by
+default; the [`taproot-ai-backlog`](../profiles/taproot-ai-backlog.json) profile
+(numeric-prefix filenames) sets it on.
+
 ### `remap` (optional)
 
 Resolve foreign values to the target's configured vocabulary, by field

@@ -13,7 +13,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | ID | Title | Owner | Priority | Effort |
 | --- | --- | --- | --- | --- |
 | [TRL0009](active/TRL0009.md) | Dogfood — onboard an existing repo end-to-end |  | Medium | 🐡 Trout · 3 |
-| [TRL0029](active/TRL0029.md) | Importer — strip the source id prefix from imported titles |  | Medium | 🐠 Goldfish · 2 |
 
 ### v1
 
