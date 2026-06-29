@@ -6,6 +6,7 @@ task and run `npm run backlog:readme`.
 <!-- BEGIN GENERATED:COMPLETED -->
 | ID | Title | Summary | Completed |
 | --- | --- | --- | --- |
+| [TRL0009](tasks/TRL0009.md) | Dogfood — onboard an existing repo end-to-end | Run `trellis init` against a second, non-trivial repo and work a real task through the loop to prove the formula travels. | 2026-06-29 |
 | [TRL0028](tasks/TRL0028.md) | trellis init — scaffold process docs into the Trellis home, not docs/ | Move the scaffolded playbooks and branch-protection guide under trellis/ so onboarding never writes into a repo's published docs/ directory. | 2026-06-29 |
 | [TRL0029](tasks/TRL0029.md) | Importer — strip the source id prefix from imported titles | When an imported item's H1 begins with its own source id, drop that leading token so titles read cleanly ("001 README Truth Pass" → "README Truth Pass"). | 2026-06-29 |
 | [TRL0014](tasks/TRL0014.md) | Bake branch protection + required backlog check into the recipe | Make a protected main with a required backlog-check gate part of standard Trellis onboarding — stated in the spec, documented as a forge-agnostic setup recipe, emitted by init, and pinned so a rename can't silently drop the gate. | 2026-06-28 |

@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0030",
   "counts": {
-    "active": 8,
-    "completed": 21,
+    "active": 7,
+    "completed": 22,
     "removed": 0
   },
   "tasks": [
@@ -44,28 +44,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a dependency graph and filtering by milestone, priority, and effort to the local viewer."
-    },
-    {
-      "id": "TRL0009",
-      "title": "Dogfood — onboard an existing repo end-to-end",
-      "status": "active",
-      "milestone": "Beta",
-      "priority": "Medium",
-      "effort": 3,
-      "effortLabel": "Trout",
-      "effortEmoji": "🐡",
-      "depends_on": [
-        "TRL0003",
-        "TRL0020",
-        "TRL0021",
-        "TRL0026",
-        "TRL0027",
-        "TRL0028",
-        "TRL0029"
-      ],
-      "owner": null,
-      "collaborators": [],
-      "summary": "Run `trellis init` against a second, non-trivial repo and work a real task through the loop to prove the formula travels."
     },
     {
       "id": "TRL0010",
@@ -246,6 +224,29 @@
       "collaborators": [],
       "summary": "Cleanly split the portable orchestration shape from repo-specific tech rules so the same loop works in any repo by reading a named conventions contract from its AGENTS.md.",
       "completed_on": "2026-06-26"
+    },
+    {
+      "id": "TRL0009",
+      "title": "Dogfood — onboard an existing repo end-to-end",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
+      "depends_on": [
+        "TRL0003",
+        "TRL0020",
+        "TRL0021",
+        "TRL0026",
+        "TRL0027",
+        "TRL0028",
+        "TRL0029"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Run `trellis init` against a second, non-trivial repo and work a real task through the loop to prove the formula travels.",
+      "completed_on": "2026-06-29"
     },
     {
       "id": "TRL0014",

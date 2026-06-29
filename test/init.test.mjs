@@ -84,6 +84,20 @@ test("scaffolds a fresh repo that the core validates clean", () => {
   }
 });
 
+test("init CLI tells import adopters to import before creating new tasks", () => {
+  const root = tempRepo();
+  try {
+    const { status, stdout } = runInit(root, ["--prefix", "DEMO"]);
+    assert.equal(status, 0);
+    assert.match(stdout, /For a fresh backlog, add a task/);
+    assert.match(stdout, /run `npx trellis import \.\.\.` before creating any new task/);
+    assert.match(stdout, /imported ids keep the first available range/);
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("scaffolds the branch-protection recipe and pins the required-check context (TRL0014)", () => {
   const root = tempRepo();
   try {

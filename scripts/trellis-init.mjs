@@ -144,7 +144,8 @@ function report(targetRoot, summary, dryRun) {
     for (const r of summary.reconcile) console.log(`    - ${r.file}: ${r.note}`);
   }
   if (!dryRun) {
-    console.log(`Done. Next: add a task under ${summary.root}/active/, then \`npx trellis generate\`.`);
+    console.log(`Done. For a fresh backlog, add a task under ${summary.root}/active/, then \`npx trellis generate\`.`);
+    console.log(`If you are importing an existing backlog, run \`npx trellis import ...\` before creating any new task so imported ids keep the first available range.`);
     console.log(`Then enable branch protection so the \`backlog\` check gates merges — see trellis/branch-protection.md.`);
   }
 }
