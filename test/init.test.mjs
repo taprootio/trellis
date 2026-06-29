@@ -72,8 +72,8 @@ test("scaffolds a fresh repo that the core validates clean", () => {
       "trellis/backlog.json",
       ".github/workflows/backlog.yml",
       ".github/pull_request_template.md",
-      "docs/playbooks/work-task.md",
-      "docs/branch-protection.md",
+      "trellis/playbooks/work-task.md",
+      "trellis/branch-protection.md",
       "AGENTS.md",
     ]) assert.ok(existsSync(join(root, rel)), `${rel} should exist`);
     assert.deepEqual(summary.warnings, [], "a fresh scaffold should produce no warnings");
@@ -90,8 +90,8 @@ test("scaffolds the branch-protection recipe and pins the required-check context
     applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
 
     // The recipe travels into the onboarded repo (copied verbatim like the playbooks).
-    assert.ok(existsSync(join(root, "docs/branch-protection.md")), "branch-protection.md is scaffolded");
-    const recipe = readFileSync(join(root, "docs/branch-protection.md"), "utf8");
+    assert.ok(existsSync(join(root, "trellis/branch-protection.md")), "branch-protection.md is scaffolded");
+    const recipe = readFileSync(join(root, "trellis/branch-protection.md"), "utf8");
     assert.match(recipe, /`backlog`/, "the recipe names the pinned check context");
     assert.match(recipe, /not `?Backlog Hygiene/, "the recipe warns to require the job name `backlog`, not the workflow display name");
     assert.match(recipe, /gh api/, "the recipe carries the GitHub gh api snippet");
@@ -106,7 +106,7 @@ test("scaffolds the branch-protection recipe and pins the required-check context
     assert.match(wf, /^ {4}name: backlog$/m, "the workflow job carries an explicit name: backlog");
 
     // The onboarded AGENTS block points at the recipe for enabling the gate.
-    assert.match(readFileSync(join(root, "AGENTS.md"), "utf8"), /docs\/branch-protection\.md/, "AGENTS points at the setup recipe");
+    assert.match(readFileSync(join(root, "AGENTS.md"), "utf8"), /trellis\/branch-protection\.md/, "AGENTS points at the setup recipe");
     assertCheckClean(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -446,7 +446,7 @@ test("the conventions contract travels into an onboarded repo without leaking Tr
     applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
 
     // The contract definition travels verbatim alongside the playbooks.
-    assert.ok(existsSync(join(root, "docs/playbooks/conventions.md")), "conventions.md should be scaffolded");
+    assert.ok(existsSync(join(root, "trellis/playbooks/conventions.md")), "conventions.md should be scaffolded");
 
     // The onboarded AGENTS.md is the *authoritative* per-repo contract: it declares
     // the seam points with this repo's package commands — never Trellis's own npm
@@ -463,12 +463,12 @@ test("the conventions contract travels into an onboarded repo without leaking Tr
     // AGENTS.md, and never mis-attribute Trellis's value to the reader's repo via
     // an indexical "this repo:" claim (which the verbatim copy would carry along).
     for (const rel of ["work-task.md", "code-review.md", "pr-draft.md", "conventions.md"]) {
-      const body = readFileSync(join(root, "docs/playbooks", rel), "utf8");
+      const body = readFileSync(join(root, "trellis/playbooks", rel), "utf8");
       assert.doesNotMatch(body, /this repo:/, `${rel} must not claim Trellis's value as the reader's ("this repo:")`);
       assert.doesNotMatch(body, /\bje\//, `${rel} must not carry Trellis's author branch prefix`);
       assert.doesNotMatch(body, /TRL(xxxx|\d)/, `${rel} must not bake in the Trellis id prefix as an example`);
     }
-    const wt = readFileSync(join(root, "docs/playbooks/work-task.md"), "utf8");
+    const wt = readFileSync(join(root, "trellis/playbooks/work-task.md"), "utf8");
     assert.match(wt, /`regenerate`/, "work-task names the regenerate seam");
     assert.match(wt, /`branch-naming`/, "work-task names the branch-naming seam");
     assert.match(wt, /see\s+AGENTS\.md/, "work-task defers to AGENTS.md for the seam value");

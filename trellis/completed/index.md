@@ -6,6 +6,7 @@ task and run `npm run backlog:readme`.
 <!-- BEGIN GENERATED:COMPLETED -->
 | ID | Title | Summary | Completed |
 | --- | --- | --- | --- |
+| [TRL0028](tasks/TRL0028.md) | trellis init — scaffold process docs into the Trellis home, not docs/ | Move the scaffolded playbooks and branch-protection guide under trellis/ so onboarding never writes into a repo's published docs/ directory. | 2026-06-29 |
 | [TRL0014](tasks/TRL0014.md) | Bake branch protection + required backlog check into the recipe | Make a protected main with a required backlog-check gate part of standard Trellis onboarding — stated in the spec, documented as a forge-agnostic setup recipe, emitted by init, and pinned so a rename can't silently drop the gate. | 2026-06-28 |
 | [TRL0024](tasks/TRL0024.md) | Drop the README "Next task ID"; make backlog.json the canonical source | Remove the redundant generated "Next task ID" section from the README and point the spec at backlog.json's nextId (plus the MCP next_id tool) as the single published source. | 2026-06-28 |
 | [TRL0025](tasks/TRL0025.md) | Git-derived task history and a materialized history.json | Derive a lightweight per-task history (who changed it, when, why) from git and materialize it as a non-gated history.json the future viewer can read without a git runtime. | 2026-06-28 |

@@ -40,22 +40,22 @@ export const RESOURCES = [
   {
     uri: "trellis://playbook/conventions", name: "playbook-conventions", title: "Conventions contract",
     description: "The per-repo conventions contract — the named seam points the universal loop reads from a repo's AGENTS.md.",
-    rel: "docs/playbooks/conventions.md", mimeType: "text/markdown",
+    rel: "trellis/playbooks/conventions.md", mimeType: "text/markdown",
   },
   {
     uri: "trellis://playbook/work-task", name: "playbook-work-task", title: "Playbook: work a task",
     description: "The work-a-task loop, as Markdown.",
-    rel: "docs/playbooks/work-task.md", mimeType: "text/markdown",
+    rel: "trellis/playbooks/work-task.md", mimeType: "text/markdown",
   },
   {
     uri: "trellis://playbook/code-review", name: "playbook-code-review", title: "Playbook: code review",
     description: "The code-review loop and its JSON output standard, as Markdown.",
-    rel: "docs/playbooks/code-review.md", mimeType: "text/markdown",
+    rel: "trellis/playbooks/code-review.md", mimeType: "text/markdown",
   },
   {
     uri: "trellis://playbook/pr-draft", name: "playbook-pr-draft", title: "Playbook: draft a PR",
     description: "The PR title/description draft loop, as Markdown.",
-    rel: "docs/playbooks/pr-draft.md", mimeType: "text/markdown",
+    rel: "trellis/playbooks/pr-draft.md", mimeType: "text/markdown",
   },
   {
     uri: "trellis://template/pull-request", name: "template-pull-request", title: "PR template",
@@ -98,19 +98,19 @@ export const PROMPTS = [
   {
     name: "work-task", title: "Work a task",
     description: "Take a Trellis task from active/ to ready-for-review by following the work-a-task loop.",
-    playbook: "docs/playbooks/work-task.md",
+    playbook: "trellis/playbooks/work-task.md",
     arguments: [{ name: "id", description: "task id to work, using this repo's configured id prefix and width", required: true }],
   },
   {
     name: "code-review", title: "Code review",
     description: "Review the current branch's work against the repo's conventions and emit the canonical JSON findings.",
-    playbook: "docs/playbooks/code-review.md",
+    playbook: "trellis/playbooks/code-review.md",
     arguments: [],
   },
   {
     name: "pr-draft", title: "Draft a PR",
     description: "Draft a copy-ready PR title and description that conform to the repo's PR template.",
-    playbook: "docs/playbooks/pr-draft.md",
+    playbook: "trellis/playbooks/pr-draft.md",
     arguments: [],
   },
 ];

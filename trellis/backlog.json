@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0030",
   "counts": {
-    "active": 10,
-    "completed": 19,
+    "active": 9,
+    "completed": 20,
     "removed": 0
   },
   "tasks": [
@@ -147,22 +147,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
-    },
-    {
-      "id": "TRL0028",
-      "title": "trellis init — scaffold process docs into the Trellis home, not docs/",
-      "status": "active",
-      "milestone": "Beta",
-      "priority": "Medium",
-      "effort": 3,
-      "effortLabel": "Trout",
-      "effortEmoji": "🐡",
-      "depends_on": [
-        "TRL0003"
-      ],
-      "owner": null,
-      "collaborators": [],
-      "summary": "Move the scaffolded playbooks and branch-protection guide under trellis/ so onboarding never writes into a repo's published docs/ directory."
     },
     {
       "id": "TRL0029",
@@ -496,6 +480,23 @@
       "collaborators": [],
       "summary": "Let `trellis init` report stale backlog guidance for the agent to rewrite, and add an opt-in, history-preserving retirement of the imported source tree.",
       "completed_on": "2026-06-28"
+    },
+    {
+      "id": "TRL0028",
+      "title": "trellis init — scaffold process docs into the Trellis home, not docs/",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
+      "depends_on": [
+        "TRL0003"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Move the scaffolded playbooks and branch-protection guide under trellis/ so onboarding never writes into a repo's published docs/ directory.",
+      "completed_on": "2026-06-29"
     }
   ]
 }

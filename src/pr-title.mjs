@@ -6,7 +6,7 @@
 // multi-item PR leads with the primary id and names the rest in the body, so the
 // lint only anchors on a single leading id and ignores whatever follows the
 // summary. Pure so the CLI wrapper (scripts/pr-title-lint.mjs) and `node --test`
-// both call it; see .github/pull_request_template.md / docs/playbooks/pr-draft.md.
+// both call it; see .github/pull_request_template.md / trellis/playbooks/pr-draft.md.
 
 export const MAX_TITLE_LENGTH = 72;
 
