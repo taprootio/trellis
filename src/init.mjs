@@ -51,8 +51,9 @@ const AGENTS_MARKERS = ["<!-- BEGIN TRELLIS -->", "<!-- END TRELLIS -->"];
 // tasksDir — never into `docs/`, which a repo's static-site generator often
 // publishes (TRL0028). They travel with the config, not the task tree, and the
 // generator (which scans only active/, completed/tasks/, removed/) ignores them.
-// The `.github/` files stay where forge convention requires. The source path and
-// scaffold destination are the same rel — this repo dogfoods the layout it emits.
+// The package ships these under templates/ so npm does not also include the live
+// generated backlog index at trellis/README.md. In a source checkout, fall back to
+// the canonical in-repo files so Trellis keeps dogfooding the layout it emits.
 const COPY_FILES = [
   `${CONFIG_DIR}/playbooks/conventions.md`,
   `${CONFIG_DIR}/playbooks/work-task.md`,
@@ -61,6 +62,13 @@ const COPY_FILES = [
   `${CONFIG_DIR}/branch-protection.md`,
   ".github/pull_request_template.md",
 ];
+
+function copySourcePath(sourceRoot, rel) {
+  const packaged = join(sourceRoot, "templates", rel);
+  if (existsSync(packaged)) return packaged;
+  const local = join(sourceRoot, rel);
+  return existsSync(local) ? local : null;
+}
 
 // The marker-based generated indexes (skeleton-then-filled), each paired with the
 // exact begin/end marker the core requires — the single source of truth shared by
@@ -350,8 +358,8 @@ function templateFiles(o, sourceRoot, root) {
   ];
   const warnings = [];
   for (const rel of COPY_FILES) {
-    const src = join(sourceRoot, rel);
-    if (existsSync(src)) files.push({ rel, content: readFileSync(src, "utf8") });
+    const src = copySourcePath(sourceRoot, rel);
+    if (src) files.push({ rel, content: readFileSync(src, "utf8") });
     else warnings.push(`source not found, skipped copy: ${rel}`);
   }
   return { files, warnings };

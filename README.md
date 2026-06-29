@@ -9,13 +9,13 @@ then browse the live backlog in [`trellis/README.md`](trellis/README.md).
 
 ## Onboard a repo
 
-`trellis init` scaffolds the Trellis layout into any repo — the config, a team
+`ai-trellis init` scaffolds the Trellis layout into any repo — the config, a team
 roster stub, the `trellis/` layout, the generated index, the CI check, an AGENTS.md
 backlog section, and the process playbooks — idempotently, without clobbering
 existing files:
 
 ```
-node scripts/trellis-init.mjs <target> --prefix ABC   # --dry-run to preview
+npx ai-trellis init <target> --prefix ABC   # --dry-run to preview
 ```
 
 It does not vendor the generator; the onboarded repo runs Trellis via the
@@ -23,32 +23,32 @@ package (the scaffolded CI calls `npx ai-trellis check`), which ships in TRL0010
 
 ## Import an existing backlog
 
-`trellis import` converts a backlog on a foreign schema into Trellis items in an
+`ai-trellis import` converts a backlog on a foreign schema into Trellis items in an
 already-initialized repo, driven by a declarative mapping — either a built-in
 **profile** (`--profile <name>`; run `--list-profiles`) or your own
 `--mapping <file.json>`. It is **dry-run by default** — preview the plan and the id
 map, then re-run with `--apply`:
 
 ```
-node scripts/trellis-import.mjs <source> --profile yaml-frontmatter --target .   # add --apply to write
+npx ai-trellis import <source> --profile yaml-frontmatter --target .   # add --apply to write
 ```
 
 Ids are assigned fresh-sequentially from the target's next id, colliding source
 ids are deduped, and `depends_on` is rewritten through the id map; the source tree
 is never modified and a real run leaves the backlog `--check`-green. To scaffold
 and import in one step on a fresh repo, use
-`trellis init --import <path> --profile <name>`. The mapping schema, the built-in
+`ai-trellis init --import <path> --profile <name>`. The mapping schema, the built-in
 profiles, and the full getting-started guide are in
 [`docs/import.md`](docs/import.md).
 
 ## Track task history
 
-`trellis history` reconstructs a per-task change log from git — who changed an
+`ai-trellis history` reconstructs a per-task change log from git — who changed an
 item, when, and why — surviving the active→completed move via `git log --follow`:
 
 ```
-node scripts/trellis-history.mjs <id>      # one task; omit <id> for the whole repo
-node scripts/trellis-history.mjs --write   # materialize trellis/history.json for a static viewer
+npx ai-trellis history <id>      # one task; omit <id> for the whole repo
+npx ai-trellis history --write   # materialize trellis/history.json for a static viewer
 ```
 
 Entries are `{ id, commit, date, author, subject, reason }`, newest-first, where
@@ -64,7 +64,7 @@ The backlog operations are also exposed as MCP tools, so any MCP-aware client
 regenerate, and read the history of tasks in a repo:
 
 ```
-node scripts/trellis-mcp.mjs --repo <path>   # serves over stdio; defaults to cwd
+npx ai-trellis mcp --repo <path>   # serves over stdio; defaults to cwd
 ```
 
 Tools: `list_tasks`, `get_task`, `next_id`, `create_task`, `move_task`,

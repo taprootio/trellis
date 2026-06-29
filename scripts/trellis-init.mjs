@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
 import { applyImport } from "../src/import.mjs";
+import { resolveRepoRoot } from "../src/cli.mjs";
 import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
 
 const HELP = `ai-trellis init — scaffold the Trellis backlog into a repo
@@ -245,7 +246,7 @@ if (flagErrors.length) {
   process.exit(2);
 }
 
-const targetRoot = resolve(target);
+const targetRoot = resolveRepoRoot(target);
 const dryRun = !!opts.dryRun;
 
 // --retire-source: a deliberate, standalone step run after the import is committed. It

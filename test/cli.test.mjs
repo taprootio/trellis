@@ -74,9 +74,10 @@ test("successful CLI reports advisory warnings before the final line on stdout",
       { cwd: root, encoding: "utf8" },
     );
     assert.equal(res.status, 0);
-    assert.equal(res.stderr, "");
-    const warningAt = res.stdout.indexOf("  warning:");
-    const finalAt = res.stdout.indexOf("Dry run");
+    assert.doesNotMatch(res.stderr, /Done\.|Dry run/, "the final success line should not be routed to stderr");
+    const lines = res.stdout.trimEnd().split("\n");
+    const warningAt = lines.findIndex((line) => line.startsWith("  warning:"));
+    const finalAt = lines.findIndex((line) => line === "Dry run — nothing written. Re-run with --apply to write.");
     assert.ok(warningAt !== -1, "expected import warnings in stdout");
     assert.ok(finalAt !== -1, "expected final dry-run line in stdout");
     assert.ok(warningAt < finalAt, "warnings should be grouped before the final line");
@@ -100,5 +101,26 @@ test("packaged pr-title uses the target repo vocabulary", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(other, { recursive: true, force: true });
+  }
+});
+
+test("package ships scaffold templates without the live backlog index", () => {
+  const cache = mkdtempSync(join(tmpdir(), "trellis-npm-cache-"));
+  try {
+    const out = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+      cwd: sourceRoot,
+      encoding: "utf8",
+      env: { ...process.env, npm_config_cache: cache },
+    });
+    const [{ files }] = JSON.parse(out);
+    const paths = files.map((f) => f.path);
+    assert.ok(paths.includes("docs/import.md"), "the README-linked import guide should ship");
+    assert.ok(paths.includes("templates/trellis/playbooks/work-task.md"), "playbook templates should ship");
+    assert.ok(paths.includes("templates/trellis/branch-protection.md"), "branch-protection template should ship");
+    assert.ok(paths.includes("templates/.github/pull_request_template.md"), "PR template should ship");
+    assert.equal(paths.includes("trellis/README.md"), false, "the live generated backlog index should not ship");
+    assert.equal(paths.some((p) => p.startsWith("trellis/active/")), false, "live backlog items should not ship");
+  } finally {
+    rmSync(cache, { recursive: true, force: true });
   }
 });

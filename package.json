@@ -5,16 +5,14 @@
   "description": "Trellis — a tool-agnostic toolkit for file-based backlogs; dogfoods its own conventions.",
   "bin": {
     "ai-trellis": "./scripts/trellis.mjs",
-    "trellis": "./scripts/trellis.mjs",
     "trellis-mcp": "./scripts/trellis-mcp.mjs"
   },
   "files": [
     "scripts/",
     "src/",
     "profiles/",
-    "trellis/playbooks/",
-    "trellis/branch-protection.md",
-    ".github/pull_request_template.md",
+    "templates/",
+    "docs/import.md",
     "README.md",
     "SPEC.md"
   ],

@@ -603,7 +603,7 @@ test("init --import --dry-run previews and writes nothing", () => {
     );
     assert.match(out, /Would scaffold Trellis/);
     assert.match(out, /Would then import from .* using profile yaml-frontmatter/);
-    assert.match(out, /trellis import --dry-run/, "points at the real import-plan preview");
+    assert.match(out, /ai-trellis import --dry-run/, "points at the real import-plan preview");
     assert.equal(existsSync(join(root, "trellis")), false, "a dry run writes no trellis/ tree");
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -6,9 +6,8 @@
 // below are package-relative; target repos are still resolved by each subcommand
 // from cwd / --target / --repo.
 
-import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const HELP = `ai-trellis — file-based backlog toolkit
@@ -52,14 +51,12 @@ if (!spec) {
 }
 
 const [script, ...prefixArgs] = spec;
-const res = spawnSync(process.execPath, [join(here, script), ...prefixArgs, ...args], {
-  stdio: "inherit",
-});
-if (res.error) {
-  console.error(`error: failed to run ${cmd}: ${res.error.message}`);
+const scriptPath = join(here, script);
+process.argv = [process.argv[0], scriptPath, ...prefixArgs, ...args];
+
+try {
+  await import(pathToFileURL(scriptPath).href);
+} catch (e) {
+  console.error(`error: failed to run ${cmd}: ${e && e.message ? e.message : String(e)}`);
   process.exit(1);
 }
-if (res.signal) {
-  process.kill(process.pid, res.signal);
-}
-process.exit(res.status ?? 1);

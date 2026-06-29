@@ -9,8 +9,9 @@
 // dependency-free on purpose (see SPEC.md §5 / the front-matter parser).
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { relative } from "node:path";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
+import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 
 const HELP = `ai-trellis generate/check — validate and regenerate Trellis artifacts
 
@@ -30,34 +31,28 @@ function parseArgs(argv) {
   const opts = { target: process.cwd(), check: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    const eq = a.indexOf("=");
-    const key = a.startsWith("--") && eq !== -1 ? a.slice(0, eq) : a;
-    const inline = a.startsWith("--") && eq !== -1 ? a.slice(eq + 1) : null;
-    const next = (flag) => {
-      const v = inline !== null ? inline : argv[++i];
-      if (v === undefined || v === "" || (inline === null && v.startsWith("-"))) {
-        console.error(`error: ${flag} requires a value`);
-        process.exit(2);
-      }
-      return v;
-    };
+    const { key, inline } = optionToken(a);
     switch (key) {
       case "-h": case "--help": opts.help = true; break;
       case "--check": opts.check = true; break;
-      case "--target": case "--repo": opts.target = next(key); break;
+      case "--target": case "--repo": {
+        const next = requiredValue(argv, i, inline, key);
+        opts.target = next.value;
+        i = next.index;
+        break;
+      }
       default:
-        if (a.startsWith("-")) { console.error(`Unknown flag: ${a}`); process.exit(2); }
-        console.error(`Unexpected argument: ${a}`);
-        process.exit(2);
+        if (a.startsWith("-")) usageError(`Unknown flag: ${a}`);
+        usageError(`Unexpected argument: ${a}`);
     }
   }
   return opts;
 }
 
 const opts = parseArgs(process.argv.slice(2));
-if (opts.help) { process.stdout.write(HELP); process.exit(0); }
+if (opts.help) showHelp(HELP);
 
-const repoRoot = resolve(opts.target);
+const repoRoot = resolveRepoRoot(opts.target);
 const isCheck = opts.check;
 const rel = (p) => relative(repoRoot, p);
 
@@ -67,7 +62,7 @@ function die(errors) {
 }
 
 const { cfg, warnings, errors: cfgErrors } = loadConfig(repoRoot);
-for (const w of warnings) console.log(`warning: ${w}`);
+for (const w of warnings) console.warn(`warning: ${w}`);
 if (cfgErrors.length) die(cfgErrors);
 
 const data = readBacklog(repoRoot, cfg);
