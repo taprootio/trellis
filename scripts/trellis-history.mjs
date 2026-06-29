@@ -11,14 +11,14 @@
 // lives in src/history.mjs so the MCP `history` tool shares it; this stays
 // dependency-free.
 
-import { resolve } from "node:path";
 import { loadConfig } from "../src/backlog.mjs";
+import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 import { deriveTaskHistory, deriveAllHistory, materializeHistory, HistoryError } from "../src/history.mjs";
 
-const HELP = `trellis history — git-derived per-task history
+const HELP = `ai-trellis history — git-derived per-task history
 
 Usage:
-  node scripts/trellis-history.mjs [<id>] [flags]
+  ai-trellis history [<id>] [flags]
 
 Flags:
   --repo <path>   repo root to derive from (default: cwd)
@@ -37,31 +37,31 @@ function parseArgs(argv) {
   let id;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    const eq = a.indexOf("=");
-    const key = a.startsWith("--") && eq !== -1 ? a.slice(0, eq) : a;
-    const inline = a.startsWith("--") && eq !== -1 ? a.slice(eq + 1) : null;
+    const { key, inline } = optionToken(a);
     // A value-taking flag must get a real value: not missing, not empty, and (for the
     // space-separated form) not the next flag — so `--out --json` errors instead of
     // silently swallowing `--json` as the path. Use `--out=<value>` to force an
     // unusual value that begins with `-`.
-    const next = (flag) => {
-      const v = inline !== null ? inline : argv[++i];
-      if (v === undefined || v === "" || (inline === null && v.startsWith("-"))) {
-        console.error(`error: ${flag} requires a value`);
-        process.exit(2);
-      }
-      return v;
-    };
     switch (key) {
       case "-h": case "--help": opts.help = true; break;
       case "--json": opts.json = true; break;
       case "--write": opts.write = true; break;
-      case "--repo": opts.repo = next("--repo"); break;
-      case "--out": opts.out = next("--out"); break;
+      case "--repo": case "--target": {
+        const next = requiredValue(argv, i, inline, key);
+        opts.repo = next.value;
+        i = next.index;
+        break;
+      }
+      case "--out": {
+        const next = requiredValue(argv, i, inline, "--out");
+        opts.out = next.value;
+        i = next.index;
+        break;
+      }
       default:
-        if (a.startsWith("-")) { console.error(`Unknown flag: ${a}`); process.exit(2); }
+        if (a.startsWith("-")) usageError(`Unknown flag: ${a}`);
         if (id === undefined) id = a;
-        else { console.error(`Unexpected extra argument: ${a}`); process.exit(2); }
+        else usageError(`Unexpected extra argument: ${a}`);
     }
   }
   return { id, opts };
@@ -93,9 +93,9 @@ function printAllHuman(tasks) {
 }
 
 const { id, opts } = parseArgs(process.argv.slice(2));
-if (opts.help) { process.stdout.write(HELP); process.exit(0); }
+if (opts.help) showHelp(HELP);
 
-const repoRoot = resolve(opts.repo || ".");
+const repoRoot = resolveRepoRoot(opts.repo);
 const { cfg, warnings, errors } = loadConfig(repoRoot);
 for (const w of warnings) console.warn(`warning: ${w}`);
 if (errors.length) { console.error(`error: config: ${errors.join("; ")}`); process.exit(2); }

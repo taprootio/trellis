@@ -16,12 +16,13 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
 import { applyImport } from "../src/import.mjs";
+import { resolveRepoRoot } from "../src/cli.mjs";
 import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
 
-const HELP = `trellis init — scaffold the Trellis backlog into a repo
+const HELP = `ai-trellis init — scaffold the Trellis backlog into a repo
 
 Usage:
-  node scripts/trellis-init.mjs [target] [flags]
+  ai-trellis init [target] [flags]
 
 Flags:
   --prefix <P>          id prefix (default: ${DEFAULTS.prefix})
@@ -30,7 +31,7 @@ Flags:
   --priorities <a,b,c>  ordered priorities, highest first (default: ${DEFAULTS.priorities.join(",")})
   --effort <1,2,3>      canonical effort values (default: ${DEFAULTS.effort.join(",")})
   --import <path>       after scaffolding, import an existing backlog at <path>
-  --profile <name>      source-mapping profile for --import (trellis import --list-profiles)
+  --profile <name>      source-mapping profile for --import (ai-trellis import --list-profiles)
   --mapping <file>      mapping file (JSON) for --import (alternative to --profile)
   --retire-source <p>   history-preservingly git-rm an imported source tree at <p>
                         (a separate, later step — see below; cannot combine with --import)
@@ -40,7 +41,7 @@ Flags:
 
 With --import, provide exactly one of --profile or --mapping; a relative <path>
 resolves against the target repo. --dry-run previews the scaffold without writing;
-preview the import plan itself with "trellis import --dry-run" on the initialized repo.
+preview the import plan itself with "ai-trellis import --dry-run" on the initialized repo.
 
 --retire-source removes the old source tree once the import is green and committed:
 it stages a "git rm -r <p>" (history preserved) and leaves the deletion for you to
@@ -135,7 +136,7 @@ function report(targetRoot, summary, dryRun) {
   line("skipped", summary.skipped);
   // Remaining warnings are benign (e.g. a missing copy source) — the scaffold
   // still completed, so they do not change the exit code.
-  for (const w of summary.warnings) console.warn(`  warning: ${w}`);
+  for (const w of summary.warnings) console.log(`  warning: ${w}`);
   // Reconciliation checklist (TRL0027): stale backlog guidance for the agent to
   // rewrite. Advisory and report-only — init never edited these — so, like warnings,
   // it does not affect the exit code.
@@ -144,7 +145,7 @@ function report(targetRoot, summary, dryRun) {
     for (const r of summary.reconcile) console.log(`    - ${r.file}: ${r.note}`);
   }
   if (!dryRun) {
-    console.log(`Done. Next: add a task under ${summary.root}/active/, then \`npx trellis generate\`.`);
+    console.log(`Done. Next: add a task under ${summary.root}/active/, then \`npx ai-trellis generate\`.`);
     console.log(`Then enable branch protection so the \`backlog\` check gates merges — see trellis/branch-protection.md.`);
   }
 }
@@ -199,7 +200,7 @@ function reportImport(targetRoot, summary) {
     console.log("  id map:");
     for (const m of summary.idMap) console.log(`    ${m.sourceId} (${m.sourceFile}) → ${m.newId}`);
   }
-  for (const w of summary.warnings) console.warn(`  warning: ${w}`);
+  for (const w of summary.warnings) console.log(`  warning: ${w}`);
   console.log(`Done. Review ${summary.root}/, then commit.`);
 }
 
@@ -245,7 +246,7 @@ if (flagErrors.length) {
   process.exit(2);
 }
 
-const targetRoot = resolve(target);
+const targetRoot = resolveRepoRoot(target);
 const dryRun = !!opts.dryRun;
 
 // --retire-source: a deliberate, standalone step run after the import is committed. It
@@ -274,7 +275,7 @@ if (opts.import) {
     // misleading plan here against a non-existent backlog.
     const via = opts.profile ? `profile ${opts.profile}` : `mapping ${opts.mapping}`;
     console.log(`Would then import from ${importSource} using ${via}.`);
-    console.log("Re-run without --dry-run to scaffold and import, or run `trellis import --dry-run` on the initialized repo to preview the import plan.");
+    console.log("Re-run without --dry-run to scaffold and import, or run `ai-trellis import --dry-run` on the initialized repo to preview the import plan.");
     process.exit(0);
   }
   const { summary: imp } = applyImport(targetRoot, importSource, mapping, { dryRun: false });

@@ -16,14 +16,14 @@ schema reference](#the-mapping-schema).
 If the repo is not yet a Trellis backlog, scaffold and import in one step:
 
 ```
-npx trellis init --import planning/old-backlog --profile yaml-frontmatter
+npx ai-trellis init --import planning/old-backlog --profile yaml-frontmatter
 ```
 
 This scaffolds the Trellis layout (config, `trellis/` tree, generated indexes, CI
 check, AGENTS block, playbooks), then imports the backlog at the given path. A
 relative `<path>` resolves against the repo being onboarded. Add `--dry-run` to
-preview the scaffold without writing; to preview the import plan itself (counts, id
-map, warnings), run `trellis import --dry-run` once the repo is initialized.
+preview the scaffold without writing; to preview the import plan itself (counts,
+id map, warnings), run `ai-trellis import --dry-run` once the repo is initialized.
 
 Use `--mapping <file.json>` instead of `--profile <name>` to supply your own
 mapping. Provide exactly one of the two.
@@ -36,11 +36,11 @@ map, and per-field warnings without writing — so you can review before committ
 to a write:
 
 ```
-npx trellis import planning/old-backlog --profile yaml-frontmatter            # preview
-npx trellis import planning/old-backlog --profile yaml-frontmatter --apply    # write
+npx ai-trellis import planning/old-backlog --profile yaml-frontmatter            # preview
+npx ai-trellis import planning/old-backlog --profile yaml-frontmatter --apply    # write
 ```
 
-`trellis import --list-profiles` lists the built-in profiles. The target defaults
+`ai-trellis import --list-profiles` lists the built-in profiles. The target defaults
 to `.`; pass `--target <dir>` to import into another repo.
 
 ### Over MCP
@@ -66,7 +66,7 @@ failure**, so a refused import leaves the target exactly as it was.
 Importing copies items into Trellis but leaves two things for you to finish the
 adoption — both deliberately **report-first**, so nothing author-written is lost.
 
-**Reconcile stale guidance.** Every `trellis init` run scans a small set of root
+**Reconcile stale guidance.** Every `ai-trellis init` run scans a small set of root
 guidance files (`AGENTS.md`, `AI_GUIDELINES.md`, `CLAUDE.md`) for pre-Trellis backlog
 instructions — an "AI Backlog" section, a reference to the old backlog path — and
 prints them as a `reconcile` checklist:
@@ -87,8 +87,8 @@ imported, **reviewed, and committed** the result, the legacy tree is still on di
 you're satisfied, retire it history-preservingly:
 
 ```
-npx trellis init --retire-source planning/old-backlog --dry-run   # list what would go
-npx trellis init --retire-source planning/old-backlog             # stage the removal
+npx ai-trellis init --retire-source planning/old-backlog --dry-run   # list what would go
+npx ai-trellis init --retire-source planning/old-backlog             # stage the removal
 ```
 
 This runs `git rm -r` on the path — git keeps the files' history — and **stages** the
