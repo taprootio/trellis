@@ -35,6 +35,9 @@
 // An <extractor> is { from: "yaml", key } | { from:"inline"|"header", label }
 //   | { from:"h1" } | { from:"filename", pattern? } | { from:"const", value },
 // each optionally carrying { fallback: <extractor> } and { list: true }.
+// The `title` field additionally honours { stripIdPrefix: true }: a leading token equal
+// to the item's source id (plus an optional `. : - – —` and whitespace) is dropped from
+// the stored title (TRL0029); it is set on the numeric-prefix profiles, off elsewhere.
 
 import { readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { join, relative, dirname, isAbsolute } from "node:path";
@@ -137,6 +140,23 @@ function matchGroup(s, pattern) {
   try { re = new RegExp(pattern); } catch { return undefined; }
   const m = String(s).match(re);
   return m ? (m[1] ?? m[0]) : undefined;
+}
+
+// Drop a leading source-id token from an imported title (TRL0029). When `enabled` and
+// the title begins with the item's OWN source id followed by a separator — whitespace,
+// optionally around a single `. : - – —` — strip that token, so a foreign
+// "001 README Truth Pass" reads as "README Truth Pass". Conservative by construction:
+// the separator's trailing whitespace is REQUIRED, so the matched run is the whole id
+// plus a real break — id "04" never bites into "047 Foo", "001README" (no break) is
+// left intact, and "001 .NET" keeps its dot. Only the item's resolved source id is
+// matched, so a genuinely number-leading title ("2024 Roadmap" under a different id) is
+// never touched; a title that is nothing but the id is returned unchanged, never blanked.
+function stripLeadingId(title, sourceId, enabled) {
+  if (!enabled || !title) return title;
+  const id = String(sourceId == null ? "" : sourceId).trim();
+  if (!id) return title;
+  const stripped = title.replace(new RegExp(`^${escRe(id)}[ \\t]*[.:–—-]?[ \\t]+`), "").trim();
+  return stripped || title;
 }
 
 // Case-insensitive remap lookup → the mapped value (trimmed), or the input unchanged.
@@ -304,7 +324,8 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
     const ierr = (m) => errors.push(`${src.rel}: ${m}`);
     const isActive = src.status === "active";
 
-    const title = runExtractor(fields.title || { from: "h1" }, ctx);
+    const titleEx = fields.title || { from: "h1" };
+    const title = stripLeadingId(runExtractor(titleEx, ctx), sourceId, titleEx.stripIdPrefix === true);
     if (!title) ierr("could not derive a `title`");
 
     // Enums: active items must resolve (the core validates them); on closed items

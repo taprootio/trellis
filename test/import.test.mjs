@@ -838,3 +838,64 @@ test("taproot profile imports a header-less, size-only fixture: git-dated, Size�
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ----- TRL0029: strip the source-id prefix from imported titles -----------------
+// A fixture whose H1s lead with the filename's numeric id (the Taproot friction the
+// real fixtures were sanitized of), plus one genuinely number-leading title (a year)
+// that must survive. The strip is opt-in via the title field's `stripIdPrefix`.
+const idPrefixSrc = join(fixtures, "id-prefixed-titles");
+const itemByFile = (plan, base) => plan.items.find((i) => i.sourceRel.endsWith(base));
+const stripMapping = (on) => ({
+  sources: { active: { dirs: ["active"], file: "*.md" } },
+  fields: {
+    id: { from: "filename", pattern: "^(\\d+)" },
+    title: on ? { from: "h1", stripIdPrefix: true } : { from: "h1" },
+  },
+  defaults: { milestone: "Alpha", priority: "Low", effort: 1 },
+});
+
+test("stripIdPrefix strips a leading source-id token (space and punctuation separators), end to end", () => {
+  const root = initTarget();
+  try {
+    const plan = planImport(root, idPrefixSrc, stripMapping(true));
+    assert.deepEqual(plan.errors, [], `unexpected plan errors: ${JSON.stringify(plan.errors)}`);
+
+    const readme = itemByFile(plan, "001-readme-truth-pass.md");
+    assert.equal(readme.fm.title, "README Truth Pass", "space-separated id prefix stripped");
+    assert.equal(readme.body.split("\n")[0], `# ${readme.newId} — README Truth Pass`, "rebuilt body heads with the cleaned title");
+    assert.doesNotMatch(readme.body, /001 README Truth Pass/, "the numbered H1 does not survive in the body");
+
+    const design = itemByFile(plan, "002-design-espalier.md");
+    assert.equal(design.fm.title, "Design the Espalier MCP server", "punctuation separator (002.) stripped");
+
+    // Applying the plan stays --check-green and the stripped title persists to disk.
+    const { summary } = applyImport(root, idPrefixSrc, stripMapping(true));
+    assert.deepEqual(summary.errors, [], `unexpected apply errors: ${JSON.stringify(summary.errors)}`);
+    assert.equal(fm(root, readme.targetRel).title, "README Truth Pass");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("stripIdPrefix matches only the item's own id — a genuinely number-leading title is left intact", () => {
+  const root = initTarget();
+  try {
+    const plan = planImport(root, idPrefixSrc, stripMapping(true));
+    const roadmap = itemByFile(plan, "047-roadmap.md");
+    assert.equal(roadmap.fm.title, "2024 roadmap themes", "id 047 must not strip the leading year 2024");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("stripIdPrefix is opt-in — without the flag the numbered title is kept verbatim", () => {
+  const root = initTarget();
+  try {
+    const plan = planImport(root, idPrefixSrc, stripMapping(false));
+    assert.equal(itemByFile(plan, "001-readme-truth-pass.md").fm.title, "001 README Truth Pass");
+    assert.equal(itemByFile(plan, "002-design-espalier.md").fm.title, "002. Design the Espalier MCP server");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
