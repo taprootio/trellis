@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0028",
   "counts": {
-    "active": 9,
-    "completed": 18,
+    "active": 8,
+    "completed": 19,
     "removed": 0
   },
   "tasks": [
@@ -145,23 +145,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
-    },
-    {
-      "id": "TRL0027",
-      "title": "trellis init — retire and reconcile a legacy backlog on adopt",
-      "status": "active",
-      "milestone": "Beta",
-      "priority": "Medium",
-      "effort": 3,
-      "effortLabel": "Trout",
-      "effortEmoji": "🐡",
-      "depends_on": [
-        "TRL0003",
-        "TRL0021"
-      ],
-      "owner": null,
-      "collaborators": [],
-      "summary": "Let `trellis init` report stale backlog guidance for the agent to rewrite, and add an opt-in, history-preserving retirement of the imported source tree."
     },
     {
       "id": "TRL0001",
@@ -460,6 +443,24 @@
       "owner": null,
       "collaborators": [],
       "summary": "Give the importer a git-date fallback for legacy close-dates and a Size→effort mapping, flagging any estimated effort so historical values stay honest.",
+      "completed_on": "2026-06-28"
+    },
+    {
+      "id": "TRL0027",
+      "title": "trellis init — retire and reconcile a legacy backlog on adopt",
+      "status": "completed",
+      "milestone": "Beta",
+      "priority": "Medium",
+      "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
+      "depends_on": [
+        "TRL0003",
+        "TRL0021"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Let `trellis init` report stale backlog guidance for the agent to rewrite, and add an opt-in, history-preserving retirement of the imported source tree.",
       "completed_on": "2026-06-28"
     }
   ]

@@ -12,7 +12,8 @@
 // future MCP tool (TRL0004) can share it.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, isAbsolute } from "node:path";
+import { execFileSync } from "node:child_process";
 import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, loadConfig, loadRoster, readBacklog, generateArtifacts, attachEffortScale } from "./backlog.mjs";
 
 // The config home is fixed at `trellis/backlog.config.json` (CONFIG_DIR),
@@ -93,6 +94,17 @@ export function validateOptions(o) {
     errors.push("`--effort` must be a non-empty list of numbers");
   }
   return errors;
+}
+
+// Whether the init CLI should interactively prompt for the missing vocabulary
+// (prefix/milestones). It must NOT prompt for a dry run, a retire-only run, or a
+// non-interactive stdin — and only when something is actually missing. The retire check
+// is keyed on the flag's PRESENCE, not a truthy value: a valueless `--retire-source`
+// (a usage error) must not prompt for scaffold vocabulary it will never use before it
+// reports the missing path. Pure (takes isTTY) so it is unit-testable without a terminal.
+export function shouldPromptVocab(opts, isTTY) {
+  if (opts.dryRun || "retireSource" in opts || !isTTY) return false;
+  return !opts.prefix || !opts.milestones;
 }
 
 // Derive scaffold options from an existing (already-validated) config, so a kept
@@ -337,6 +349,65 @@ function templateFiles(o, sourceRoot, root) {
   return { files, warnings };
 }
 
+// -------------------------------------------------------- reconciliation
+// Root guidance files an onboarding agent typically keeps backlog instructions in.
+// Bounded on purpose: a precise, low-false-positive scan beats a broad one, since
+// the output is a checklist a human acts on (TRL0027).
+const RECONCILE_FILES = ["AGENTS.md", "AI_GUIDELINES.md", "CLAUDE.md"];
+
+// Strip Trellis's own appended block from AGENTS.md so the scan never flags the
+// guidance init itself just wrote — only the author's surrounding prose is examined.
+function stripTrellisBlock(text) {
+  const [begin, end] = AGENTS_MARKERS;
+  const bi = text.indexOf(begin);
+  if (bi === -1) return text;
+  const ei = text.indexOf(end, bi);
+  if (ei === -1) return text;
+  return text.slice(0, bi) + text.slice(ei + end.length);
+}
+
+// READ-ONLY scan for stale, pre-Trellis backlog guidance the agent should rewrite
+// by hand. `init` reports; it never edits or deletes author prose (TRL0027). Returns
+// [{ file, note }]. `root` is the effective backlog root; `importSource` (when set) is
+// the repo-relative path just imported — a reference to it is the strongest signal a
+// doc points at the now-retired backlog. Precision over recall: a false positive is
+// only a line the agent skips.
+export function scanReconcile(targetRoot, { root = DEFAULT_TASKS_DIR, importSource } = {}) {
+  const notes = [];
+  const headingRe = /^[ \t]*#{1,6}[ \t]+(.*\bbacklog\b.*)$/im;
+  for (const file of RECONCILE_FILES) {
+    const abs = join(targetRoot, file);
+    if (!existsSync(abs)) continue;
+    const authorText = file === "AGENTS.md" ? stripTrellisBlock(readFileSync(abs, "utf8")) : readFileSync(abs, "utf8");
+
+    // (a) A backlog-ish heading in author prose that doesn't already point at the new
+    // root — likely guidance still describing the old backlog. Suppress once the
+    // author content references `<root>/`, i.e. it has already been reconciled.
+    const m = authorText.match(headingRe);
+    if (m && !authorText.includes(`${root}/`)) {
+      notes.push({ file, note: `has a "${m[1].trim()}" section that looks like pre-Trellis backlog guidance — rewrite it to point at ${root}/ (init only appends its own block; it won't touch this)` });
+    }
+
+    // (b) A reference to the just-imported source path — the doc names the backlog
+    // location that import copied out of and --retire-source can now remove.
+    if (importSource && authorText.includes(importSource)) {
+      notes.push({ file, note: `references the imported backlog path "${importSource}" — update or remove that reference now that items live under ${root}/` });
+    }
+  }
+  return notes;
+}
+
+// The just-imported source as a repo-relative path, or undefined when no --import was
+// given or the source sits outside the repo (it can't be named as a repo path then,
+// so signal (b) above doesn't apply).
+function importSourceRel(targetRoot, importOpt) {
+  if (!importOpt) return undefined;
+  const abs = isAbsolute(importOpt) ? importOpt : join(targetRoot, importOpt);
+  const rel = relative(targetRoot, abs);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return undefined;
+  return rel;
+}
+
 // ----------------------------------------------------------------- plan
 // Compute the per-file actions without touching disk. `action` is one of
 // create | skip | append (append is AGENTS.md only). force turns skip → create.
@@ -390,7 +461,12 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
     }
   }
 
-  return { options: o, resolved, actions, warnings, root };
+  // Read-only reconciliation scan (TRL0027): stale backlog guidance for the agent to
+  // rewrite by hand. Advisory — kept separate from `warnings` (scaffold mechanics) and
+  // from `errors` (it never blocks).
+  const reconcile = scanReconcile(targetRoot, { root, importSource: importSourceRel(targetRoot, opts.import) });
+
+  return { options: o, resolved, actions, warnings, root, reconcile };
 }
 
 // ---------------------------------------------------------------- apply
@@ -400,12 +476,13 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false } = {}, so
   // `errors` is fatal (the run did not produce a --check-green scaffold);
   // `warnings` is benign (e.g. a missing copy source). The CLI keys its exit code
   // and "Refused" banner off `errors`, never off `warnings`.
-  const summary = { created: [], skipped: [], appended: [], generated: [], warnings: [], errors: [] };
+  const summary = { created: [], skipped: [], appended: [], generated: [], reconcile: [], warnings: [], errors: [] };
 
   // planScaffold only reads, so the target stays untouched through every check
   // below — a rejected run leaves nothing behind. It also resolves the options
   // (no need to resolve again here).
-  const { options, resolved, actions, warnings, root } = planScaffold(targetRoot, opts, sourceRoot);
+  const { options, resolved, actions, warnings, root, reconcile } = planScaffold(targetRoot, opts, sourceRoot);
+  summary.reconcile = reconcile; // advisory, populated even on a refusal (the CLI only prints it on success)
   const GENERATED = generatedFiles(root); // artifact rel-paths under the effective backlog root
   summary.root = root; // surfaced so the CLI can point at the actual scaffold root
 
@@ -466,4 +543,86 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false } = {}, so
   }
 
   return { options, summary };
+}
+
+// --------------------------------------------------------- retire source
+// Run git rooted at repoRoot with an arg array (NO shell). Mirrors src/history.mjs:
+// capture stderr so the caller can classify a failure; never inherit it.
+function git(repoRoot, args) {
+  return execFileSync("git", ["-C", repoRoot, ...args], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+// First line of the most useful diagnostic from a failed git call.
+function gitErr(e) {
+  const s = (e && e.stderr ? String(e.stderr) : e && e.message ? e.message : String(e)).trim();
+  return s.split("\n")[0] || "git error";
+}
+
+// History-preserving retirement of an imported source tree (TRL0027). Stages a
+// `git rm -r` of <sourcePath> and leaves the deletion for the user to review and
+// commit — it never creates a commit, mirroring how scaffold/import leave changes for
+// review. Deliberately separate from import: run it as a late step once the import is
+// green and committed, so the source tree is intact if anything rolls back.
+//
+// Refuses (writes nothing) unless the path is inside the repo, exists, the repo is a
+// git work tree, and the path is git-tracked — a history-preserving removal needs a
+// tracked path (git keeps the file's history after the staged deletion is committed),
+// and an untracked path has no history to preserve. `dryRun` lists the tracked files
+// without touching git. Returns { summary: { path, removed, errors, warnings } }.
+export function retireSource(targetRoot, sourcePath, { dryRun = false } = {}) {
+  const summary = { path: null, removed: [], errors: [], warnings: [] };
+  if (!sourcePath || !String(sourcePath).trim()) {
+    summary.errors.push("--retire-source requires a path");
+    return { summary };
+  }
+  const abs = isAbsolute(sourcePath) ? sourcePath : join(targetRoot, sourcePath);
+  const rel = relative(targetRoot, abs);
+  // Stay inside the repo — never `git rm` a path outside the tree we were pointed at,
+  // and never the repo root itself (empty rel).
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    summary.errors.push(`refusing to retire "${sourcePath}" — it is outside the repo (or is the repo root)`);
+    return { summary };
+  }
+  summary.path = rel;
+  if (!existsSync(abs)) {
+    summary.errors.push(`nothing to retire at "${rel}" (path does not exist)`);
+    return { summary };
+  }
+  // Must be a git work tree — retirement is history-preserving, so it needs git.
+  try {
+    if (git(targetRoot, ["rev-parse", "--is-inside-work-tree"]).trim() !== "true") throw new Error("not a work tree");
+  } catch (e) {
+    summary.errors.push(e && e.code === "ENOENT" ? "git is not available on PATH" : `not a git work tree: ${targetRoot}`);
+    return { summary };
+  }
+  // The path must be tracked: `ls-files` lists exactly the tracked files under <rel>.
+  // An untracked source has no history to preserve, and `git rm` would fail anyway.
+  let tracked;
+  try {
+    tracked = git(targetRoot, ["ls-files", "-z", "--", rel]).split("\0").filter(Boolean);
+  } catch (e) {
+    summary.errors.push(`git ls-files failed: ${gitErr(e)}`);
+    return { summary };
+  }
+  if (!tracked.length) {
+    summary.errors.push(`"${rel}" is not tracked by git — nothing to retire (commit the import first; a history-preserving removal needs a tracked path)`);
+    return { summary };
+  }
+  if (dryRun) {
+    summary.removed = tracked;
+    return { summary };
+  }
+  // `git rm -r` stages the deletion (index + working tree); the user reviews and commits.
+  try {
+    git(targetRoot, ["rm", "-r", "-q", "--", rel]);
+  } catch (e) {
+    summary.errors.push(`git rm failed: ${gitErr(e)}`);
+    return { summary };
+  }
+  summary.removed = tracked;
+  return { summary };
 }

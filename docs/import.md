@@ -61,6 +61,42 @@ failure**, so a refused import leaves the target exactly as it was.
 - **A real run leaves the backlog `--check`-green**, or rolls back to the
   pre-import state if anything fails.
 
+### After adopting: reconcile guidance, then retire the source
+
+Importing copies items into Trellis but leaves two things for you to finish the
+adoption — both deliberately **report-first**, so nothing author-written is lost.
+
+**Reconcile stale guidance.** Every `trellis init` run scans a small set of root
+guidance files (`AGENTS.md`, `AI_GUIDELINES.md`, `CLAUDE.md`) for pre-Trellis backlog
+instructions — an "AI Backlog" section, a reference to the old backlog path — and
+prints them as a `reconcile` checklist:
+
+```
+  reconcile (1) — pre-Trellis backlog guidance to rewrite by hand (init left these untouched):
+    - AI_GUIDELINES.md: has a "AI Backlog" section that looks like pre-Trellis backlog guidance — rewrite it to point at trellis/
+```
+
+`init` **only ever reports** here — it appends its own marked block and never edits or
+deletes your prose. The surgical rewrite (point the section at `trellis/`, drop the old
+field names) is the onboarding agent's job; the checklist just says where to look. The
+scan skips Trellis's own appended block and any section that already points at the new
+root, so it won't flag guidance you've already migrated.
+
+**Retire the old source tree.** The importer never touches the source, so after you have
+imported, **reviewed, and committed** the result, the legacy tree is still on disk. Once
+you're satisfied, retire it history-preservingly:
+
+```
+npx trellis init --retire-source planning/old-backlog --dry-run   # list what would go
+npx trellis init --retire-source planning/old-backlog             # stage the removal
+```
+
+This runs `git rm -r` on the path — git keeps the files' history — and **stages** the
+deletion for you to review (`git status`) and commit. It does not scaffold, import, or
+commit, and it **cannot be combined with `--import`**: retirement is a separate, later
+step so the source is intact if an import ever rolls back. The path must be inside the
+repo and already tracked by git (commit the import first).
+
 ## The mapping schema
 
 A mapping is a JSON object. A profile is the same object shipped under
