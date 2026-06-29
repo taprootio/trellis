@@ -842,3 +842,30 @@ test("--retire-source does not swallow a following flag as its path", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("--retire-source does not consume a short option (-h) as its path", () => {
+  const root = gitRepo();
+  try {
+    // The worst case: a tracked file literally named "-h". The parser must never treat it
+    // as the retire path just because it followed --retire-source.
+    writeFileSync(join(root, "-h"), "do not delete me\n");
+    git(root, ["add", "-A"]);
+    git(root, ["commit", "-q", "-m", "add a file named -h"]);
+
+    // -h is the help flag, not a path: help wins and nothing is retired.
+    const h = runInit(root, ["--retire-source", "-h"]);
+    assert.equal(h.status, 0, "-h shows help and exits 0");
+    assert.match(h.stdout, /--retire-source/, "help text is printed");
+    assert.ok(existsSync(join(root, "-h")), "the tracked '-h' file is untouched");
+    assert.equal(git(root, ["status", "--porcelain"]).trim(), "", "nothing is staged");
+
+    // A non-help short option is an unknown flag → usage error, still no retire.
+    const x = runInit(root, ["--retire-source", "-x"]);
+    assert.equal(x.status, 2, "-x is rejected as an unknown flag");
+    assert.match(x.stderr, /Unknown flag/);
+    assert.ok(existsSync(join(root, "-h")), "still untouched");
+    assert.equal(git(root, ["status", "--porcelain"]).trim(), "", "still nothing staged");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

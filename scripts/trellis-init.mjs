@@ -60,14 +60,15 @@ function parseArgs(argv) {
     const key = a.startsWith("--") && eq !== -1 ? a.slice(0, eq) : a;
     const inline = a.startsWith("--") && eq !== -1 ? a.slice(eq + 1) : null;
     // Read a flag's value. `--flag=value` always uses the inline value; with the space
-    // form, a following long-option token (`--x`) means the value was OMITTED — do not
-    // swallow it. So `--retire-source --dry-run` is a missing path (caught as a usage
-    // error) instead of a path literally named "--dry-run" with --dry-run silently lost,
-    // which would turn an intended preview into a real staged `git rm`.
+    // form, a following OPTION-looking token (anything starting with `-`, e.g. `--dry-run`
+    // or `-h`) means the value was OMITTED — do not swallow it. So `--retire-source -h` is
+    // a missing path (help wins / a clean usage error), never a path literally named "-h"
+    // with the real intent silently dropped onto a staged `git rm`. To pass a value that
+    // genuinely starts with `-`, use the inline form (`--flag=-x`) or, for a path, `./-x`.
     const next = () => {
       if (inline !== null) return inline;
       const v = argv[i + 1];
-      if (v === undefined || v.startsWith("--")) return undefined;
+      if (v === undefined || v.startsWith("-")) return undefined;
       i++;
       return v;
     };
