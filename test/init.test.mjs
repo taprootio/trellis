@@ -518,6 +518,14 @@ test("a kept config's custom tasksDir relocates the scaffolded tree, not the def
     assert.ok(existsSync(join(root, "planning/backlog.json")), "artifacts land under tasksDir");
     assert.equal(existsSync(join(root, "trellis/README.md")), false, "nothing is scaffolded at the default root");
     assert.ok(existsSync(join(root, "trellis/backlog.config.json")), "the config home stays fixed at trellis/");
+    // The playbooks and branch-protection recipe travel with the FIXED config home
+    // (TRL0028), independent of tasksDir — they must NOT follow the relocated tree.
+    // COPY_FILES is pinned at trellis/, decoupled from the task root; this guards a
+    // future refactor that re-derived it from `root` against a silent regression.
+    assert.ok(existsSync(join(root, "trellis/playbooks/work-task.md")), "playbooks scaffold at the fixed config home, not under tasksDir");
+    assert.ok(existsSync(join(root, "trellis/branch-protection.md")), "the branch-protection recipe scaffolds at the fixed config home");
+    assert.equal(existsSync(join(root, "planning/playbooks/work-task.md")), false, "playbooks are not scaffolded under the relocated task root");
+    assert.equal(existsSync(join(root, "planning/branch-protection.md")), false, "the recipe is not scaffolded under the relocated task root");
     const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
     assert.match(agents, /`planning\/\{active/, "the AGENTS block reflects the configured root");
     assert.match(agents, /`planning\/backlog\.json`/, "the AGENTS generated-artifacts bullet names the root-relative paths");
