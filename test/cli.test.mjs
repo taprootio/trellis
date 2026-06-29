@@ -16,6 +16,14 @@ const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cliScript = join(sourceRoot, "scripts", "trellis.mjs");
 const legacySrc = join(sourceRoot, "test", "fixtures", "legacy-backlog");
 const tempRepo = () => mkdtempSync(join(tmpdir(), "trellis-cli-"));
+const TEMPLATE_PAIRS = [
+  ["trellis/playbooks/conventions.md", "templates/trellis/playbooks/conventions.md"],
+  ["trellis/playbooks/work-task.md", "templates/trellis/playbooks/work-task.md"],
+  ["trellis/playbooks/code-review.md", "templates/trellis/playbooks/code-review.md"],
+  ["trellis/playbooks/pr-draft.md", "templates/trellis/playbooks/pr-draft.md"],
+  ["trellis/branch-protection.md", "templates/trellis/branch-protection.md"],
+  [".github/pull_request_template.md", "templates/.github/pull_request_template.md"],
+];
 
 function assertCheckClean(root) {
   const { cfg, errors } = loadConfig(root);
@@ -101,6 +109,16 @@ test("packaged pr-title uses the target repo vocabulary", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(other, { recursive: true, force: true });
+  }
+});
+
+test("packaged scaffold templates match the live scaffold sources", () => {
+  for (const [live, tmpl] of TEMPLATE_PAIRS) {
+    assert.equal(
+      readFileSync(join(sourceRoot, tmpl), "utf8"),
+      readFileSync(join(sourceRoot, live), "utf8"),
+      `${tmpl} should match ${live}`,
+    );
   }
 });
 

@@ -52,8 +52,8 @@ const AGENTS_MARKERS = ["<!-- BEGIN TRELLIS -->", "<!-- END TRELLIS -->"];
 // publishes (TRL0028). They travel with the config, not the task tree, and the
 // generator (which scans only active/, completed/tasks/, removed/) ignores them.
 // The package ships these under templates/ so npm does not also include the live
-// generated backlog index at trellis/README.md. In a source checkout, fall back to
-// the canonical in-repo files so Trellis keeps dogfooding the layout it emits.
+// generated backlog index at trellis/README.md. In a source checkout, prefer the
+// canonical in-repo files so Trellis keeps dogfooding the layout it emits.
 const COPY_FILES = [
   `${CONFIG_DIR}/playbooks/conventions.md`,
   `${CONFIG_DIR}/playbooks/work-task.md`,
@@ -64,10 +64,10 @@ const COPY_FILES = [
 ];
 
 function copySourcePath(sourceRoot, rel) {
-  const packaged = join(sourceRoot, "templates", rel);
-  if (existsSync(packaged)) return packaged;
   const local = join(sourceRoot, rel);
-  return existsSync(local) ? local : null;
+  if (existsSync(local)) return local;
+  const packaged = join(sourceRoot, "templates", rel);
+  return existsSync(packaged) ? packaged : null;
 }
 
 // The marker-based generated indexes (skeleton-then-filled), each paired with the

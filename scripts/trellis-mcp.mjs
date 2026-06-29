@@ -134,11 +134,11 @@ export const TOOLS = {
   },
 };
 
-function registerTools(server, defaultRoot) {
+export function registerTools(server, defaultRoot) {
   for (const [name, def] of Object.entries(TOOLS)) {
     server.registerTool(name, { description: def.description, inputSchema: def.inputSchema }, (args = {}) => {
       try {
-        const root = args.repoRoot ? resolve(args.repoRoot) : defaultRoot;
+        const root = args.repoRoot ? resolveRepoRoot(args.repoRoot) : defaultRoot;
         const result = OPS[name](root, args);
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
       } catch (e) {
