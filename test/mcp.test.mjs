@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
 import { loadProfile } from "../src/profiles.mjs";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
+import { registerTools } from "../scripts/trellis-mcp.mjs";
 import {
   listTasks, getTask, nextIdOp, createTask, moveTask, validateOp, regenerateOp, importOp, TrellisError,
 } from "../src/mcp.mjs";
@@ -68,6 +69,20 @@ test("create_task writes a valid active item and stays --check-green", () => {
     assert.equal(nextIdOp(root).nextId, "DEMO0002", "next id advances");
     assert.ok(validateOp(root).ok, "the backlog validates");
     assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("registered MCP tools honor per-call repoRoot", () => {
+  const root = freshRepo();
+  const handlers = {};
+  const server = { registerTool: (name, _meta, handler) => { handlers[name] = handler; } };
+  try {
+    registerTools(server, join(tmpdir(), "not-the-target-repo"));
+    const res = handlers.next_id({ repoRoot: root });
+    assert.equal(res.isError, undefined);
+    assert.equal(res.structuredContent.nextId, "DEMO0001");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

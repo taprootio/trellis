@@ -14,12 +14,13 @@
 
 import { resolve } from "node:path";
 import { applyImport } from "../src/import.mjs";
+import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 import { loadProfile, loadMappingFile, listProfiles } from "../src/profiles.mjs";
 
-const HELP = `trellis import — import an existing backlog into Trellis
+const HELP = `ai-trellis import — import an existing backlog into Trellis
 
 Usage:
-  node scripts/trellis-import.mjs <source> (--profile <name> | --mapping <file>) [flags]
+  ai-trellis import <source> (--profile <name> | --mapping <file>) [flags]
 
 Flags:
   --profile <name>   built-in source-mapping profile (see --list-profiles)
@@ -41,22 +42,34 @@ function parseArgs(argv) {
   let source;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    const eq = a.indexOf("=");
-    const key = a.startsWith("--") && eq !== -1 ? a.slice(0, eq) : a;
-    const inline = a.startsWith("--") && eq !== -1 ? a.slice(eq + 1) : null;
-    const next = () => (inline !== null ? inline : argv[++i]);
+    const { key, inline } = optionToken(a);
     switch (key) {
       case "-h": case "--help": opts.help = true; break;
       case "--apply": opts.apply = true; break;
       case "--dry-run": opts.dryRun = true; break;
       case "--list-profiles": opts.listProfiles = true; break;
-      case "--profile": opts.profile = next(); break;
-      case "--mapping": opts.mapping = next(); break;
-      case "--target": opts.target = next(); break;
+      case "--profile": {
+        const next = requiredValue(argv, i, inline, "--profile");
+        opts.profile = next.value;
+        i = next.index;
+        break;
+      }
+      case "--mapping": {
+        const next = requiredValue(argv, i, inline, "--mapping");
+        opts.mapping = next.value;
+        i = next.index;
+        break;
+      }
+      case "--target": case "--repo": {
+        const next = requiredValue(argv, i, inline, key);
+        opts.target = next.value;
+        i = next.index;
+        break;
+      }
       default:
-        if (a.startsWith("-")) { console.error(`Unknown flag: ${a}`); process.exit(2); }
+        if (a.startsWith("-")) usageError(`Unknown flag: ${a}`);
         if (source === undefined) source = a;
-        else { console.error(`Unexpected extra argument: ${a}`); process.exit(2); }
+        else usageError(`Unexpected extra argument: ${a}`);
     }
   }
   return { source, opts };
@@ -93,13 +106,13 @@ function report(targetRoot, summary, dryRun) {
     for (const m of summary.idMap) console.log(`    ${m.sourceId} (${m.sourceFile}) → ${m.newId}`);
   }
   if (summary.generated.length) console.log(`  ${dryRun ? "regenerate" : "generated"} (${summary.generated.length}): ${summary.generated.join(", ")}`);
-  for (const w of summary.warnings) console.warn(`  warning: ${w}`);
+  for (const w of summary.warnings) console.log(`  warning: ${w}`);
   if (!dryRun) console.log(`Done. Review ${summary.root}/, then commit.`);
   else console.log("Dry run — nothing written. Re-run with --apply to write.");
 }
 
 const { source, opts } = parseArgs(process.argv.slice(2));
-if (opts.help) { process.stdout.write(HELP); process.exit(0); }
+if (opts.help) showHelp(HELP);
 
 if (opts.listProfiles) {
   const profiles = listProfiles();
@@ -119,7 +132,7 @@ if (!!opts.profile === !!opts.mapping) {
 const { mapping, error } = opts.profile ? loadProfile(opts.profile) : loadMappingFile(opts.mapping);
 if (error) { console.error(`error: ${error}`); process.exit(2); }
 
-const targetRoot = resolve(opts.target || ".");
+const targetRoot = resolveRepoRoot(opts.target);
 const sourceRoot = resolve(targetRoot, source); // relative <source> resolves against the target repo
 const dryRun = opts.dryRun || !opts.apply; // dry-run by default; --apply writes, but an explicit --dry-run always wins
 

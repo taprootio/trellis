@@ -14,9 +14,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { realpathSync } from "node:fs";
+import { optionToken, requiredValue, resolveRepoRoot, usageError } from "../src/cli.mjs";
 import { OPS, TrellisError } from "../src/mcp.mjs";
 import { RESOURCES, PROMPTS, listResources, readResource, buildPrompt } from "../src/prompts.mjs";
 
@@ -25,21 +25,27 @@ import { RESOURCES, PROMPTS, listResources, readResource, buildPrompt } from "..
 const SERVER_VERSION = "0.1.0";
 
 function parseArgs(argv) {
-  let repo = process.cwd();
+  let repo;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--repo") repo = argv[++i];
-    else if (a.startsWith("--repo=")) repo = a.slice("--repo=".length);
-    else if (a === "-h" || a === "--help") return { help: true };
-    else { console.error(`Unknown argument: ${a}`); process.exit(2); }
+    const { key, inline } = optionToken(a);
+    if (key === "--repo" || key === "--target") {
+      const next = requiredValue(argv, i, inline, key);
+      repo = next.value;
+      i = next.index;
+    } else if (a === "-h" || a === "--help") {
+      return { help: true };
+    } else {
+      usageError(`Unknown argument: ${a}`);
+    }
   }
-  return { repo: resolve(repo) };
+  return { repo: resolveRepoRoot(repo) };
 }
 
-const HELP = `trellis-mcp — serve the Trellis backlog operations over MCP (stdio)
+const HELP = `ai-trellis mcp — serve the Trellis backlog operations over MCP (stdio)
 
 Usage:
-  node scripts/trellis-mcp.mjs [--repo <path>]
+  ai-trellis mcp [--repo <path>]
 
 Options:
   --repo <path>   default repo root for tools that omit \`repoRoot\`, and the repo
@@ -128,11 +134,11 @@ export const TOOLS = {
   },
 };
 
-function registerTools(server, defaultRoot) {
+export function registerTools(server, defaultRoot) {
   for (const [name, def] of Object.entries(TOOLS)) {
     server.registerTool(name, { description: def.description, inputSchema: def.inputSchema }, (args = {}) => {
       try {
-        const root = args.repoRoot ? resolve(args.repoRoot) : defaultRoot;
+        const root = args.repoRoot ? resolveRepoRoot(args.repoRoot) : defaultRoot;
         const result = OPS[name](root, args);
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
       } catch (e) {

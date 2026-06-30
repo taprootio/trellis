@@ -468,8 +468,8 @@ test("the conventions contract travels into an onboarded repo without leaking Tr
     const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
     assert.match(agents, /Loop contract/, "AGENTS declares a Loop contract block");
     assert.match(agents, /`branch-naming`/, "declares the branch-naming seam the playbooks read");
-    assert.match(agents, /npx trellis generate/, "regenerate value is the package command");
-    assert.match(agents, /npx trellis check/, "check value is the package command");
+    assert.match(agents, /npx ai-trellis generate/, "regenerate value is the package command");
+    assert.match(agents, /npx ai-trellis check/, "check value is the package command");
     assert.doesNotMatch(agents, /npm run backlog:/, "Trellis's own npm scripts must not leak into an onboarded contract");
     assert.doesNotMatch(agents, /\bje\//, "Trellis's author branch prefix must not leak");
 
@@ -617,7 +617,7 @@ test("init --import --dry-run previews and writes nothing", () => {
     );
     assert.match(out, /Would scaffold Trellis/);
     assert.match(out, /Would then import from .* using profile yaml-frontmatter/);
-    assert.match(out, /trellis import --dry-run/, "points at the real import-plan preview");
+    assert.match(out, /ai-trellis import --dry-run/, "points at the real import-plan preview");
     assert.equal(existsSync(join(root, "trellis")), false, "a dry run writes no trellis/ tree");
   } finally {
     rmSync(root, { recursive: true, force: true });
