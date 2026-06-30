@@ -6,10 +6,10 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0030",
+  "nextId": "TRL0031",
   "counts": {
     "active": 7,
-    "completed": 22,
+    "completed": 23,
     "removed": 0
   },
   "tasks": [
@@ -60,7 +60,7 @@
       ],
       "owner": null,
       "collaborators": [],
-      "summary": "Publish Trellis as an installable package (npx trellis), version the spec, and write the getting-started and reference docs."
+      "summary": "Publish Trellis as an installable package (`npx ai-trellis`), version the spec, and write the getting-started and reference docs."
     },
     {
       "id": "TRL0011",
@@ -498,6 +498,21 @@
       "owner": null,
       "collaborators": [],
       "summary": "When an imported item's H1 begins with its own source id, drop that leading token so titles read cleanly (\"001 README Truth Pass\" → \"README Truth Pass\").",
+      "completed_on": "2026-06-29"
+    },
+    {
+      "id": "TRL0030",
+      "title": "Harden packaged onboarding after Taproot dogfood",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 2,
+      "effortLabel": "Goldfish",
+      "effortEmoji": "🐠",
+      "depends_on": [],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Address the small but release-blocking dogfood issues from Taproot onboarding: publish under `ai-trellis`, make packaged commands target-aware, order CLI output deterministically, and clarify import retirement.",
       "completed_on": "2026-06-29"
     }
   ]
