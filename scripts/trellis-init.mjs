@@ -16,13 +16,12 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
 import { applyImport } from "../src/import.mjs";
-import { resolveRepoRoot } from "../src/cli.mjs";
 import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
 
-const HELP = `ai-trellis init — scaffold the Trellis backlog into a repo
+const HELP = `trellis init — scaffold the Trellis backlog into a repo
 
 Usage:
-  ai-trellis init [target] [flags]
+  node scripts/trellis-init.mjs [target] [flags]
 
 Flags:
   --prefix <P>          id prefix (default: ${DEFAULTS.prefix})
@@ -136,7 +135,7 @@ function report(targetRoot, summary, dryRun) {
   line("skipped", summary.skipped);
   // Remaining warnings are benign (e.g. a missing copy source) — the scaffold
   // still completed, so they do not change the exit code.
-  for (const w of summary.warnings) console.log(`  warning: ${w}`);
+  for (const w of summary.warnings) console.warn(`  warning: ${w}`);
   // Reconciliation checklist (TRL0027): stale backlog guidance for the agent to
   // rewrite. Advisory and report-only — init never edited these — so, like warnings,
   // it does not affect the exit code.
@@ -145,7 +144,8 @@ function report(targetRoot, summary, dryRun) {
     for (const r of summary.reconcile) console.log(`    - ${r.file}: ${r.note}`);
   }
   if (!dryRun) {
-    console.log(`Done. Next: add a task under ${summary.root}/active/, then \`npx ai-trellis generate\`.`);
+    console.log(`Done. For a fresh backlog, add a task under ${summary.root}/active/, then \`npx ai-trellis generate\`.`);
+    console.log(`If you are importing an existing backlog, run \`npx ai-trellis import ...\` before creating any new task so imported ids keep the first available range.`);
     console.log(`Then enable branch protection so the \`backlog\` check gates merges — see trellis/branch-protection.md.`);
   }
 }
@@ -200,7 +200,7 @@ function reportImport(targetRoot, summary) {
     console.log("  id map:");
     for (const m of summary.idMap) console.log(`    ${m.sourceId} (${m.sourceFile}) → ${m.newId}`);
   }
-  for (const w of summary.warnings) console.log(`  warning: ${w}`);
+  for (const w of summary.warnings) console.warn(`  warning: ${w}`);
   console.log(`Done. Review ${summary.root}/, then commit.`);
 }
 
@@ -246,7 +246,7 @@ if (flagErrors.length) {
   process.exit(2);
 }
 
-const targetRoot = resolveRepoRoot(target);
+const targetRoot = resolve(target);
 const dryRun = !!opts.dryRun;
 
 // --retire-source: a deliberate, standalone step run after the import is committed. It
@@ -270,7 +270,7 @@ if (opts.import) {
   const importSource = isAbsolute(opts.import) ? opts.import : resolve(targetRoot, opts.import);
   if (dryRun) {
     // A dry run scaffolds nothing, so there is no initialized target to plan the
-    // import against — report intent and point at `trellis import --dry-run` (which
+    // import against — report intent and point at `ai-trellis import --dry-run` (which
     // previews the full plan against an initialized repo) rather than computing a
     // misleading plan here against a non-existent backlog.
     const via = opts.profile ? `profile ${opts.profile}` : `mapping ${opts.mapping}`;

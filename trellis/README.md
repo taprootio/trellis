@@ -8,12 +8,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 <!-- BEGIN GENERATED:MILESTONES -->
 
-### Beta
-
-| ID | Title | Owner | Priority | Effort |
-| --- | --- | --- | --- | --- |
-| [TRL0009](active/TRL0009.md) | Dogfood — onboard an existing repo end-to-end |  | Medium | 🐡 Trout · 3 |
-
 ### v1
 
 | ID | Title | Owner | Priority | Effort |

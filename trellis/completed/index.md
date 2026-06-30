@@ -6,6 +6,7 @@ task and run `npm run backlog:readme`.
 <!-- BEGIN GENERATED:COMPLETED -->
 | ID | Title | Summary | Completed |
 | --- | --- | --- | --- |
+| [TRL0009](tasks/TRL0009.md) | Dogfood — onboard an existing repo end-to-end | Run `trellis init` against a second, non-trivial repo and work a real task through the loop to prove the formula travels. | 2026-06-29 |
 | [TRL0028](tasks/TRL0028.md) | trellis init — scaffold process docs into the Trellis home, not docs/ | Move the scaffolded playbooks and branch-protection guide under trellis/ so onboarding never writes into a repo's published docs/ directory. | 2026-06-29 |
 | [TRL0029](tasks/TRL0029.md) | Importer — strip the source id prefix from imported titles | When an imported item's H1 begins with its own source id, drop that leading token so titles read cleanly ("001 README Truth Pass" → "README Truth Pass"). | 2026-06-29 |
 | [TRL0030](tasks/TRL0030.md) | Harden packaged onboarding after Taproot dogfood | Address the small but release-blocking dogfood issues from Taproot onboarding: publish under `ai-trellis`, make packaged commands target-aware, order CLI output deterministically, and clarify import retirement. | 2026-06-29 |

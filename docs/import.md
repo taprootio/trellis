@@ -61,6 +61,14 @@ failure**, so a refused import leaves the target exactly as it was.
 - **A real run leaves the backlog `--check`-green**, or rolls back to the
   pre-import state if anything fails.
 
+### Add the adoption tracker after import
+
+When onboarding a repo that already has a backlog, import the legacy backlog
+before creating any new Trellis task for the adoption work itself. Trellis assigns
+imported ids from the target's current `nextId`, so an early "Adopt Trellis" item
+would consume the first id and shift every imported task up by one. Import first,
+review the id map, then create and work the adoption tracker at the next id.
+
 ### After adopting: reconcile guidance, then retire the source
 
 Importing copies items into Trellis but leaves two things for you to finish the
