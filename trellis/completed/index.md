@@ -6,6 +6,7 @@ task and run `npm run backlog:readme`.
 <!-- BEGIN GENERATED:COMPLETED -->
 | ID | Title | Summary | Completed |
 | --- | --- | --- | --- |
+| [TRL0010](tasks/TRL0010.md) | Packaging, versioned spec, and docs | Publish Trellis to public npm as `@taprootio/trellis` from GitHub CI, renaming off the never-published `ai-trellis` placeholder, then dogfood the packaged onboarding against a real repo. | 2026-07-01 |
 | [TRL0009](tasks/TRL0009.md) | Dogfood — onboard an existing repo end-to-end | Run `trellis init` against a second, non-trivial repo and work a real task through the loop to prove the formula travels. | 2026-06-29 |
 | [TRL0028](tasks/TRL0028.md) | trellis init — scaffold process docs into the Trellis home, not docs/ | Move the scaffolded playbooks and branch-protection guide under trellis/ so onboarding never writes into a repo's published docs/ directory. | 2026-06-29 |
 | [TRL0029](tasks/TRL0029.md) | Importer — strip the source id prefix from imported titles | When an imported item's H1 begins with its own source id, drop that leading token so titles read cleanly ("001 README Truth Pass" → "README Truth Pass"). | 2026-06-29 |

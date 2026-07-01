@@ -12,9 +12,12 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 | ID | Title | Owner | Priority | Effort |
 | --- | --- | --- | --- | --- |
-| [TRL0010](active/TRL0010.md) | Packaging, versioned spec, and docs |  | High | Tuna · 5 |
 | [TRL0011](active/TRL0011.md) | Test suite and CI for CLI and MCP server |  | High | Tuna · 5 |
+| [TRL0031](active/TRL0031.md) | Importer — skip generated indexes and read completed/tasks; refresh the taproot profile |  | High | 🐡 Trout · 3 |
 | [TRL0019](active/TRL0019.md) | MCP server HTTP transport (port/host) + per-repo resource addressing |  | Medium | Tuna · 5 |
+| [TRL0032](active/TRL0032.md) | Importer — preserve sound source ids, with a configured new-id floor |  | Medium | Tuna · 5 |
+| [TRL0033](active/TRL0033.md) | Importer — stop truncating synthesized summaries at a line break |  | Medium | 🐠 Goldfish · 2 |
+| [TRL0035](active/TRL0035.md) | Dogfood round 2 — re-onboard Taproot with the built-in profile after the fixes |  | Medium | 🐡 Trout · 3 |
 
 ### Future
 
@@ -24,5 +27,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | [TRL0008](active/TRL0008.md) | Viewer — dependency graph and filters |  | Medium | Tuna · 5 |
 | [TRL0012](active/TRL0012.md) | Static-site deploy of the viewer |  | Low | Swordfish · 8 |
 | [TRL0013](active/TRL0013.md) | Access control / SSO for the deployed viewer |  | Low | Tuna · 5 |
+| [TRL0034](active/TRL0034.md) | Init — drop the placeholder example member from the scaffolded team.json |  | Low | 🐟 Minnow · 1 |
 
 <!-- END GENERATED:MILESTONES -->
