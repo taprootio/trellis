@@ -1,0 +1,51 @@
+name: Release
+
+# Publishes @taprootio/trellis to the public npm registry on a v<version> tag push.
+# Releases are tag-driven only — there is no manual/branch publish path. To re-run
+# a failed release, use "Re-run jobs" (it replays the original tag context).
+#
+# Auth is a two-phase plan (TRL0010):
+#   Phase 1 (now): a short-lived npm automation token in the NPM_TOKEN secret.
+#   Phase 2 (next): npm trusted publishing (OIDC). This job already requests
+#     `id-token: write` and publishes with `--provenance`, so migrating is just:
+#     configure the trusted publisher for this package + workflow on npmjs, then
+#     delete the NPM_TOKEN secret — no workflow change required.
+#
+# Provenance requires this repository to be public.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write # npm provenance / trusted publishing
+
+jobs:
+  publish:
+    name: publish
+    # Defense in depth: only ever run for a v* tag ref, even if another trigger
+    # is added later.
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - run: npm ci
+      # Gates — never publish a red tree.
+      - run: node --test
+      - run: node scripts/backlog-readme.mjs --check
+      # The tag's version must match package.json (v0.1.0 -> 0.1.0).
+      - name: Verify tag matches package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag $GITHUB_REF_NAME ($tag) does not match package.json version $pkg" >&2
+            exit 1
+          fi
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

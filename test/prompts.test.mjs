@@ -75,7 +75,7 @@ test("the MCP entrypoint boots when launched through a symlink (bin-style)", () 
   try {
     symlinkSync(join(sourceRoot, "scripts/trellis-mcp.mjs"), link);
     const out = execFileSync(process.execPath, [link, "--help"], { encoding: "utf8" });
-    assert.match(out, /ai-trellis mcp — serve the Trellis backlog operations/, "a symlinked launch prints help, i.e. it booted");
+    assert.match(out, /trellis mcp — serve the Trellis backlog operations/, "a symlinked launch prints help, i.e. it booted");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

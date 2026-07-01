@@ -13,11 +13,11 @@ import { relative } from "node:path";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
 import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 
-const HELP = `ai-trellis generate/check — validate and regenerate Trellis artifacts
+const HELP = `trellis generate/check — validate and regenerate Trellis artifacts
 
 Usage:
-  ai-trellis generate [--target <repo>]
-  ai-trellis check [--target <repo>]
+  trellis generate [--target <repo>]
+  trellis check [--target <repo>]
   node scripts/backlog-readme.mjs [--check] [--target <repo>]
 
 Flags:
@@ -74,7 +74,7 @@ if (errors.length) die(errors);
 if (isCheck) {
   const stale = files.filter((f) => (existsSync(f.path) ? readFileSync(f.path, "utf8") : "") !== f.content);
   if (stale.length) {
-    for (const f of stale) console.error(`${rel(f.path)} is stale - run: npx ai-trellis generate`);
+    for (const f of stale) console.error(`${rel(f.path)} is stale - run: npx @taprootio/trellis generate`);
     process.exit(1);
   }
   console.log("Backlog check OK.");

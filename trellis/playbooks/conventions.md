@@ -10,7 +10,7 @@ named, which gates must stay green — is read at runtime from the repo's own
 This file defines that seam: the **named points** a playbook refers to, and the
 rule for where their values live. The *definition* here is universal and travels
 unchanged into every Trellis repo; the *values* are per-repo and live in each
-repo's `AGENTS.md` "Loop contract" block (scaffolded by `ai-trellis init`). A
+repo's `AGENTS.md` "Loop contract" block (scaffolded by `trellis init`). A
 playbook step names a seam point as its instruction ("regenerate the backlog");
 any concrete command it shows is a tagged example of *one* repo's value, never
 the command a different repo should run.
@@ -37,9 +37,9 @@ completeness:
 
 ## How a repo declares its values
 
-`ai-trellis init` writes a "Loop contract" block into the onboarded repo's
-`AGENTS.md` with that repo's values (e.g. `npx ai-trellis generate` /
-`npx ai-trellis check`, a branch pattern, the attribution policy). A repo edits those values to
+`trellis init` writes a "Loop contract" block into the onboarded repo's
+`AGENTS.md` with that repo's values (e.g. `npx @taprootio/trellis generate` /
+`npx @taprootio/trellis check`, a branch pattern, the attribution policy). A repo edits those values to
 match its own tooling; the playbooks need no change to follow them, because they
 only ever name the seam point.
 

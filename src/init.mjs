@@ -6,8 +6,8 @@
 // never clobbering existing files.
 //
 // The generator itself is NOT vendored. The onboarded repo runs Trellis via the
-// package (TRL0010), so the scaffolded CI calls `npx ai-trellis check` and the
-// AGENTS block points at `npx ai-trellis ...`. Like the core, every entry point
+// package (TRL0010), so the scaffolded CI calls `npx @taprootio/trellis check` and the
+// AGENTS block points at `npx @taprootio/trellis ...`. Like the core, every entry point
 // takes an explicit targetRoot and holds no process-wide state, so the CLI and a
 // future MCP tool (TRL0004) can share it.
 
@@ -44,7 +44,7 @@ const AGENTS_MARKERS = ["<!-- BEGIN TRELLIS -->", "<!-- END TRELLIS -->"];
 
 // Process files copied verbatim from the Trellis install (sourceRoot). Their
 // value is the loop, not the exact command names; the AGENTS block below carries
-// the authoritative `npx ai-trellis` commands for the onboarded repo.
+// the authoritative `npx @taprootio/trellis` commands for the onboarded repo.
 //
 // The playbooks and branch-protection guide scaffold into the FIXED Trellis home
 // (CONFIG_DIR), alongside backlog.config.json / team.json and independent of
@@ -248,7 +248,7 @@ function readmeSkeleton() {
     "Managed with [Trellis](https://github.com/taprootio/trellis) — a file-based\n" +
       "backlog. See `AGENTS.md` for the schema and conventions. The tables below are\n" +
       "generated; do not hand-edit between the markers — edit the per-item files in\n" +
-      "`active/`, then regenerate (`npx ai-trellis generate`).",
+      "`active/`, then regenerate (`npx @taprootio/trellis generate`).",
   );
 }
 
@@ -257,7 +257,7 @@ function completedSkeleton() {
     MARKERS.completed,
     "Completed tasks",
     "Generated from `completed/tasks/`. Do not hand-edit between the markers — close\n" +
-      "a task and regenerate (`npx ai-trellis generate`).",
+      "a task and regenerate (`npx @taprootio/trellis generate`).",
   );
 }
 
@@ -266,7 +266,7 @@ function removedSkeleton() {
     MARKERS.removed,
     "Removed tasks",
     "Generated from `removed/`. Do not hand-edit between the markers — remove a task\n" +
-      "and regenerate (`npx ai-trellis generate`).",
+      "and regenerate (`npx @taprootio/trellis generate`).",
   );
 }
 
@@ -291,7 +291,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npx --yes ai-trellis check
+      - run: npx --yes @taprootio/trellis check
 `;
 }
 
@@ -316,8 +316,8 @@ Markdown files with YAML front-matter; ids are \`${o.prefix}\` + ${o.idWidth} di
 - The team roster lives in \`trellis/team.json\` (members with a \`handle\`, \`name\`,
   optional \`email\`, and \`status\`). A task may set an optional \`owner\` (one handle)
   and \`collaborators\` (handles); on active items they must be active roster members.
-- After adding, moving, or editing an item, regenerate with \`npx ai-trellis generate\`;
-  CI runs \`npx ai-trellis check\`.
+- After adding, moving, or editing an item, regenerate with \`npx @taprootio/trellis generate\`;
+  CI runs \`npx @taprootio/trellis check\`.
 - \`main\` is protected — work on a branch, open a PR, and let the backlog check
   (the pinned \`backlog\` job) gate the merge. Enable the gate with the recipe in
   \`trellis/branch-protection.md\` (GitHub plus GitLab/Bitbucket/Azure DevOps).
@@ -332,10 +332,10 @@ contract, then set these to match your tooling:
 
 | seam point | this repo's value |
 | --- | --- |
-| \`regenerate\` | \`npx ai-trellis generate\` |
-| \`check\` | \`npx ai-trellis check\` |
+| \`regenerate\` | \`npx @taprootio/trellis generate\` |
+| \`check\` | \`npx @taprootio/trellis check\` |
 | \`branch-naming\` | \`<initials>/<id-lowercase>/<slug>\` (e.g. \`ab/${idExample}/short-slug\`) |
-| \`gates\` | \`npx ai-trellis check\` (plus this repo's tests/lint) |
+| \`gates\` | \`npx @taprootio/trellis check\` (plus this repo's tests/lint) |
 | \`attribution\` | none — no \`Co-Authored-By:\` trailers or "Generated with …" footers |
 
 See \`trellis/playbooks/\` for the work-a-task and code-review loops.

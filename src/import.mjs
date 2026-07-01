@@ -289,7 +289,7 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   // it does not scaffold (that's `trellis init`, or the `init --import` on-ramp
   // that scaffolds first, then calls this).
   if (!existsSync(p.readme) || !existsSync(p.completedIndex) || !existsSync(p.removedIndex)) {
-    return { ...empty(), cfg, root, errors: ["target is not an initialized Trellis backlog (missing generated indexes); run `ai-trellis init` first"] };
+    return { ...empty(), cfg, root, errors: ["target is not an initialized Trellis backlog (missing generated indexes); run `npx @taprootio/trellis init` first"] };
   }
   const data = readBacklog(targetRoot, cfg);
   if (data.errors.length) return { ...empty(), cfg, root, errors: [`target backlog has errors; fix them before importing: ${data.errors.join("; ")}`] };

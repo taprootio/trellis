@@ -15,10 +15,10 @@ import { loadConfig } from "../src/backlog.mjs";
 import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 import { deriveTaskHistory, deriveAllHistory, materializeHistory, HistoryError } from "../src/history.mjs";
 
-const HELP = `ai-trellis history — git-derived per-task history
+const HELP = `trellis history — git-derived per-task history
 
 Usage:
-  ai-trellis history [<id>] [flags]
+  trellis history [<id>] [flags]
 
 Flags:
   --repo <path>   repo root to derive from (default: cwd)

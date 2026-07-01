@@ -17,10 +17,10 @@ import { applyImport } from "../src/import.mjs";
 import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 import { loadProfile, loadMappingFile, listProfiles } from "../src/profiles.mjs";
 
-const HELP = `ai-trellis import — import an existing backlog into Trellis
+const HELP = `trellis import — import an existing backlog into Trellis
 
 Usage:
-  ai-trellis import <source> (--profile <name> | --mapping <file>) [flags]
+  trellis import <source> (--profile <name> | --mapping <file>) [flags]
 
 Flags:
   --profile <name>   built-in source-mapping profile (see --list-profiles)
