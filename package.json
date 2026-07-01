@@ -1,10 +1,31 @@
 {
-  "name": "ai-trellis",
+  "name": "@taprootio/trellis",
   "version": "0.1.0",
   "type": "module",
   "description": "Trellis — a tool-agnostic toolkit for file-based backlogs; dogfoods its own conventions.",
+  "keywords": [
+    "backlog",
+    "tasks",
+    "task-management",
+    "project-management",
+    "cli",
+    "mcp",
+    "file-based",
+    "git",
+    "trellis"
+  ],
+  "homepage": "https://github.com/taprootio/trellis#readme",
+  "bugs": "https://github.com/taprootio/trellis/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taprootio/trellis.git"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "bin": {
-    "ai-trellis": "./scripts/trellis.mjs",
+    "trellis": "./scripts/trellis.mjs",
     "trellis-mcp": "./scripts/trellis-mcp.mjs"
   },
   "files": [
@@ -16,6 +37,10 @@
     "README.md",
     "SPEC.md"
   ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "trellis": "node scripts/trellis.mjs",
     "backlog:readme": "node scripts/backlog-readme.mjs",

@@ -2,7 +2,7 @@
 // Packaged Trellis CLI dispatcher.
 //
 // The subcommand wrappers keep their existing thin shape, while this file is the
-// npm bin exposed by the `ai-trellis` package. Run from an installed package, paths
+// npm bin exposed by the `@taprootio/trellis` package. Run from an installed package, paths
 // below are package-relative; target repos are still resolved by each subcommand
 // from cwd / --target / --repo.
 
@@ -10,10 +10,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const HELP = `ai-trellis — file-based backlog toolkit
+const HELP = `trellis — file-based backlog toolkit
 
 Usage:
-  ai-trellis <command> [args]
+  trellis <command> [args]
 
 Commands:
   init       scaffold Trellis into a repo
@@ -24,7 +24,7 @@ Commands:
   mcp        serve Trellis operations over MCP stdio
   pr-title   lint a PR title from PR_TITLE
 
-Run "ai-trellis <command> --help" for command-specific options.
+Run "trellis <command> --help" for command-specific options.
 `;
 
 const COMMANDS = {

@@ -30,7 +30,7 @@ Flags:
   --priorities <a,b,c>  ordered priorities, highest first (default: ${DEFAULTS.priorities.join(",")})
   --effort <1,2,3>      canonical effort values (default: ${DEFAULTS.effort.join(",")})
   --import <path>       after scaffolding, import an existing backlog at <path>
-  --profile <name>      source-mapping profile for --import (ai-trellis import --list-profiles)
+  --profile <name>      source-mapping profile for --import (trellis import --list-profiles)
   --mapping <file>      mapping file (JSON) for --import (alternative to --profile)
   --retire-source <p>   history-preservingly git-rm an imported source tree at <p>
                         (a separate, later step — see below; cannot combine with --import)
@@ -40,7 +40,7 @@ Flags:
 
 With --import, provide exactly one of --profile or --mapping; a relative <path>
 resolves against the target repo. --dry-run previews the scaffold without writing;
-preview the import plan itself with "ai-trellis import --dry-run" on the initialized repo.
+preview the import plan itself with "trellis import --dry-run" on the initialized repo.
 
 --retire-source removes the old source tree once the import is green and committed:
 it stages a "git rm -r <p>" (history preserved) and leaves the deletion for you to
@@ -144,8 +144,8 @@ function report(targetRoot, summary, dryRun) {
     for (const r of summary.reconcile) console.log(`    - ${r.file}: ${r.note}`);
   }
   if (!dryRun) {
-    console.log(`Done. For a fresh backlog, add a task under ${summary.root}/active/, then \`npx ai-trellis generate\`.`);
-    console.log(`If you are importing an existing backlog, run \`npx ai-trellis import ...\` before creating any new task so imported ids keep the first available range.`);
+    console.log(`Done. For a fresh backlog, add a task under ${summary.root}/active/, then \`npx @taprootio/trellis generate\`.`);
+    console.log(`If you are importing an existing backlog, run \`npx @taprootio/trellis import ...\` before creating any new task so imported ids keep the first available range.`);
     console.log(`Then enable branch protection so the \`backlog\` check gates merges — see trellis/branch-protection.md.`);
   }
 }
@@ -270,12 +270,12 @@ if (opts.import) {
   const importSource = isAbsolute(opts.import) ? opts.import : resolve(targetRoot, opts.import);
   if (dryRun) {
     // A dry run scaffolds nothing, so there is no initialized target to plan the
-    // import against — report intent and point at `ai-trellis import --dry-run` (which
+    // import against — report intent and point at `trellis import --dry-run` (which
     // previews the full plan against an initialized repo) rather than computing a
     // misleading plan here against a non-existent backlog.
     const via = opts.profile ? `profile ${opts.profile}` : `mapping ${opts.mapping}`;
     console.log(`Would then import from ${importSource} using ${via}.`);
-    console.log("Re-run without --dry-run to scaffold and import, or run `ai-trellis import --dry-run` on the initialized repo to preview the import plan.");
+    console.log("Re-run without --dry-run to scaffold and import, or run `npx @taprootio/trellis import --dry-run` on the initialized repo to preview the import plan.");
     process.exit(0);
   }
   const { summary: imp } = applyImport(targetRoot, importSource, mapping, { dryRun: false });

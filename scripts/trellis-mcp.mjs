@@ -42,10 +42,10 @@ function parseArgs(argv) {
   return { repo: resolveRepoRoot(repo) };
 }
 
-const HELP = `ai-trellis mcp — serve the Trellis backlog operations over MCP (stdio)
+const HELP = `trellis mcp — serve the Trellis backlog operations over MCP (stdio)
 
 Usage:
-  ai-trellis mcp [--repo <path>]
+  trellis mcp [--repo <path>]
 
 Options:
   --repo <path>   default repo root for tools that omit \`repoRoot\`, and the repo

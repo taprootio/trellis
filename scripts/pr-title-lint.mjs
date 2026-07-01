@@ -3,7 +3,7 @@
 // pr-title workflow on every pull_request.
 //
 //   PR_TITLE="TRL0016: add the lint" node scripts/pr-title-lint.mjs
-//   PR_TITLE="DEMO0001: add the lint" ai-trellis pr-title --repo <target>
+//   PR_TITLE="DEMO0001: add the lint" trellis pr-title --repo <target>
 //
 // Reads the title from $PR_TITLE (set from the pull_request event title) and the
 // id vocabulary from the target repo's backlog.config.json, then exits non-zero on any
@@ -14,10 +14,10 @@ import { loadConfig } from "../src/backlog.mjs";
 import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 import { lintPrTitle } from "../src/pr-title.mjs";
 
-const HELP = `ai-trellis pr-title — lint a pull request title
+const HELP = `trellis pr-title — lint a pull request title
 
 Usage:
-  PR_TITLE="TASK0001: concise title" ai-trellis pr-title [--repo <target>]
+  PR_TITLE="TASK0001: concise title" trellis pr-title [--repo <target>]
 
 Flags:
   --repo <target>    repo root whose Trellis id vocabulary should be used (default: cwd)
