@@ -10,9 +10,10 @@ name: Release
 # tag/Release is missing, the next push to main completes just that one — npm and
 # the tag/Release can't permanently diverge.
 #
-# Auth (TRL0010): Phase 1 short-lived NPM_TOKEN secret; Phase 2 npm trusted
-# publishing (OIDC) — the publish job already has id-token: write + --provenance,
-# so migrating is configure-the-publisher-then-drop-the-secret.
+# Auth: npm trusted publishing (OIDC) — no long-lived token. The publish job has
+# id-token: write and runs npm >= 11.5.1 (npm install -g npm@latest), so `npm
+# publish` mints a short-lived token from npm's trusted publisher configured for
+# this repo + workflow (taprootio/trellis, release.yml). Provenance is automatic.
 #
 # Provenance requires this repository to be public.
 on:
@@ -39,7 +40,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "lts/*"
           registry-url: "https://registry.npmjs.org"
       - name: Decide what still needs releasing
         id: state
@@ -81,23 +82,25 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the v<version> tag + GitHub Release
-      id-token: write # npm provenance / trusted publishing
+      id-token: write # npm trusted publishing (OIDC) + provenance
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "lts/*"
           registry-url: "https://registry.npmjs.org"
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; LTS Node bundles an older npm.
+      - run: npm install -g npm@latest
       - run: npm ci
       # Gates — never publish or release a red tree.
       - run: node --test
       - run: node scripts/backlog-readme.mjs --check
+      # No NODE_AUTH_TOKEN: auth is OIDC via id-token + the npm trusted publisher.
       # Values pass through env, never inline `${{ }}`, so they cannot inject shell
       # (matching pr-title.yml's convention).
       - name: Publish to npm
         if: needs.check.outputs.publish == 'true'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_TAG: ${{ needs.check.outputs.npmtag }}
         run: npm publish --provenance --access public --tag "$NPM_TAG"
       # Independently gated: a tag/Release that didn't get created (e.g. this step
