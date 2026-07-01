@@ -187,8 +187,9 @@ function resolveEnum(raw, remap, allowed, label) {
 // First-sentence (or title) synthesis for a missing summary (SPEC §5.1: summary is
 // required and feeds the README). Skips the H1, blank lines, and metadata-shaped
 // lines (bold `**Field:**`, list bullets, short `Key: value` headers) so it lands
-// on real prose, then flows that first prose paragraph and takes its first sentence, single-lined (a wrapped sentence isn't cut at the newline). A heuristic —
-// summary is descriptive, not correctness-critical — that fails safe to the title.
+// on real prose, then flows that first prose paragraph and takes its first sentence,
+// single-lined (a wrapped sentence isn't cut at the newline). A heuristic — summary is
+// descriptive, not correctness-critical — that fails safe to the title.
 function synthSummary(body, title, strategy) {
   if (strategy === "title") return title;
   const isMeta = (l) => l.startsWith("**") || /^[-*+]\s/.test(l) || /^[A-Za-z][\w ()/-]{0,30}:\s+\S/.test(l);
