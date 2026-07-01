@@ -14,7 +14,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | --- | --- | --- | --- | --- |
 | [TRL0011](active/TRL0011.md) | Test suite and CI for CLI and MCP server |  | High | Tuna · 5 |
 | [TRL0019](active/TRL0019.md) | MCP server HTTP transport (port/host) + per-repo resource addressing |  | Medium | Tuna · 5 |
-| [TRL0032](active/TRL0032.md) | Importer — preserve sound source ids, with a configured new-id floor |  | Medium | Tuna · 5 |
 | [TRL0035](active/TRL0035.md) | Dogfood round 2 — re-onboard Taproot with the built-in profile after the fixes |  | Medium | 🐡 Trout · 3 |
 
 ### Future

@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0036",
   "counts": {
-    "active": 8,
-    "completed": 27,
+    "active": 7,
+    "completed": 28,
     "removed": 0
   },
   "tasks": [
@@ -108,22 +108,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
-    },
-    {
-      "id": "TRL0032",
-      "title": "Importer — preserve sound source ids, with a configured new-id floor",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "Medium",
-      "effort": 5,
-      "effortLabel": "Tuna",
-      "effortImage": "assets/effort/tuna.svg",
-      "depends_on": [
-        "TRL0021"
-      ],
-      "owner": null,
-      "collaborators": [],
-      "summary": "Add an opt-in import mode that keeps an item's source id when it matches the target format and is unique, reassigning collisions/mismatches into the gap above the imported range, and record a configured nextIdFloor (core-honored) so freshly-created tasks begin above the imported band."
     },
     {
       "id": "TRL0035",
@@ -567,6 +551,23 @@
       "owner": null,
       "collaborators": [],
       "summary": "Make import skip the generator's own artifacts (index.md / README.md) so they aren't imported as tasks, and add a general `trellis` profile that imports any Trellis-shaped backlog (YAML front-matter under active/, completed/tasks/, removed/) — so onboarding a Trellis-shaped repo needs no hand-written mapping.",
+      "completed_on": "2026-07-01"
+    },
+    {
+      "id": "TRL0032",
+      "title": "Importer — preserve sound source ids, with a configured new-id floor",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "Medium",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [
+        "TRL0021"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Add an opt-in import mode that keeps an item's source id when it matches the target format and is unique, reassigning collisions/mismatches into the gap above the imported range, and record a configured nextIdFloor (core-honored) so freshly-created tasks begin above the imported band.",
       "completed_on": "2026-07-01"
     },
     {
