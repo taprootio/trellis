@@ -187,19 +187,25 @@ function resolveEnum(raw, remap, allowed, label) {
 // First-sentence (or title) synthesis for a missing summary (SPEC §5.1: summary is
 // required and feeds the README). Skips the H1, blank lines, and metadata-shaped
 // lines (bold `**Field:**`, list bullets, short `Key: value` headers) so it lands
-// on real prose, then takes that line's first sentence, single-lined. A heuristic —
+// on real prose, then flows that first prose paragraph and takes its first sentence, single-lined (a wrapped sentence isn't cut at the newline). A heuristic —
 // summary is descriptive, not correctness-critical — that fails safe to the title.
 function synthSummary(body, title, strategy) {
   if (strategy === "title") return title;
   const isMeta = (l) => l.startsWith("**") || /^[-*+]\s/.test(l) || /^[A-Za-z][\w ()/-]{0,30}:\s+\S/.test(l);
-  for (const line of body.split("\n")) {
-    const l = line.trim();
-    if (!l || l.startsWith("#") || isMeta(l)) continue;
-    const m = l.match(/^(.+?[.!?])(\s|$)/);
-    const s = (m ? m[1] : l).replace(/\s+/g, " ").trim();
-    if (s) return s;
-  }
-  return title;
+  const lines = body.split("\n");
+  let i = 0;
+  while (i < lines.length) { const l = lines[i].trim(); if (l && !l.startsWith("#") && !isMeta(l)) break; i++; }
+  if (i >= lines.length) return title;
+  // Flow the soft-wrapped lines of the first prose paragraph into one string so a
+  // sentence that wraps across lines isn't truncated at the newline; the paragraph
+  // ends at a blank line, a heading, or a metadata-shaped line.
+  const para = [];
+  for (; i < lines.length; i++) { const l = lines[i].trim(); if (!l || l.startsWith("#") || isMeta(l)) break; para.push(l); }
+  const flowed = para.join(" ").replace(/\s+/g, " ").trim();
+  const m = flowed.match(/^(.+?[.!?])(\s|$)/);
+  // First sentence if the paragraph terminates one; else fall back to the first prose
+  // line (unchanged from prior behavior), single-lined.
+  return (m ? m[1] : para[0]).replace(/\s+/g, " ").trim() || title;
 }
 
 // Rebuild a source file's prose as a Trellis body: drop a leading YAML block and a

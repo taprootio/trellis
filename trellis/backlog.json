@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0036",
   "counts": {
-    "active": 10,
-    "completed": 25,
+    "active": 9,
+    "completed": 26,
     "removed": 0
   },
   "tasks": [
@@ -124,22 +124,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Let import keep an existing item's id when it is valid for the target format and the data is sound, reserving the imported range and starting freshly-created ids at a configured floor above it — leaving a gap that absorbs collisions organically."
-    },
-    {
-      "id": "TRL0033",
-      "title": "Importer — stop truncating synthesized summaries at a line break",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "Medium",
-      "effort": 2,
-      "effortLabel": "Goldfish",
-      "effortEmoji": "🐠",
-      "depends_on": [
-        "TRL0021"
-      ],
-      "owner": null,
-      "collaborators": [],
-      "summary": "Fix the firstSentence summary strategy so a synthesized summary isn't cut off mid-sentence at a soft line break; end at the first real sentence terminator across wrapped lines."
     },
     {
       "id": "TRL0034",
@@ -599,6 +583,23 @@
       "owner": null,
       "collaborators": [],
       "summary": "Make import skip the generator's own artifacts (index.md / README.md) so they aren't imported as tasks, and add a general `trellis` profile that imports any Trellis-shaped backlog (YAML front-matter under active/, completed/tasks/, removed/) — so onboarding a Trellis-shaped repo needs no hand-written mapping.",
+      "completed_on": "2026-07-01"
+    },
+    {
+      "id": "TRL0033",
+      "title": "Importer — stop truncating synthesized summaries at a line break",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "Medium",
+      "effort": 2,
+      "effortLabel": "Goldfish",
+      "effortEmoji": "🐠",
+      "depends_on": [
+        "TRL0021"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Fix the firstSentence summary strategy so a synthesized summary isn't cut off mid-sentence at a soft line break; end at the first real sentence terminator across wrapped lines.",
       "completed_on": "2026-07-01"
     }
   ]

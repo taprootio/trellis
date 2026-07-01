@@ -28,6 +28,10 @@ const headerlessSrc = join(fixtures, "legacy-headerless");
 // completed/tasks/, removed/, plus generator index.md/README.md artifacts that import
 // must skip. Imported via the built-in `trellis` profile.
 const trellisSrc = join(fixtures, "trellis-shaped");
+// A source whose first prose sentence wraps across two lines and carries no explicit
+// summary field, to prove synthSummary flows the paragraph (TRL0033) rather than
+// truncating at the newline.
+const wrappedSrc = join(fixtures, "wrapped-summary");
 // The shipped Taproot reference profile doubles as this suite's regression mapping
 // (the built-in profiles are the canonical fixtures — TRL0022).
 const mapping = loadProfile("taproot-ai-backlog").mapping;
@@ -493,6 +497,23 @@ test("the trellis profile imports a Trellis-shaped backlog: reads completed/task
     );
     assertCheckClean(root);
     assert.deepEqual(snapshot(trellisSrc), before, "source is left untouched");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("firstSentence summary flows a sentence that wraps across lines, not truncating at the newline", () => {
+  const root = initTarget();
+  try {
+    const { summary } = applyImport(root, wrappedSrc, loadProfile("trellis").mapping, {});
+    assert.deepEqual(summary.errors, []);
+    const item = fm(root, `trellis/active/${newIdFor(summary.idMap, "active/W1.md")}.md`);
+    assert.equal(
+      item.summary,
+      "Add a real generator test command, make sure generator tests run in CI, and have the loop enforce it so drift can't land.",
+      "the wrapped opening sentence is flowed in full, not cut at the line break",
+    );
+    assertCheckClean(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
