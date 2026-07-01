@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0036",
   "counts": {
-    "active": 9,
-    "completed": 26,
+    "active": 8,
+    "completed": 27,
     "removed": 0
   },
   "tasks": [
@@ -124,22 +124,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Let import keep an existing item's id when it is valid for the target format and the data is sound, reserving the imported range and starting freshly-created ids at a configured floor above it — leaving a gap that absorbs collisions organically."
-    },
-    {
-      "id": "TRL0034",
-      "title": "Init — drop the placeholder example member from the scaffolded team.json",
-      "status": "active",
-      "milestone": "Future",
-      "priority": "Low",
-      "effort": 1,
-      "effortLabel": "Minnow",
-      "effortEmoji": "🐟",
-      "depends_on": [
-        "TRL0023"
-      ],
-      "owner": null,
-      "collaborators": [],
-      "summary": "The scaffolded team.json ships an active \"example\" member that reads like real config; make it clearly inert (empty roster with inline guidance) so onboarded repos don't mistake it for a real teammate."
     },
     {
       "id": "TRL0035",
@@ -600,6 +584,23 @@
       "owner": null,
       "collaborators": [],
       "summary": "Fix the firstSentence summary strategy so a synthesized summary isn't cut off mid-sentence at a soft line break; end at the first real sentence terminator across wrapped lines.",
+      "completed_on": "2026-07-01"
+    },
+    {
+      "id": "TRL0034",
+      "title": "Init — drop the placeholder example member from the scaffolded team.json",
+      "status": "completed",
+      "milestone": "Future",
+      "priority": "Low",
+      "effort": 1,
+      "effortLabel": "Minnow",
+      "effortEmoji": "🐟",
+      "depends_on": [
+        "TRL0023"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "The scaffolded team.json ships an active \"example\" member that reads like real config; make it clearly inert (empty roster with inline guidance) so onboarded repos don't mistake it for a real teammate.",
       "completed_on": "2026-07-01"
     }
   ]

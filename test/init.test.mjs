@@ -127,7 +127,7 @@ test("scaffolds the branch-protection recipe and pins the required-check context
   }
 });
 
-test("scaffolds a valid team.json stub (one active member) and mentions the roster in AGENTS", () => {
+test("scaffolds a valid team.json stub (an inactive placeholder) and mentions the roster in AGENTS", () => {
   const root = tempRepo();
   try {
     const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
@@ -135,7 +135,7 @@ test("scaffolds a valid team.json stub (one active member) and mentions the rost
     const { roster, errors } = loadRoster(root);
     assert.deepEqual(errors, [], "the stub roster validates");
     assert.equal(roster.members.length, 1);
-    assert.equal(roster.members[0].status, "active");
+    assert.equal(roster.members[0].status, "inactive", "the stub is an inactive placeholder, not a real teammate (TRL0034)");
     assert.match(readFileSync(join(root, "AGENTS.md"), "utf8"), /trellis\/team\.json/, "AGENTS mentions the roster");
     assertCheckClean(root);
   } finally {

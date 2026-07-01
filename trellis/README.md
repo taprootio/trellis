@@ -25,6 +25,5 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | [TRL0008](active/TRL0008.md) | Viewer — dependency graph and filters |  | Medium | Tuna · 5 |
 | [TRL0012](active/TRL0012.md) | Static-site deploy of the viewer |  | Low | Swordfish · 8 |
 | [TRL0013](active/TRL0013.md) | Access control / SSO for the deployed viewer |  | Low | Tuna · 5 |
-| [TRL0034](active/TRL0034.md) | Init — drop the placeholder example member from the scaffolded team.json |  | Low | 🐟 Minnow · 1 |
 
 <!-- END GENERATED:MILESTONES -->

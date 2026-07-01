@@ -224,12 +224,14 @@ function configContent(o) {
   ) + "\n";
 }
 
-// The team roster stub (SPEC §7.2): one example active member showing the shape
-// (`handle`/`name`/optional `email`/`status`). Authored, not generated; left for the
-// repo to edit. An unused roster keeps the scaffold --check-green (no task owns it).
+// The team roster stub (SPEC §7.2): one INACTIVE placeholder member showing the shape
+// (`handle`/`name`/optional `email`/`status`) without reading like a real teammate —
+// an inactive member can't own active items, so it's clearly a stub to replace or
+// delete rather than live config. Authored, not generated; left for the repo to edit.
+// An unused roster keeps the scaffold --check-green (no task owns it).
 function teamContent() {
   return JSON.stringify(
-    { members: [{ handle: "example", name: "Example Member", email: "example@example.com", status: "active" }] },
+    { members: [{ handle: "example", name: "Example teammate (replace or delete)", email: "you@example.com", status: "inactive" }] },
     null,
     2,
   ) + "\n";
