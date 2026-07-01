@@ -110,10 +110,15 @@ repo and already tracked by git (commit the import first).
 A mapping is a JSON object. A profile is the same object shipped under
 [`profiles/`](../profiles) and addressed by name; an optional top-level
 `description` documents it and is ignored by the engine. The worked examples below
-are the two built-in profiles:
-[`taproot-ai-backlog`](../profiles/taproot-ai-backlog.json) (bold-inline + header
-style) and [`yaml-frontmatter`](../profiles/yaml-frontmatter.json) (full YAML
-front-matter).
+are the three built-in profiles:
+[`taproot-ai-backlog`](../profiles/taproot-ai-backlog.json) (a historical bold-inline +
+header-style reference), [`yaml-frontmatter`](../profiles/yaml-frontmatter.json) (full
+YAML front-matter under flat `active/`, `completed/`, `removed/`), and
+[`trellis`](../profiles/trellis.json) (a **Trellis-shaped** backlog — YAML front-matter
+under `active/`, `completed/tasks/`, `removed/` — for adopting, splitting, or merging
+Trellis repos). Source discovery skips the generator's own `index.md` / `README.md`
+artifacts, so importing a Trellis-shaped tree never picks up a generated index as a
+task.
 
 ```json
 {

@@ -215,10 +215,17 @@ function buildBody(raw, newId, title) {
 }
 
 // --------------------------------------------------------------- discovery
+// Basenames the Trellis generator owns (SPEC §8): a source that is itself a Trellis
+// backlog carries these alongside its tasks, so never select one as an importable
+// item — a `*.md` glob would otherwise pull in `completed/index.md` / `removed/index.md`
+// / `README.md` and fail validation. Scoped to the generator's exact artifact names,
+// not any `index.md` a foreign source might legitimately use as a real task.
+const GENERATED_ARTIFACTS = new Set(["index.md", "README.md"]);
+
 function listFiles(dir, re) {
   if (!existsSync(dir)) return null; // null = dir absent (a warning), [] = present-but-empty
   return readdirSync(dir)
-    .filter((f) => re.test(f) && statSync(join(dir, f)).isFile())
+    .filter((f) => !GENERATED_ARTIFACTS.has(f) && re.test(f) && statSync(join(dir, f)).isFile())
     .sort();
 }
 

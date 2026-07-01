@@ -24,6 +24,10 @@ const yamlSrc = join(fixtures, "yaml-frontmatter");
 // Header-less / size-only drift (TRL0026): closed items with no date header, effort
 // under a `Size:` label, and one item with no effort signal at all.
 const headerlessSrc = join(fixtures, "legacy-headerless");
+// A Trellis-shaped source (TRL0031): standard YAML front-matter under active/,
+// completed/tasks/, removed/, plus generator index.md/README.md artifacts that import
+// must skip. Imported via the built-in `trellis` profile.
+const trellisSrc = join(fixtures, "trellis-shaped");
 // The shipped Taproot reference profile doubles as this suite's regression mapping
 // (the built-in profiles are the canonical fixtures — TRL0022).
 const mapping = loadProfile("taproot-ai-backlog").mapping;
@@ -468,6 +472,30 @@ test("every built-in profile loads and is a structurally valid, documented mappi
     assert.ok(p.description, `profile ${p.name} documents itself with a description`);
   }
   // The clean-import proof for each profile is its dedicated test above.
+});
+
+test("the trellis profile imports a Trellis-shaped backlog: reads completed/tasks and skips generated indexes", () => {
+  const root = initTarget();
+  const before = snapshot(trellisSrc);
+  try {
+    const { mapping: trellisMapping, error } = loadProfile("trellis");
+    assert.equal(error, null, "trellis profile loads");
+    const { summary } = applyImport(root, trellisSrc, trellisMapping, {});
+    assert.deepEqual(summary.errors, []);
+    // One real task per status. The generated index.md + README.md in the globbed
+    // removed/ dir are skipped (else removed would be 3), and completed items are read
+    // from the nested completed/tasks/ — not the sibling completed/index.md.
+    assert.deepEqual(summary.counts, { active: 1, completed: 1, removed: 1, total: 3 });
+    const importedSources = summary.idMap.map((m) => m.sourceFile);
+    assert.ok(
+      !importedSources.some((s) => /(^|\/)(index|README)\.md$/.test(s)),
+      "no generated index.md/README.md was imported as a task",
+    );
+    assertCheckClean(root);
+    assert.deepEqual(snapshot(trellisSrc), before, "source is left untouched");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("CLI lists profiles, and --mapping <file> matches --profile <name>", () => {
