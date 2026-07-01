@@ -126,7 +126,7 @@
       ],
       "owner": null,
       "collaborators": [],
-      "summary": "After the import and scaffolding fixes ship, re-onboard ../taproot using only the published package's built-in taproot-ai-backlog profile (no hand-written mapping) and confirm the consumer path is clean end-to-end."
+      "summary": "After the import and scaffolding fixes ship, re-onboard ../taproot using only the published package's built-in trellis profile (no hand-written mapping) and confirm the consumer path is clean end-to-end."
     },
     {
       "id": "TRL0001",
