@@ -60,7 +60,7 @@
       ],
       "owner": null,
       "collaborators": [],
-      "summary": "Publish Trellis as an installable package (`npx ai-trellis`), version the spec, and write the getting-started and reference docs."
+      "summary": "Publish Trellis to public npm as `@taprootio/trellis` from GitHub CI, renaming off the never-published `ai-trellis` placeholder, then dogfood the packaged onboarding against a real repo."
     },
     {
       "id": "TRL0011",
