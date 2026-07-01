@@ -123,7 +123,7 @@
       ],
       "owner": null,
       "collaborators": [],
-      "summary": "Let import keep an existing item's id when it is valid for the target format and the data is sound, reserving the imported range and starting freshly-created ids at a configured floor above it — leaving a gap that absorbs collisions organically."
+      "summary": "Add an opt-in import mode that keeps an item's source id when it matches the target format and is unique, reassigning collisions/mismatches into the gap above the imported range, and record a configured nextIdFloor (core-honored) so freshly-created tasks begin above the imported band."
     },
     {
       "id": "TRL0035",
