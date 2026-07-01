@@ -1,32 +1,87 @@
 name: Release
 
-# Publishes @taprootio/trellis to the public npm registry on a v<version> tag push.
-# Releases are tag-driven only — there is no manual/branch publish path. To re-run
-# a failed release, use "Re-run jobs" (it replays the original tag context).
+# Publishes @taprootio/trellis to public npm when package.json's version on main
+# isn't on the registry yet. The version bump — reviewed in its PR into protected
+# main — is the release act; there is no separate tag step.
 #
-# Auth is a two-phase plan (TRL0010):
-#   Phase 1 (now): a short-lived npm automation token in the NPM_TOKEN secret.
-#   Phase 2 (next): npm trusted publishing (OIDC). This job already requests
-#     `id-token: write` and publishes with `--provenance`, so migrating is just:
-#     configure the trusted publisher for this package + workflow on npmjs, then
-#     delete the NPM_TOKEN secret — no workflow change required.
+# The npm publish and the git tag + GitHub Release are gated independently by the
+# `check` job, so the model is idempotent AND self-healing: unrelated pushes are
+# no-ops (version already published and released), and if either the publish or the
+# tag/Release is missing, the next push to main completes just that one — npm and
+# the tag/Release can't permanently diverge.
+#
+# Auth (TRL0010): Phase 1 short-lived NPM_TOKEN secret; Phase 2 npm trusted
+# publishing (OIDC) — the publish job already has id-token: write + --provenance,
+# so migrating is configure-the-publisher-then-drop-the-secret.
 #
 # Provenance requires this repository to be public.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
 
 permissions:
   contents: read
-  id-token: write # npm provenance / trusted publishing
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
+  check:
+    name: check version
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.state.outputs.publish }}
+      release: ${{ steps.state.outputs.release }}
+      version: ${{ steps.state.outputs.version }}
+      npmtag: ${{ steps.state.outputs.npmtag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Decide what still needs releasing
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # A prerelease (e.g. 1.2.0-rc.1) goes to the 'next' dist-tag, never
+          # 'latest', so it isn't the default install.
+          case "$version" in
+            *-*) echo "npmtag=next" >> "$GITHUB_OUTPUT" ;;
+            *) echo "npmtag=latest" >> "$GITHUB_OUTPUT" ;;
+          esac
+          # npm: publish unless this exact version is already on the registry. A
+          # missing package or version yields empty (`|| true` keeps set -e happy).
+          published="$(npm view "$name@$version" version 2>/dev/null || true)"
+          if [ "$published" = "$version" ]; then
+            echo "$name@$version already on npm."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$name@$version not on npm — will publish."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+          # git: create the tag + Release unless one already exists for this version.
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "v$version Release already exists."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$version Release missing — will create."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
   publish:
     name: publish
-    # Defense in depth: only ever run for a v* tag ref, even if another trigger
-    # is added later.
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    needs: check
+    if: needs.check.outputs.publish == 'true' || needs.check.outputs.release == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the v<version> tag + GitHub Release
+      id-token: write # npm provenance / trusted publishing
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,18 +89,25 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
       - run: npm ci
-      # Gates — never publish a red tree.
+      # Gates — never publish or release a red tree.
       - run: node --test
       - run: node scripts/backlog-readme.mjs --check
-      # The tag's version must match package.json (v0.1.0 -> 0.1.0).
-      - name: Verify tag matches package version
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          pkg="$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$pkg" ]; then
-            echo "tag $GITHUB_REF_NAME ($tag) does not match package.json version $pkg" >&2
-            exit 1
-          fi
-      - run: npm publish --provenance --access public
+      # Values pass through env, never inline `${{ }}`, so they cannot inject shell
+      # (matching pr-title.yml's convention).
+      - name: Publish to npm
+        if: needs.check.outputs.publish == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TAG: ${{ needs.check.outputs.npmtag }}
+        run: npm publish --provenance --access public --tag "$NPM_TAG"
+      # Independently gated: a tag/Release that didn't get created (e.g. this step
+      # failed after npm publish succeeded) is finished on a later push.
+      - name: Tag and GitHub Release
+        if: needs.check.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "v$VERSION" --title "v$VERSION" --generate-notes --target "$GITHUB_SHA" $prerelease
