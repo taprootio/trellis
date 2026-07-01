@@ -21,7 +21,7 @@ import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
 const HELP = `trellis init — scaffold the Trellis backlog into a repo
 
 Usage:
-  node scripts/trellis-init.mjs [target] [flags]
+  trellis init [target] [flags]
 
 Flags:
   --prefix <P>          id prefix (default: ${DEFAULTS.prefix})

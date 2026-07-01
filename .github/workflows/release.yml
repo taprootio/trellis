@@ -33,10 +33,16 @@ jobs:
       # Gates — never publish a red tree.
       - run: node --test
       - run: node scripts/backlog-readme.mjs --check
-      # On a tag push, the tag must match the package version (v0.1.0 -> 0.1.0).
-      - name: Verify tag matches package version
-        if: github.ref_type == 'tag'
+      # Publish only from a v<version> tag whose version matches package.json —
+      # enforced on every trigger, so a manual workflow_dispatch from a branch
+      # can't publish an untagged version.
+      - name: Require a matching v<version> tag
         run: |
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "Release publishes only from a v<version> tag; got $GITHUB_REF_TYPE '$GITHUB_REF_NAME'." >&2
+            echo "Tag the release, e.g. git tag v$(node -p "require('./package.json').version") && git push --tags" >&2
+            exit 1
+          fi
           tag="${GITHUB_REF_NAME#v}"
           pkg="$(node -p "require('./package.json').version")"
           if [ "$tag" != "$pkg" ]; then
