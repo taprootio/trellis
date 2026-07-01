@@ -32,6 +32,8 @@ Flags:
   --import <path>       after scaffolding, import an existing backlog at <path>
   --profile <name>      source-mapping profile for --import (trellis import --list-profiles)
   --mapping <file>      mapping file (JSON) for --import (alternative to --profile)
+  --preserve-ids        with --import, keep a source id that fits the target format (else reassign)
+  --id-floor <N>        with --import, floor the organic next id (default: auto — next 1000 above the band)
   --retire-source <p>   history-preservingly git-rm an imported source tree at <p>
                         (a separate, later step — see below; cannot combine with --import)
   --force               overwrite existing files instead of skipping
