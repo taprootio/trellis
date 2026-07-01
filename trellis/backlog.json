@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0036",
   "counts": {
-    "active": 11,
-    "completed": 24,
+    "active": 10,
+    "completed": 25,
     "removed": 0
   },
   "tasks": [
@@ -108,23 +108,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
-    },
-    {
-      "id": "TRL0031",
-      "title": "Importer — skip generated indexes; add a general trellis profile",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "High",
-      "effort": 3,
-      "effortLabel": "Trout",
-      "effortEmoji": "🐡",
-      "depends_on": [
-        "TRL0021",
-        "TRL0022"
-      ],
-      "owner": null,
-      "collaborators": [],
-      "summary": "Make import skip the generator's own artifacts (index.md / README.md) so they aren't imported as tasks, and add a general `trellis` profile that imports any Trellis-shaped backlog (YAML front-matter under active/, completed/tasks/, removed/) — so onboarding a Trellis-shaped repo needs no hand-written mapping."
     },
     {
       "id": "TRL0032",
@@ -599,6 +582,24 @@
       "collaborators": [],
       "summary": "Address the small but release-blocking dogfood issues from Taproot onboarding: publish under `ai-trellis`, make packaged commands target-aware, order CLI output deterministically, and clarify import retirement.",
       "completed_on": "2026-06-29"
+    },
+    {
+      "id": "TRL0031",
+      "title": "Importer — skip generated indexes; add a general trellis profile",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
+      "depends_on": [
+        "TRL0021",
+        "TRL0022"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Make import skip the generator's own artifacts (index.md / README.md) so they aren't imported as tasks, and add a general `trellis` profile that imports any Trellis-shaped backlog (YAML front-matter under active/, completed/tasks/, removed/) — so onboarding a Trellis-shaped repo needs no hand-written mapping.",
+      "completed_on": "2026-07-01"
     }
   ]
 }

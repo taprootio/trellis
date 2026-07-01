@@ -13,7 +13,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | ID | Title | Owner | Priority | Effort |
 | --- | --- | --- | --- | --- |
 | [TRL0011](active/TRL0011.md) | Test suite and CI for CLI and MCP server |  | High | Tuna · 5 |
-| [TRL0031](active/TRL0031.md) | Importer — skip generated indexes; add a general trellis profile |  | High | 🐡 Trout · 3 |
 | [TRL0019](active/TRL0019.md) | MCP server HTTP transport (port/host) + per-repo resource addressing |  | Medium | Tuna · 5 |
 | [TRL0032](active/TRL0032.md) | Importer — preserve sound source ids, with a configured new-id floor |  | Medium | Tuna · 5 |
 | [TRL0033](active/TRL0033.md) | Importer — stop truncating synthesized summaries at a line break |  | Medium | 🐠 Goldfish · 2 |
