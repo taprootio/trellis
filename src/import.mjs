@@ -221,17 +221,18 @@ function buildBody(raw, newId, title) {
 }
 
 // --------------------------------------------------------------- discovery
-// Basenames the Trellis generator owns (SPEC §8): a source that is itself a Trellis
-// backlog carries these alongside its tasks, so never select one as an importable
-// item — a `*.md` glob would otherwise pull in `completed/index.md` / `removed/index.md`
-// / `README.md` and fail validation. Scoped to the generator's exact artifact names,
-// not any `index.md` a foreign source might legitimately use as a real task.
-const GENERATED_ARTIFACTS = new Set(["index.md", "README.md"]);
+// The source-relative PATHS the Trellis generator owns (SPEC §8): a source that is
+// itself a Trellis backlog carries these alongside its tasks, so never select one as an
+// importable item — a `*.md` glob would otherwise pull them in and fail validation.
+// Matched by PATH, not basename, so a real task that merely happens to be named
+// `active/index.md` still imports.
+const GENERATED_ARTIFACTS = new Set(["README.md", "completed/index.md", "removed/index.md"]);
+const isGeneratedArtifact = (rel) => GENERATED_ARTIFACTS.has(rel.split(/[/\\]/).join("/"));
 
 function listFiles(dir, re) {
   if (!existsSync(dir)) return null; // null = dir absent (a warning), [] = present-but-empty
   return readdirSync(dir)
-    .filter((f) => !GENERATED_ARTIFACTS.has(f) && re.test(f) && statSync(join(dir, f)).isFile())
+    .filter((f) => re.test(f) && statSync(join(dir, f)).isFile())
     .sort();
 }
 
@@ -248,7 +249,11 @@ function discoverSources(sourceRoot, mapping, warnings) {
       const dir = join(sourceRoot, d);
       const files = listFiles(dir, re);
       if (files === null) { warnings.push(`source dir not found, skipped: ${d}`); continue; }
-      for (const f of files) hits.push({ status, dir, file: join(dir, f), basename: f.replace(/\.[^.]+$/, ""), rel: relative(sourceRoot, join(dir, f)) });
+      for (const f of files) {
+        const rel = relative(sourceRoot, join(dir, f));
+        if (isGeneratedArtifact(rel)) continue; // a Trellis generated artifact at its known path — not a task
+        hits.push({ status, dir, file: join(dir, f), basename: f.replace(/\.[^.]+$/, ""), rel });
+      }
     }
     hits.sort((a, b) => a.rel.localeCompare(b.rel));
     out.push(...hits);
@@ -350,7 +355,11 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
       }
     }
   }
-  let n = maxBand + 1;
+  // Non-preserve mode seeds from the organic next id (honoring nextIdFloor, SPEC §7);
+  // preserve mode fills the gap above the imported band (floor-agnostic), so reassigned
+  // collisions/mismatches stay with the band rather than jumping to the floor.
+  const floorSeed = Number.isInteger(cfg.nextIdFloor) && cfg.nextIdFloor > 0 ? cfg.nextIdFloor : 0;
+  let n = preserve ? maxBand + 1 : Math.max(maxBand + 1, floorSeed);
   for (const p of parsed) {
     if (p.newId) continue;
     while (used.has(fmtId(n))) n++;
