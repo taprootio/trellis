@@ -32,6 +32,9 @@ const trellisSrc = join(fixtures, "trellis-shaped");
 // summary field, to prove synthSummary flows the paragraph (TRL0033) rather than
 // truncating at the newline.
 const wrappedSrc = join(fixtures, "wrapped-summary");
+// Source ids that match the target format (TAP + 4 digits), plus a collision and a
+// non-matching legacy id, for --preserve-ids (TRL0032).
+const preserveSrc = join(fixtures, "preserve-ids");
 // The shipped Taproot reference profile doubles as this suite's regression mapping
 // (the built-in profiles are the canonical fixtures — TRL0022).
 const mapping = loadProfile("taproot-ai-backlog").mapping;
@@ -513,6 +516,34 @@ test("firstSentence summary flows a sentence that wraps across lines, not trunca
       "Add a real generator test command, make sure generator tests run in CI, and have the loop enforce it so drift can't land.",
       "the wrapped opening sentence is flowed in full, not cut at the line break",
     );
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--preserve-ids keeps sound ids, reassigns collisions/mismatches into the gap, and records a floor", () => {
+  const root = initTarget(); // prefix TAP, width 4, empty
+  try {
+    const { summary } = applyImport(root, preserveSrc, loadProfile("trellis").mapping, { preserveIds: true });
+    assert.deepEqual(summary.errors, []);
+    assert.equal(summary.counts.total, 4);
+    // TAP0031 + TAP0090 match the target format and are kept; the colliding TAP0031 and
+    // the non-matching LEG-1 are reassigned into the gap above the band (max kept = 90).
+    assert.equal(summary.preserved, 2);
+    assert.equal(summary.reassigned.length, 2);
+    // Which gap id each takes depends on locale sort order; assert the sets, not the pairing.
+    assert.deepEqual(summary.reassigned.map((r) => r.sourceId).sort(), ["LEG-1", "TAP0031"], "the collision and the mismatch are reassigned");
+    assert.deepEqual(summary.reassigned.map((r) => r.newId).sort(), ["TAP0091", "TAP0092"], "reassigned into the gap just above the band");
+    for (const id of ["TAP0031", "TAP0090", "TAP0091", "TAP0092"]) {
+      assert.ok(existsSync(join(root, `trellis/active/${id}.md`)), `${id} landed in the target`);
+    }
+    // Floor auto-derived (next 1000 above 90), recorded in config, honored by nextId.
+    assert.equal(summary.idFloor, 1000);
+    assert.equal(JSON.parse(readFileSync(join(root, "trellis/backlog.config.json"), "utf8")).nextIdFloor, 1000);
+    assert.equal(JSON.parse(readFileSync(join(root, "trellis/backlog.json"), "utf8")).nextId, "TAP1000");
+    // A prose ref to a reassigned id is reported (report-only — the prose is untouched).
+    assert.ok(summary.warnings.some((w) => /body still names "LEG-1"/.test(w)), `expected a LEG-1 prose-ref warning in ${JSON.stringify(summary.warnings)}`);
     assertCheckClean(root);
   } finally {
     rmSync(root, { recursive: true, force: true });

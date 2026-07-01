@@ -54,12 +54,33 @@ failure**, so a refused import leaves the target exactly as it was.
 ### What the importer guarantees
 
 - **The source tree is read-only** — items are copied out, never moved or deleted.
-- **Ids are assigned fresh-sequentially** from the target's next id, so an import
-  is safe even into a non-empty backlog. Colliding source ids are deduped by
-  construction, and every `depends_on` is rewritten through the id map. A
-  dependency on a collided (ambiguous) or unknown source id is a hard error.
+- **Ids are assigned fresh-sequentially** from the target's next id by default (with
+  `--preserve-ids`, sound source ids are kept — see below), so an import is safe even
+  into a non-empty backlog. Colliding source ids are deduped by construction, and every
+  `depends_on` is rewritten through the id map. A dependency on a collided (ambiguous)
+  or unknown source id is a hard error.
 - **A real run leaves the backlog `--check`-green**, or rolls back to the
   pre-import state if anything fails.
+
+### Preserve source ids (`--preserve-ids`)
+
+By default an import assigns fresh ids. With `--preserve-ids`, an item **keeps its own
+id** when it matches the target format exactly (`<idPrefix><idWidth digits>`) and is
+still free — so a same-prefix migration (a repo already Trellis-shaped, or one sharing
+the target's prefix) keeps its identities. Anything that can't keep its id — a
+collision (two sources claim one id: the first keeps it, the rest are reassigned) or a
+mismatched prefix/width — is reassigned into the **gap just above the imported range**,
+and every remap is reported.
+
+A configured **`nextIdFloor`** (SPEC §7) is recorded in `backlog.config.json` so the
+next *organically-created* id begins above the imported band: `nextId` becomes
+`max(floor, highest+1)`. The floor is auto-derived to the next multiple of 1000 above
+the band, or set explicitly with `--id-floor <N>`; the gap between the imported max and
+the floor is deliberate room to resolve collisions.
+
+`depends_on` is rewritten either way. Body **prose** is copied verbatim, so when an id
+changes the importer **warns** for any item whose text still names the old id — fix
+those by hand (the importer never rewrites prose).
 
 ### Add the adoption tracker after import
 

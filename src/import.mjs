@@ -49,7 +49,6 @@ import {
   resolveEffort,
   findMember,
   isValidHandle,
-  nextId,
   parseFrontMatter,
   paths,
   composeFile,
@@ -313,11 +312,11 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   const sources = discoverSources(sourceRoot, mapping, warnings);
   if (!sources.length) warnings.push("no source items matched — check `sources.dirs` and the `file` pattern");
 
-  // Fresh-sequential id allocation from the target's current nextId.
   const fields = mapping.fields;
   const idEx = fields.id || { from: "filename" };
-  let n = Number(nextId(data.ids, cfg).slice(cfg.idPrefix.length));
   const fmtId = (num) => cfg.idPrefix + String(num).padStart(cfg.idWidth, "0");
+  const numOf = (id) => Number(id.slice(cfg.idPrefix.length));
+  const preserve = opts.preserveIds === true;
 
   const errors = [];
   const items = [];
@@ -328,13 +327,40 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   const gitDate = opts.gitDate || ((rel) => gitCommitDate(sourceRoot, rel));
   const bySourceId = new Map(); // source id → [newId, …]; >1 ⇒ a collision (ambiguous for deps)
 
-  for (const src of sources) {
+  // Pre-pass: read each source and extract its source id, then assign a target id.
+  // Preserve mode (opt-in) keeps a source id that matches the target format exactly and
+  // is still free; collisions, format mismatches, and every id in the default mode are
+  // assigned fresh from the gap ABOVE the imported band. Allocation is floor-agnostic —
+  // the configured `nextIdFloor` governs only the organic next id (SPEC §7).
+  const parsed = sources.map((src) => {
     const raw = readFileSync(src.file, "utf8");
     const ctx = { raw, basename: src.basename, yaml: parseFrontMatter(raw, src.rel, []) || {} };
-    const newId = fmtId(n++);
     const sourceId = String(runExtractor(idEx, ctx) ?? src.basename).trim();
-    const at = bySourceId.get(sourceId) || []; at.push(newId); bySourceId.set(sourceId, at);
+    return { src, raw, ctx, sourceId, newId: null };
+  });
+  const exactRe = new RegExp(`^${escRe(cfg.idPrefix)}\\d{${cfg.idWidth}}$`);
+  const used = new Set(data.ids);
+  let maxBand = 0;
+  for (const id of data.ids) { const x = numOf(id); if (Number.isFinite(x) && x > maxBand) maxBand = x; }
+  const reassigned = []; // {sourceId, newId} — items whose id changed under preserve mode
+  if (preserve) {
+    for (const p of parsed) {
+      if (exactRe.test(p.sourceId) && !used.has(p.sourceId)) {
+        p.newId = p.sourceId; used.add(p.sourceId); maxBand = Math.max(maxBand, numOf(p.sourceId));
+      }
+    }
+  }
+  let n = maxBand + 1;
+  for (const p of parsed) {
+    if (p.newId) continue;
+    while (used.has(fmtId(n))) n++;
+    p.newId = fmtId(n); used.add(p.newId); n++;
+    if (preserve) reassigned.push({ sourceId: p.sourceId, newId: p.newId });
+  }
+  for (const p of parsed) { const at = bySourceId.get(p.sourceId) || []; at.push(p.newId); bySourceId.set(p.sourceId, at); }
 
+  for (const p of parsed) {
+    const { src, raw, ctx, sourceId, newId } = p;
     const ierr = (m) => errors.push(`${src.rel}: ${m}`);
     const isActive = src.status === "active";
 
@@ -529,10 +555,29 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
     it.fm.depends_on = out;
   }
 
+  // Prose-ref report (preserve mode): depends_on is rewritten through the id map, but
+  // body prose is copied verbatim, so warn when an imported body still names an id that
+  // was reassigned (report-only — never rewrite prose).
+  for (const { sourceId: oldId, newId } of reassigned) {
+    const re = new RegExp(`\\b${escRe(oldId)}\\b`);
+    // Skip the canonical H1 (buildBody re-heads it with the NEW id); only prose refs matter.
+    for (const it of items) if (re.test(it.body.replace(/^#[^\n]*\n?/, ""))) warnings.push(`${it.sourceRel}: body still names "${oldId}" (reassigned to ${newId}) — update the prose`);
+  }
+  // New-id floor (preserve mode): reserve the imported band so the ORGANIC next id
+  // begins above it. Auto-derive to the next multiple of 1000 above the band unless
+  // `--id-floor` overrides; skip with a warning if it wouldn't fit idWidth.
+  let idFloor = null;
+  if (preserve) {
+    const want = opts.idFloor != null ? opts.idFloor : (Math.floor(maxBand / 1000) + 1) * 1000;
+    if (want >= 10 ** cfg.idWidth) warnings.push(`nextIdFloor ${want} does not fit idWidth ${cfg.idWidth} (max ${10 ** cfg.idWidth - 1}) — floor not set`);
+    else { idFloor = want; cfg.nextIdFloor = want; }
+  }
+
   const counts = { active: 0, completed: 0, removed: 0, total: items.length };
   for (const it of items) counts[it.status]++;
   const idMap = items.map((it) => ({ sourceFile: it.sourceRel, sourceId: it.sourceId, newId: it.newId, status: it.status }));
-  return { cfg, root, items, idMap, counts, provenance, warnings, errors };
+  const preserved = preserve ? parsed.filter((p) => p.newId === p.sourceId).length : 0;
+  return { cfg, root, items, idMap, counts, provenance, warnings, errors, preserved, reassigned, idFloor };
 }
 
 // The four generated-artifact paths, repo-relative under the backlog root.
@@ -545,13 +590,16 @@ function generatedRels(root) {
 // the backlog is --check-green. On ANY failure, roll back (remove the new items,
 // restore the artifacts) so a rejected import leaves the target exactly as it was.
 // `dryRun` returns the plan without writing. The source tree is never written.
-export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, gitDate } = {}) {
-  const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, provenance: null, root: null, warnings: [], errors: [] };
-  const plan = planImport(targetRoot, sourceRoot, mapping, { gitDate });
+export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, gitDate, preserveIds = false, idFloor } = {}) {
+  const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, provenance: null, root: null, preserved: 0, reassigned: [], idFloor: null, warnings: [], errors: [] };
+  const plan = planImport(targetRoot, sourceRoot, mapping, { gitDate, preserveIds, idFloor });
   summary.idMap = plan.idMap;
   summary.counts = plan.counts;
   summary.provenance = plan.provenance;
   summary.root = plan.root;
+  summary.preserved = plan.preserved;
+  summary.reassigned = plan.reassigned;
+  summary.idFloor = plan.idFloor;
   summary.warnings = plan.warnings;
   if (plan.errors.length) { summary.errors.push(...plan.errors); return { summary }; }
 
@@ -565,16 +613,25 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
   const p = paths(targetRoot, plan.cfg);
   const artifacts = [p.readme, p.completedIndex, p.removedIndex, p.backlogJson];
   const priorArtifacts = artifacts.map((path) => ({ path, before: existsSync(path) ? readFileSync(path, "utf8") : null }));
+  // Persisting nextIdFloor mutates the config; snapshot it for rollback.
+  const priorConfig = plan.idFloor != null ? readFileSync(p.config, "utf8") : null;
   const written = [];
   try {
     for (const it of plan.items) {
       const abs = join(targetRoot, it.targetRel);
-      // Fresh ids never collide with existing items; a pre-existing target file
-      // would mean a corrupt plan, so refuse rather than clobber.
+      // A preserved id could match an existing item; a pre-existing target file means a
+      // corrupt plan (preservation checks the target's ids first), so refuse to clobber.
       if (existsSync(abs)) throw new Error(`refusing to overwrite existing ${it.targetRel}`);
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, composeFile(it.fm, it.body));
       written.push(abs);
+    }
+    // Record the new-id floor before regenerating so backlog.json's nextId (and every
+    // future organic id) begins above the imported band; plan.cfg already carries it.
+    if (plan.idFloor != null) {
+      const obj = JSON.parse(priorConfig);
+      obj.nextIdFloor = plan.idFloor;
+      writeFileSync(p.config, JSON.stringify(obj, null, 2) + "\n");
     }
     const data = readBacklog(targetRoot, plan.cfg);
     if (data.errors.length) throw new Error(`imported backlog is invalid: ${data.errors.join("; ")}`);
@@ -591,6 +648,7 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
     for (const a of priorArtifacts) {
       try { a.before === null ? rmSync(a.path, { force: true }) : writeFileSync(a.path, a.before); } catch { /* best-effort */ }
     }
+    if (priorConfig != null) { try { writeFileSync(p.config, priorConfig); } catch { /* best-effort */ } }
     summary.errors.push(e.message);
     return { summary };
   }
