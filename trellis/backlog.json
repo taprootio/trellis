@@ -111,7 +111,7 @@
     },
     {
       "id": "TRL0031",
-      "title": "Importer — skip generated indexes and read completed/tasks; refresh the taproot profile",
+      "title": "Importer — skip generated indexes; add a general trellis profile",
       "status": "active",
       "milestone": "v1",
       "priority": "High",
@@ -124,7 +124,7 @@
       ],
       "owner": null,
       "collaborators": [],
-      "summary": "Make import ignore generated index files and read completed items from a nested completed/tasks/ dir, and refresh the taproot-ai-backlog profile to Taproot's current docs/tasks layout and milestones so the built-in profile onboards Taproot with no hand-written mapping."
+      "summary": "Make import skip the generator's own artifacts (index.md / README.md) so they aren't imported as tasks, and add a general `trellis` profile that imports any Trellis-shaped backlog (YAML front-matter under active/, completed/tasks/, removed/) — so onboarding a Trellis-shaped repo needs no hand-written mapping."
     },
     {
       "id": "TRL0032",
