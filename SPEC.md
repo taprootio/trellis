@@ -1,6 +1,6 @@
 # Trellis Backlog Spec
 
-**Version:** 2.3.0 · **Status:** stable
+**Version:** 2.4.0 · **Status:** stable
 
 Trellis is a tool-agnostic convention for running a software backlog as plain
 files in a git repository. Work items are Markdown files with YAML front-matter;
@@ -62,7 +62,8 @@ configured width — e.g. with prefix `AB` and width 4, `AB0042`.
 
 - The id MUST match the item's filename (`AB0042` ⇄ `AB0042.md`).
 - Ids are assigned monotonically from the `nextId` published in the generated
-  `backlog.json` (§8.2).
+  `backlog.json` (§8.2); `nextId` is `max(highest-existing + 1, nextIdFloor)` when a
+  `nextIdFloor` is configured (§7).
 - An id is permanent and globally unique across all three directories. It MUST
   NOT be reused, even after an item is removed.
 
@@ -216,11 +217,17 @@ custom **effort scale** for display.
 | `priorities` | ordered priority names, highest first |
 | `effort` | canonical values, or the effort-scale object (§6.1) |
 | `tasksDir` | optional backlog-root path, repo-relative; defaults to `trellis/` |
+| `nextIdFloor` | optional; floors the next organically-assigned id — `nextId` = max(floor, highest+1) — so hand-created tasks begin above a reserved band (must fit `idWidth`) |
 
 `tasksDir` locates the task tree and the generated artifacts; omit it to accept
 the `trellis/` default. The config file itself stays at `trellis/backlog.config.json`
 regardless (§2) — its location is **not** governed by `tasksDir`, so the spec
 example above omits the key.
+
+`nextIdFloor` reserves the low id range: when set, the next organically-assigned id
+is `max(nextIdFloor, highest-existing + 1)`, so newly created tasks begin above a
+reserved band (e.g. one populated by an import) while ids within the band remain
+available. Absent, the next id is the historical `highest + 1`.
 
 **Configurable** per repo: everything in the table above, including the backlog
 root via `tasksDir`. **Fixed** by the spec: the `trellis/backlog.config.json`
