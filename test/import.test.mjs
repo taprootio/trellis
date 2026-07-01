@@ -24,6 +24,17 @@ const yamlSrc = join(fixtures, "yaml-frontmatter");
 // Header-less / size-only drift (TRL0026): closed items with no date header, effort
 // under a `Size:` label, and one item with no effort signal at all.
 const headerlessSrc = join(fixtures, "legacy-headerless");
+// A Trellis-shaped source (TRL0031): standard YAML front-matter under active/,
+// completed/tasks/, removed/, plus generator index.md/README.md artifacts that import
+// must skip. Imported via the built-in `trellis` profile.
+const trellisSrc = join(fixtures, "trellis-shaped");
+// A source whose first prose sentence wraps across two lines and carries no explicit
+// summary field, to prove synthSummary flows the paragraph (TRL0033) rather than
+// truncating at the newline.
+const wrappedSrc = join(fixtures, "wrapped-summary");
+// Source ids that match the target format (TAP + 4 digits), plus a collision and a
+// non-matching legacy id, for --preserve-ids (TRL0032).
+const preserveSrc = join(fixtures, "preserve-ids");
 // The shipped Taproot reference profile doubles as this suite's regression mapping
 // (the built-in profiles are the canonical fixtures — TRL0022).
 const mapping = loadProfile("taproot-ai-backlog").mapping;
@@ -468,6 +479,97 @@ test("every built-in profile loads and is a structurally valid, documented mappi
     assert.ok(p.description, `profile ${p.name} documents itself with a description`);
   }
   // The clean-import proof for each profile is its dedicated test above.
+});
+
+test("the trellis profile imports a Trellis-shaped backlog: reads completed/tasks and skips generated indexes", () => {
+  const root = initTarget();
+  const before = snapshot(trellisSrc);
+  try {
+    const { mapping: trellisMapping, error } = loadProfile("trellis");
+    assert.equal(error, null, "trellis profile loads");
+    const { summary } = applyImport(root, trellisSrc, trellisMapping, {});
+    assert.deepEqual(summary.errors, []);
+    // Completed items are read from the nested completed/tasks/; the generator's own
+    // removed/index.md is skipped by PATH; a real task named active/index.md still imports.
+    assert.deepEqual(summary.counts, { active: 2, completed: 1, removed: 1, total: 4 });
+    const importedSources = summary.idMap.map((m) => m.sourceFile);
+    assert.ok(
+      !importedSources.includes("removed/index.md") && !importedSources.includes("completed/index.md"),
+      "generated indexes at their known paths are not imported as tasks",
+    );
+    assert.ok(
+      importedSources.includes("active/index.md"),
+      "a legit task merely named active/index.md is imported (not skipped by basename)",
+    );
+    assertCheckClean(root);
+    assert.deepEqual(snapshot(trellisSrc), before, "source is left untouched");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("firstSentence summary flows a sentence that wraps across lines, not truncating at the newline", () => {
+  const root = initTarget();
+  try {
+    const { summary } = applyImport(root, wrappedSrc, loadProfile("trellis").mapping, {});
+    assert.deepEqual(summary.errors, []);
+    const item = fm(root, `trellis/active/${newIdFor(summary.idMap, "active/W1.md")}.md`);
+    assert.equal(
+      item.summary,
+      "Add a real generator test command, make sure generator tests run in CI, and have the loop enforce it so drift can't land.",
+      "the wrapped opening sentence is flowed in full, not cut at the line break",
+    );
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("--preserve-ids keeps sound ids, reassigns collisions/mismatches into the gap, and records a floor", () => {
+  const root = initTarget(); // prefix TAP, width 4, empty
+  try {
+    const { summary } = applyImport(root, preserveSrc, loadProfile("trellis").mapping, { preserveIds: true });
+    assert.deepEqual(summary.errors, []);
+    assert.equal(summary.counts.total, 4);
+    // TAP0031 + TAP0090 match the target format and are kept; the colliding TAP0031 and
+    // the non-matching LEG-1 are reassigned into the gap above the band (max kept = 90).
+    assert.equal(summary.preserved, 2);
+    assert.equal(summary.reassigned.length, 2);
+    // Which gap id each takes depends on locale sort order; assert the sets, not the pairing.
+    assert.deepEqual(summary.reassigned.map((r) => r.sourceId).sort(), ["LEG-1", "TAP0031"], "the collision and the mismatch are reassigned");
+    assert.deepEqual(summary.reassigned.map((r) => r.newId).sort(), ["TAP0091", "TAP0092"], "reassigned into the gap just above the band");
+    for (const id of ["TAP0031", "TAP0090", "TAP0091", "TAP0092"]) {
+      assert.ok(existsSync(join(root, `trellis/active/${id}.md`)), `${id} landed in the target`);
+    }
+    // Floor auto-derived (next 1000 above 90), recorded in config, honored by nextId.
+    assert.equal(summary.idFloor, 1000);
+    assert.equal(JSON.parse(readFileSync(join(root, "trellis/backlog.config.json"), "utf8")).nextIdFloor, 1000);
+    assert.equal(JSON.parse(readFileSync(join(root, "trellis/backlog.json"), "utf8")).nextId, "TAP1000");
+    // A prose ref to a reassigned id is reported (report-only — the prose is untouched).
+    assert.ok(summary.warnings.some((w) => /body still names "LEG-1"/.test(w)), `expected a LEG-1 prose-ref warning in ${JSON.stringify(summary.warnings)}`);
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a non-preserve import honors an existing nextIdFloor (SPEC §7), not just preserve mode", () => {
+  const root = initTarget(); // TAP/4, empty
+  const cfgPath = join(root, "trellis/backlog.config.json");
+  const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  cfg.nextIdFloor = 500; // as a prior preserving import would have recorded
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+  try {
+    // Default (non-preserve) import into a floored, empty target → ids begin at the floor,
+    // not TAP0001 — allocation matches the core nextId = max(highest+1, floor).
+    const { summary } = applyImport(root, trellisSrc, loadProfile("trellis").mapping, {});
+    assert.deepEqual(summary.errors, []);
+    assert.ok(summary.idMap.every((m) => Number(m.newId.slice(3)) >= 500), `all imported ids >= floor; got ${summary.idMap.map((m) => m.newId)}`);
+    assert.ok(summary.idMap.some((m) => m.newId === "TAP0500"), "the first imported id is the floor");
+    assertCheckClean(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("CLI lists profiles, and --mapping <file> matches --profile <name>", () => {

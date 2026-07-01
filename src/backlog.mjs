@@ -12,7 +12,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
-export const SPEC_VERSION = "2.3";
+export const SPEC_VERSION = "2.4";
 
 // The backlog root defaults to `trellis/` and is overridable per repo via the
 // config's `tasksDir` key (SPEC §2/§7). The config file itself lives at a FIXED
@@ -72,6 +72,15 @@ export function loadConfig(repoRoot) {
   const errors = [];
   if (typeof cfg.idPrefix !== "string" || !cfg.idPrefix) errors.push("config: `idPrefix` must be a non-empty string");
   if (!Number.isInteger(cfg.idWidth) || cfg.idWidth < 1) errors.push("config: `idWidth` must be a positive integer");
+  // Optional (TRL0032): floors the *organic* next id (max(floor, max+1)) so freshly
+  // created tasks begin above an imported band; must fit idWidth.
+  if (cfg.nextIdFloor != null) {
+    if (!Number.isInteger(cfg.nextIdFloor) || cfg.nextIdFloor < 0) {
+      errors.push("config: `nextIdFloor` must be a non-negative integer when present");
+    } else if (Number.isInteger(cfg.idWidth) && cfg.idWidth >= 1 && cfg.nextIdFloor >= 10 ** cfg.idWidth) {
+      errors.push(`config: \`nextIdFloor\` (${cfg.nextIdFloor}) must be < 10^idWidth (${10 ** cfg.idWidth}) to fit ${cfg.idWidth} digits`);
+    }
+  }
   if (!Array.isArray(cfg.milestones) || cfg.milestones.length === 0) errors.push("config: `milestones` must be a non-empty array");
   if (!Array.isArray(cfg.priorities) || cfg.priorities.length === 0) errors.push("config: `priorities` must be a non-empty array");
   const effortValues = Array.isArray(cfg.effort) ? cfg.effort : cfg.effort && cfg.effort.values;
@@ -564,7 +573,10 @@ export function nextId(ids, cfg) {
     const n = Number(id.slice(cfg.idPrefix.length));
     if (Number.isFinite(n) && n > max) max = n;
   }
-  return cfg.idPrefix + String(max + 1).padStart(cfg.idWidth, "0");
+  // `nextIdFloor` (TRL0032) reserves the low range for an imported band: the next
+  // organically-created id is max(max+1, floor). Absent floor ⇒ the historical max+1.
+  const floor = Number.isInteger(cfg.nextIdFloor) && cfg.nextIdFloor > 0 ? cfg.nextIdFloor : 0;
+  return cfg.idPrefix + String(Math.max(max + 1, floor)).padStart(cfg.idWidth, "0");
 }
 
 // ------------------------------------------------------------- rendering

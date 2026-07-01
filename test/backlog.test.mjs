@@ -124,6 +124,25 @@ test("config errors: missing mapping, duplicate label, bad types, unknown active
   }
 });
 
+test("config accepts a valid nextIdFloor and rejects invalid ones (TRL0032)", () => {
+  withRepo({ ...ARRAY_CFG, nextIdFloor: 100 }, {}, (root) => {
+    const { cfg, errors } = loadConfig(root);
+    assert.deepEqual(errors, []);
+    assert.equal(cfg.nextIdFloor, 100);
+  });
+  const bad = [
+    [-1, /nextIdFloor.*non-negative integer/],
+    [3.5, /nextIdFloor.*non-negative integer/],
+    [10000, /nextIdFloor.*10\^idWidth/], // idWidth 4 ⇒ must be < 10000
+  ];
+  for (const [nextIdFloor, re] of bad) {
+    withRepo({ ...ARRAY_CFG, nextIdFloor }, {}, (root) => {
+      const { errors } = loadConfig(root);
+      assert.ok(errors.some((e) => re.test(e)), `expected ${re} in ${JSON.stringify(errors)}`);
+    });
+  }
+});
+
 // ----------------------------------------------------------- resolution
 
 test("resolveEffort accepts a number or a case-insensitive label", () => {
@@ -200,6 +219,22 @@ test("README publishes the milestone tables only — no `Next task ID` section (
     assert.doesNotMatch(readme, /Next task ID/, "the next id is no longer published in the README");
     // It stays canonical in backlog.json (SPEC §8.2) — one active item ⇒ next is DEMO0002.
     assert.equal(JSON.parse(buildBacklogJson(cfg, data)).nextId, "DEMO0002");
+  });
+});
+
+test("nextIdFloor floors the next organically-assigned id (SPEC §7)", () => {
+  // Floor above the current max: the next id jumps to the floor.
+  withRepo({ ...ARRAY_CFG, nextIdFloor: 1000 }, { active: [{ id: "DEMO0001", title: "T", effort: 2 }] }, (root) => {
+    const { cfg, errors } = loadConfig(root);
+    assert.deepEqual(errors, []);
+    const data = readBacklog(root, cfg);
+    assert.equal(JSON.parse(buildBacklogJson(cfg, data)).nextId, "DEMO1000", "next id is max(floor, max+1)");
+  });
+  // Floor below the current max: it never lowers the next id.
+  withRepo({ ...ARRAY_CFG, nextIdFloor: 5 }, { active: [{ id: "DEMO0009", title: "T", effort: 2 }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    assert.equal(JSON.parse(buildBacklogJson(cfg, data)).nextId, "DEMO0010");
   });
 });
 

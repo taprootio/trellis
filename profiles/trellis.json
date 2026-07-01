@@ -1,0 +1,23 @@
+{
+  "description": "Import a Trellis-shaped backlog into a Trellis repo: standard YAML front-matter items under active/, completed/tasks/, and removed/ (Trellis's own output layout), with the generator's index.md / README.md artifacts skipped. For adopting, splitting, or merging Trellis backlogs. Carries no remap or defaults — it assumes the target's vocabulary (milestones, priorities, effort) already matches the source's; configure the target's milestones at init, or supply a --mapping override, if they differ.",
+  "sources": {
+    "active": { "dirs": ["active"], "file": "*.md" },
+    "completed": { "dirs": ["completed/tasks"], "file": "*.md" },
+    "removed": { "dirs": ["removed"], "file": "*.md" }
+  },
+  "fields": {
+    "id": { "from": "yaml", "key": "id", "fallback": { "from": "filename" } },
+    "title": { "from": "yaml", "key": "title", "fallback": { "from": "h1" } },
+    "priority": { "from": "yaml", "key": "priority" },
+    "effort": { "from": "yaml", "key": "effort" },
+    "milestone": { "from": "yaml", "key": "milestone" },
+    "summary": { "from": "yaml", "key": "summary" },
+    "owner": { "from": "yaml", "key": "owner" },
+    "collaborators": { "from": "yaml", "key": "collaborators" },
+    "depends_on": { "from": "yaml", "key": "depends_on" },
+    "completed_on": { "from": "yaml", "key": "completed_on" },
+    "removed_on": { "from": "yaml", "key": "removed_on" },
+    "removed_reason": { "from": "yaml", "key": "removed_reason" }
+  },
+  "summary": { "strategy": "firstSentence" }
+}

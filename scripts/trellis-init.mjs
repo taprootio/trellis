@@ -32,6 +32,8 @@ Flags:
   --import <path>       after scaffolding, import an existing backlog at <path>
   --profile <name>      source-mapping profile for --import (trellis import --list-profiles)
   --mapping <file>      mapping file (JSON) for --import (alternative to --profile)
+  --preserve-ids        with --import, keep a source id that fits the target format (else reassign)
+  --id-floor <N>        with --import, floor the organic next id (default: auto — next 1000 above the band)
   --retire-source <p>   history-preservingly git-rm an imported source tree at <p>
                         (a separate, later step — see below; cannot combine with --import)
   --force               overwrite existing files instead of skipping
@@ -79,6 +81,13 @@ function parseArgs(argv) {
       case "--import": opts.import = next(); break;
       case "--profile": opts.profile = next(); break;
       case "--mapping": opts.mapping = next(); break;
+      case "--preserve-ids": opts.preserveIds = true; break;
+      case "--id-floor": {
+        const v = Number(next());
+        if (!Number.isInteger(v) || v < 0) { console.error("--id-floor must be a non-negative integer"); process.exit(2); }
+        opts.idFloor = v;
+        break;
+      }
       case "--retire-source": opts.retireSource = next(); break;
       case "--prefix": opts.prefix = next(); break;
       case "--id-width": opts.idWidth = Number(next()); break;
@@ -278,7 +287,7 @@ if (opts.import) {
     console.log("Re-run without --dry-run to scaffold and import, or run `npx @taprootio/trellis import --dry-run` on the initialized repo to preview the import plan.");
     process.exit(0);
   }
-  const { summary: imp } = applyImport(targetRoot, importSource, mapping, { dryRun: false });
+  const { summary: imp } = applyImport(targetRoot, importSource, mapping, { dryRun: false, preserveIds: opts.preserveIds, idFloor: opts.idFloor });
   reportImport(targetRoot, imp);
   process.exit(imp.errors.length ? 1 : 0);
 }

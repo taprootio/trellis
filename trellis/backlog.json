@@ -6,10 +6,10 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0031",
+  "nextId": "TRL0036",
   "counts": {
     "active": 7,
-    "completed": 23,
+    "completed": 28,
     "removed": 0
   },
   "tasks": [
@@ -44,23 +44,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a dependency graph and filtering by milestone, priority, and effort to the local viewer."
-    },
-    {
-      "id": "TRL0010",
-      "title": "Packaging, versioned spec, and docs",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "High",
-      "effort": 5,
-      "effortLabel": "Tuna",
-      "effortImage": "assets/effort/tuna.svg",
-      "depends_on": [
-        "TRL0003",
-        "TRL0006"
-      ],
-      "owner": null,
-      "collaborators": [],
-      "summary": "Publish Trellis to public npm as `@taprootio/trellis` from GitHub CI, renaming off the never-published `ai-trellis` placeholder, then dogfood the packaged onboarding against a real repo."
     },
     {
       "id": "TRL0011",
@@ -125,6 +108,25 @@
       "owner": null,
       "collaborators": [],
       "summary": "Add a network (Streamable HTTP) transport with --port/--host and trellis://{repo}/… resource addressing, so a team can run one shared MCP server against many repos."
+    },
+    {
+      "id": "TRL0035",
+      "title": "Dogfood round 2 — re-onboard Taproot with the built-in profile after the fixes",
+      "status": "active",
+      "milestone": "v1",
+      "priority": "Medium",
+      "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
+      "depends_on": [
+        "TRL0031",
+        "TRL0032",
+        "TRL0033",
+        "TRL0034"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "After the import and scaffolding fixes ship, re-onboard ../taproot using only the published package's built-in trellis profile (no hand-written mapping) and confirm the consumer path is clean end-to-end."
     },
     {
       "id": "TRL0001",
@@ -247,6 +249,24 @@
       "collaborators": [],
       "summary": "Run `trellis init` against a second, non-trivial repo and work a real task through the loop to prove the formula travels.",
       "completed_on": "2026-06-29"
+    },
+    {
+      "id": "TRL0010",
+      "title": "Packaging, versioned spec, and docs",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [
+        "TRL0003",
+        "TRL0006"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Publish Trellis to public npm as `@taprootio/trellis` from GitHub CI, renaming off the never-published `ai-trellis` placeholder, then dogfood the packaged onboarding against a real repo.",
+      "completed_on": "2026-07-01"
     },
     {
       "id": "TRL0014",
@@ -514,6 +534,75 @@
       "collaborators": [],
       "summary": "Address the small but release-blocking dogfood issues from Taproot onboarding: publish under `ai-trellis`, make packaged commands target-aware, order CLI output deterministically, and clarify import retirement.",
       "completed_on": "2026-06-29"
+    },
+    {
+      "id": "TRL0031",
+      "title": "Importer — skip generated indexes; add a general trellis profile",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
+      "depends_on": [
+        "TRL0021",
+        "TRL0022"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Make import skip the generator's own artifacts (index.md / README.md) so they aren't imported as tasks, and add a general `trellis` profile that imports any Trellis-shaped backlog (YAML front-matter under active/, completed/tasks/, removed/) — so onboarding a Trellis-shaped repo needs no hand-written mapping.",
+      "completed_on": "2026-07-01"
+    },
+    {
+      "id": "TRL0032",
+      "title": "Importer — preserve sound source ids, with a configured new-id floor",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "Medium",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [
+        "TRL0021"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Add an opt-in import mode that keeps an item's source id when it matches the target format and is unique, reassigning collisions/mismatches into the gap above the imported range, and record a configured nextIdFloor (core-honored) so freshly-created tasks begin above the imported band.",
+      "completed_on": "2026-07-01"
+    },
+    {
+      "id": "TRL0033",
+      "title": "Importer — stop truncating synthesized summaries at a line break",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "Medium",
+      "effort": 2,
+      "effortLabel": "Goldfish",
+      "effortEmoji": "🐠",
+      "depends_on": [
+        "TRL0021"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "Fix the firstSentence summary strategy so a synthesized summary isn't cut off mid-sentence at a soft line break; end at the first real sentence terminator across wrapped lines.",
+      "completed_on": "2026-07-01"
+    },
+    {
+      "id": "TRL0034",
+      "title": "Init — drop the placeholder example member from the scaffolded team.json",
+      "status": "completed",
+      "milestone": "Future",
+      "priority": "Low",
+      "effort": 1,
+      "effortLabel": "Minnow",
+      "effortEmoji": "🐟",
+      "depends_on": [
+        "TRL0023"
+      ],
+      "owner": null,
+      "collaborators": [],
+      "summary": "The scaffolded team.json ships an active \"example\" member that reads like real config; make it clearly inert (empty roster with inline guidance) so onboarded repos don't mistake it for a real teammate.",
+      "completed_on": "2026-07-01"
     }
   ]
 }

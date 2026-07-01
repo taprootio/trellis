@@ -49,7 +49,6 @@ import {
   resolveEffort,
   findMember,
   isValidHandle,
-  nextId,
   parseFrontMatter,
   paths,
   composeFile,
@@ -187,19 +186,26 @@ function resolveEnum(raw, remap, allowed, label) {
 // First-sentence (or title) synthesis for a missing summary (SPEC §5.1: summary is
 // required and feeds the README). Skips the H1, blank lines, and metadata-shaped
 // lines (bold `**Field:**`, list bullets, short `Key: value` headers) so it lands
-// on real prose, then takes that line's first sentence, single-lined. A heuristic —
-// summary is descriptive, not correctness-critical — that fails safe to the title.
+// on real prose, then flows that first prose paragraph and takes its first sentence,
+// single-lined (a wrapped sentence isn't cut at the newline). A heuristic — summary is
+// descriptive, not correctness-critical — that fails safe to the title.
 function synthSummary(body, title, strategy) {
   if (strategy === "title") return title;
   const isMeta = (l) => l.startsWith("**") || /^[-*+]\s/.test(l) || /^[A-Za-z][\w ()/-]{0,30}:\s+\S/.test(l);
-  for (const line of body.split("\n")) {
-    const l = line.trim();
-    if (!l || l.startsWith("#") || isMeta(l)) continue;
-    const m = l.match(/^(.+?[.!?])(\s|$)/);
-    const s = (m ? m[1] : l).replace(/\s+/g, " ").trim();
-    if (s) return s;
-  }
-  return title;
+  const lines = body.split("\n");
+  let i = 0;
+  while (i < lines.length) { const l = lines[i].trim(); if (l && !l.startsWith("#") && !isMeta(l)) break; i++; }
+  if (i >= lines.length) return title;
+  // Flow the soft-wrapped lines of the first prose paragraph into one string so a
+  // sentence that wraps across lines isn't truncated at the newline; the paragraph
+  // ends at a blank line, a heading, or a metadata-shaped line.
+  const para = [];
+  for (; i < lines.length; i++) { const l = lines[i].trim(); if (!l || l.startsWith("#") || isMeta(l)) break; para.push(l); }
+  const flowed = para.join(" ").replace(/\s+/g, " ").trim();
+  const m = flowed.match(/^(.+?[.!?])(\s|$)/);
+  // First sentence if the paragraph terminates one; else fall back to the first prose
+  // line (unchanged from prior behavior), single-lined.
+  return (m ? m[1] : para[0]).replace(/\s+/g, " ").trim() || title;
 }
 
 // Rebuild a source file's prose as a Trellis body: drop a leading YAML block and a
@@ -215,6 +221,14 @@ function buildBody(raw, newId, title) {
 }
 
 // --------------------------------------------------------------- discovery
+// The source-relative PATHS the Trellis generator owns (SPEC §8): a source that is
+// itself a Trellis backlog carries these alongside its tasks, so never select one as an
+// importable item — a `*.md` glob would otherwise pull them in and fail validation.
+// Matched by PATH, not basename, so a real task that merely happens to be named
+// `active/index.md` still imports.
+const GENERATED_ARTIFACTS = new Set(["README.md", "completed/index.md", "removed/index.md"]);
+const isGeneratedArtifact = (rel) => GENERATED_ARTIFACTS.has(rel.split(/[/\\]/).join("/"));
+
 function listFiles(dir, re) {
   if (!existsSync(dir)) return null; // null = dir absent (a warning), [] = present-but-empty
   return readdirSync(dir)
@@ -235,7 +249,11 @@ function discoverSources(sourceRoot, mapping, warnings) {
       const dir = join(sourceRoot, d);
       const files = listFiles(dir, re);
       if (files === null) { warnings.push(`source dir not found, skipped: ${d}`); continue; }
-      for (const f of files) hits.push({ status, dir, file: join(dir, f), basename: f.replace(/\.[^.]+$/, ""), rel: relative(sourceRoot, join(dir, f)) });
+      for (const f of files) {
+        const rel = relative(sourceRoot, join(dir, f));
+        if (isGeneratedArtifact(rel)) continue; // a Trellis generated artifact at its known path — not a task
+        hits.push({ status, dir, file: join(dir, f), basename: f.replace(/\.[^.]+$/, ""), rel });
+      }
     }
     hits.sort((a, b) => a.rel.localeCompare(b.rel));
     out.push(...hits);
@@ -299,11 +317,11 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   const sources = discoverSources(sourceRoot, mapping, warnings);
   if (!sources.length) warnings.push("no source items matched — check `sources.dirs` and the `file` pattern");
 
-  // Fresh-sequential id allocation from the target's current nextId.
   const fields = mapping.fields;
   const idEx = fields.id || { from: "filename" };
-  let n = Number(nextId(data.ids, cfg).slice(cfg.idPrefix.length));
   const fmtId = (num) => cfg.idPrefix + String(num).padStart(cfg.idWidth, "0");
+  const numOf = (id) => Number(id.slice(cfg.idPrefix.length));
+  const preserve = opts.preserveIds === true;
 
   const errors = [];
   const items = [];
@@ -314,13 +332,44 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   const gitDate = opts.gitDate || ((rel) => gitCommitDate(sourceRoot, rel));
   const bySourceId = new Map(); // source id → [newId, …]; >1 ⇒ a collision (ambiguous for deps)
 
-  for (const src of sources) {
+  // Pre-pass: read each source and extract its source id, then assign a target id.
+  // Preserve mode (opt-in) keeps a source id that matches the target format exactly and
+  // is still free; collisions, format mismatches, and every id in the default mode are
+  // assigned fresh from the gap ABOVE the imported band. Allocation is floor-agnostic —
+  // the configured `nextIdFloor` governs only the organic next id (SPEC §7).
+  const parsed = sources.map((src) => {
     const raw = readFileSync(src.file, "utf8");
     const ctx = { raw, basename: src.basename, yaml: parseFrontMatter(raw, src.rel, []) || {} };
-    const newId = fmtId(n++);
     const sourceId = String(runExtractor(idEx, ctx) ?? src.basename).trim();
-    const at = bySourceId.get(sourceId) || []; at.push(newId); bySourceId.set(sourceId, at);
+    return { src, raw, ctx, sourceId, newId: null };
+  });
+  const exactRe = new RegExp(`^${escRe(cfg.idPrefix)}\\d{${cfg.idWidth}}$`);
+  const used = new Set(data.ids);
+  let maxBand = 0;
+  for (const id of data.ids) { const x = numOf(id); if (Number.isFinite(x) && x > maxBand) maxBand = x; }
+  const reassigned = []; // {sourceId, newId} — items whose id changed under preserve mode
+  if (preserve) {
+    for (const p of parsed) {
+      if (exactRe.test(p.sourceId) && !used.has(p.sourceId)) {
+        p.newId = p.sourceId; used.add(p.sourceId); maxBand = Math.max(maxBand, numOf(p.sourceId));
+      }
+    }
+  }
+  // Non-preserve mode seeds from the organic next id (honoring nextIdFloor, SPEC §7);
+  // preserve mode fills the gap above the imported band (floor-agnostic), so reassigned
+  // collisions/mismatches stay with the band rather than jumping to the floor.
+  const floorSeed = Number.isInteger(cfg.nextIdFloor) && cfg.nextIdFloor > 0 ? cfg.nextIdFloor : 0;
+  let n = preserve ? maxBand + 1 : Math.max(maxBand + 1, floorSeed);
+  for (const p of parsed) {
+    if (p.newId) continue;
+    while (used.has(fmtId(n))) n++;
+    p.newId = fmtId(n); used.add(p.newId); n++;
+    if (preserve) reassigned.push({ sourceId: p.sourceId, newId: p.newId });
+  }
+  for (const p of parsed) { const at = bySourceId.get(p.sourceId) || []; at.push(p.newId); bySourceId.set(p.sourceId, at); }
 
+  for (const p of parsed) {
+    const { src, raw, ctx, sourceId, newId } = p;
     const ierr = (m) => errors.push(`${src.rel}: ${m}`);
     const isActive = src.status === "active";
 
@@ -515,10 +564,29 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
     it.fm.depends_on = out;
   }
 
+  // Prose-ref report (preserve mode): depends_on is rewritten through the id map, but
+  // body prose is copied verbatim, so warn when an imported body still names an id that
+  // was reassigned (report-only — never rewrite prose).
+  for (const { sourceId: oldId, newId } of reassigned) {
+    const re = new RegExp(`\\b${escRe(oldId)}\\b`);
+    // Skip the canonical H1 (buildBody re-heads it with the NEW id); only prose refs matter.
+    for (const it of items) if (re.test(it.body.replace(/^#[^\n]*\n?/, ""))) warnings.push(`${it.sourceRel}: body still names "${oldId}" (reassigned to ${newId}) — update the prose`);
+  }
+  // New-id floor (preserve mode): reserve the imported band so the ORGANIC next id
+  // begins above it. Auto-derive to the next multiple of 1000 above the band unless
+  // `--id-floor` overrides; skip with a warning if it wouldn't fit idWidth.
+  let idFloor = null;
+  if (preserve) {
+    const want = opts.idFloor != null ? opts.idFloor : (Math.floor(maxBand / 1000) + 1) * 1000;
+    if (want >= 10 ** cfg.idWidth) warnings.push(`nextIdFloor ${want} does not fit idWidth ${cfg.idWidth} (max ${10 ** cfg.idWidth - 1}) — floor not set`);
+    else { idFloor = want; cfg.nextIdFloor = want; }
+  }
+
   const counts = { active: 0, completed: 0, removed: 0, total: items.length };
   for (const it of items) counts[it.status]++;
   const idMap = items.map((it) => ({ sourceFile: it.sourceRel, sourceId: it.sourceId, newId: it.newId, status: it.status }));
-  return { cfg, root, items, idMap, counts, provenance, warnings, errors };
+  const preserved = preserve ? parsed.filter((p) => p.newId === p.sourceId).length : 0;
+  return { cfg, root, items, idMap, counts, provenance, warnings, errors, preserved, reassigned, idFloor };
 }
 
 // The four generated-artifact paths, repo-relative under the backlog root.
@@ -531,13 +599,16 @@ function generatedRels(root) {
 // the backlog is --check-green. On ANY failure, roll back (remove the new items,
 // restore the artifacts) so a rejected import leaves the target exactly as it was.
 // `dryRun` returns the plan without writing. The source tree is never written.
-export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, gitDate } = {}) {
-  const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, provenance: null, root: null, warnings: [], errors: [] };
-  const plan = planImport(targetRoot, sourceRoot, mapping, { gitDate });
+export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, gitDate, preserveIds = false, idFloor } = {}) {
+  const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, provenance: null, root: null, preserved: 0, reassigned: [], idFloor: null, warnings: [], errors: [] };
+  const plan = planImport(targetRoot, sourceRoot, mapping, { gitDate, preserveIds, idFloor });
   summary.idMap = plan.idMap;
   summary.counts = plan.counts;
   summary.provenance = plan.provenance;
   summary.root = plan.root;
+  summary.preserved = plan.preserved;
+  summary.reassigned = plan.reassigned;
+  summary.idFloor = plan.idFloor;
   summary.warnings = plan.warnings;
   if (plan.errors.length) { summary.errors.push(...plan.errors); return { summary }; }
 
@@ -551,16 +622,25 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
   const p = paths(targetRoot, plan.cfg);
   const artifacts = [p.readme, p.completedIndex, p.removedIndex, p.backlogJson];
   const priorArtifacts = artifacts.map((path) => ({ path, before: existsSync(path) ? readFileSync(path, "utf8") : null }));
+  // Persisting nextIdFloor mutates the config; snapshot it for rollback.
+  const priorConfig = plan.idFloor != null ? readFileSync(p.config, "utf8") : null;
   const written = [];
   try {
     for (const it of plan.items) {
       const abs = join(targetRoot, it.targetRel);
-      // Fresh ids never collide with existing items; a pre-existing target file
-      // would mean a corrupt plan, so refuse rather than clobber.
+      // A preserved id could match an existing item; a pre-existing target file means a
+      // corrupt plan (preservation checks the target's ids first), so refuse to clobber.
       if (existsSync(abs)) throw new Error(`refusing to overwrite existing ${it.targetRel}`);
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, composeFile(it.fm, it.body));
       written.push(abs);
+    }
+    // Record the new-id floor before regenerating so backlog.json's nextId (and every
+    // future organic id) begins above the imported band; plan.cfg already carries it.
+    if (plan.idFloor != null) {
+      const obj = JSON.parse(priorConfig);
+      obj.nextIdFloor = plan.idFloor;
+      writeFileSync(p.config, JSON.stringify(obj, null, 2) + "\n");
     }
     const data = readBacklog(targetRoot, plan.cfg);
     if (data.errors.length) throw new Error(`imported backlog is invalid: ${data.errors.join("; ")}`);
@@ -577,6 +657,7 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
     for (const a of priorArtifacts) {
       try { a.before === null ? rmSync(a.path, { force: true }) : writeFileSync(a.path, a.before); } catch { /* best-effort */ }
     }
+    if (priorConfig != null) { try { writeFileSync(p.config, priorConfig); } catch { /* best-effort */ } }
     summary.errors.push(e.message);
     return { summary };
   }

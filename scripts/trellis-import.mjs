@@ -28,13 +28,17 @@ Flags:
   --target <dir>     target Trellis repo (default: ".")
   --apply            write items and regenerate (default: dry-run, write nothing)
   --dry-run          report the plan only (the default)
+  --preserve-ids     keep a source id that fits the target format (else reassign)
+  --id-floor <N>     floor the organic next id (default: auto — next 1000 above the band)
   --list-profiles    list the built-in profiles and exit
   -h, --help         show this help
 
-Provide exactly one of --profile or --mapping. The source tree is read-only; ids
-are assigned fresh-sequentially from the target's next id, colliding source ids are
-deduped, and depends_on is rewritten accordingly. Relative <source> paths resolve
-against the target repo.
+Provide exactly one of --profile or --mapping. The source tree is read-only. By
+default ids are assigned fresh-sequentially from the target's next id (colliding
+source ids deduped). With --preserve-ids, a source id matching the target format is
+kept, collisions/mismatches are reassigned into the gap above the imported band, and a
+nextIdFloor is recorded so organically-created ids begin above it. depends_on is
+rewritten either way. Relative <source> paths resolve against the target repo.
 `;
 
 function parseArgs(argv) {
@@ -48,6 +52,15 @@ function parseArgs(argv) {
       case "--apply": opts.apply = true; break;
       case "--dry-run": opts.dryRun = true; break;
       case "--list-profiles": opts.listProfiles = true; break;
+      case "--preserve-ids": opts.preserveIds = true; break;
+      case "--id-floor": {
+        const next = requiredValue(argv, i, inline, "--id-floor");
+        const num = Number(next.value);
+        if (!Number.isInteger(num) || num < 0) usageError("--id-floor must be a non-negative integer");
+        opts.idFloor = num;
+        i = next.index;
+        break;
+      }
       case "--profile": {
         const next = requiredValue(argv, i, inline, "--profile");
         opts.profile = next.value;
@@ -101,6 +114,11 @@ function report(targetRoot, summary, dryRun) {
     if (pv.effortEstimated) parts.push(`${pv.effortEstimated} effort-estimated`);
     console.log(`  estimated: ${parts.join(", ")}`);
   }
+  if (summary.preserved || (summary.reassigned && summary.reassigned.length)) {
+    console.log(`  ids: ${summary.preserved} preserved, ${summary.reassigned.length} reassigned`);
+    for (const r of summary.reassigned) console.log(`    reassigned ${r.sourceId} → ${r.newId}`);
+  }
+  if (summary.idFloor != null) console.log(`  nextIdFloor: ${summary.idFloor}${dryRun ? " (would set)" : " (recorded in config)"}`);
   if (summary.idMap.length) {
     console.log("  id map:");
     for (const m of summary.idMap) console.log(`    ${m.sourceId} (${m.sourceFile}) → ${m.newId}`);
@@ -136,6 +154,6 @@ const targetRoot = resolveRepoRoot(opts.target);
 const sourceRoot = resolve(targetRoot, source); // relative <source> resolves against the target repo
 const dryRun = opts.dryRun || !opts.apply; // dry-run by default; --apply writes, but an explicit --dry-run always wins
 
-const { summary } = applyImport(targetRoot, sourceRoot, mapping, { dryRun });
+const { summary } = applyImport(targetRoot, sourceRoot, mapping, { dryRun, preserveIds: opts.preserveIds, idFloor: opts.idFloor });
 report(targetRoot, summary, dryRun);
 process.exit(summary.errors.length ? 1 : 0);
