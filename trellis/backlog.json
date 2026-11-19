@@ -6,9 +6,9 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0036",
+  "nextId": "TRL0041",
   "counts": {
-    "active": 7,
+    "active": 11,
     "completed": 28,
     "removed": 0
   },
@@ -17,17 +17,17 @@
       "id": "TRL0005",
       "title": "Build the local viewer (`trellis serve`)",
       "status": "active",
-      "milestone": "Future",
-      "priority": "Medium",
-      "effort": 5,
-      "effortLabel": "Tuna",
-      "effortImage": "assets/effort/tuna.svg",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 8,
+      "effortLabel": "Swordfish",
       "depends_on": [
-        "TRL0001"
+        "TRL0001",
+        "TRL0037"
       ],
-      "owner": null,
+      "owner": "jereme",
       "collaborators": [],
-      "summary": "A local dev server that renders the backlog from backlog.json and hot-reloads when the task files change — no deploy, no auth."
+      "summary": "A local, read-only web board (`trellis serve`) that renders the backlog straight from the item files, overlays every worktree's in-flight task edits and the id ledger's claims, searches titles, summaries and bodies, and live-reloads on change."
     },
     {
       "id": "TRL0008",
@@ -111,7 +111,7 @@
     },
     {
       "id": "TRL0035",
-      "title": "Dogfood round 2 — re-onboard Taproot with the built-in profile after the fixes",
+      "title": "Dogfood round 2 — onboard Taproot in place with the published release",
       "status": "active",
       "milestone": "v1",
       "priority": "Medium",
@@ -122,11 +122,71 @@
         "TRL0031",
         "TRL0032",
         "TRL0033",
-        "TRL0034"
+        "TRL0034",
+        "TRL0037",
+        "TRL0038",
+        "TRL0039",
+        "TRL0040"
       ],
       "owner": null,
       "collaborators": [],
-      "summary": "After the import and scaffolding fixes ship, re-onboard ../taproot using only the published package's built-in trellis profile (no hand-written mapping) and confirm the consumer path is clean end-to-end."
+      "summary": "Once the ledger, local-artifact, legacy-archive and good-agent-aware init changes ship in a published release, onboard ../taproot in place with only the published package and record every friction point."
+    },
+    {
+      "id": "TRL0037",
+      "title": "Claim task ids from a local git ledger",
+      "status": "active",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Add an opt-in id ledger on a local orphan branch that every worktree of a clone shares, so `trellis claim` and the MCP create path hand out each id exactly once even when several sessions write stories at the same time."
+    },
+    {
+      "id": "TRL0038",
+      "title": "Keep generated backlog artifacts out of git",
+      "status": "active",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Add an opt-in mode in which the generated index, completed and removed tables and backlog.json are written to an ignored folder instead of being committed, so parallel branches stop conflicting on them and `check` only validates the item files."
+    },
+    {
+      "id": "TRL0039",
+      "title": "Accept closed items that predate a repo's adoption",
+      "status": "active",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 2,
+      "effortLabel": "Goldfish",
+      "effortEmoji": "🐠",
+      "depends_on": [],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Add an optional id cutoff below which completed and removed items may omit the descriptive metadata (summary, milestone, priority, effort), so a long-lived backlog can adopt Trellis without inventing history while new closures stay strict."
+    },
+    {
+      "id": "TRL0040",
+      "title": "Onboard a repo that already runs good-agent and its own CI",
+      "status": "active",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
+      "depends_on": [],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Let `trellis init` skip the parts an established repo already owns (CI workflow, PR template, process playbooks) and write a compact AGENTS.md block that defers the loops to good-agent's skills, refusing to push AGENTS.md past Codex's 32 KiB budget."
     },
     {
       "id": "TRL0001",
