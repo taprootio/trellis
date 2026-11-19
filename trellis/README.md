@@ -13,6 +13,7 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | ID | Title | Owner | Priority | Effort |
 | --- | --- | --- | --- | --- |
 | [TRL0011](active/TRL0011.md) | Test suite and CI for CLI and MCP server |  | High | Tuna · 5 |
+| [TRL0036](active/TRL0036.md) | Adopt good-agent for Trellis's own task work | jereme | High | 🐠 Goldfish · 2 |
 | [TRL0019](active/TRL0019.md) | MCP server HTTP transport (port/host) + per-repo resource addressing |  | Medium | Tuna · 5 |
 | [TRL0035](active/TRL0035.md) | Dogfood round 2 — re-onboard Taproot with the built-in profile after the fixes |  | Medium | 🐡 Trout · 3 |
 
