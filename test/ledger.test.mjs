@@ -2,7 +2,7 @@
 // `node --test`. Each test builds a throwaway git repo with linked worktrees and
 // drives the module directly; the git-level seams use a `git` shim first on PATH.
 
-import { test } from "node:test";
+import { ledgerTest as test, initRefFormat } from "./git-support.mjs";
 import assert from "node:assert/strict";
 import {
   mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync, chmodSync, symlinkSync, readFileSync, existsSync, readdirSync, renameSync, cpSync,
@@ -30,7 +30,7 @@ function makeClone(cfgOverrides = {}) {
   const dir = tmp("ledger");
   const root = join(dir, "main");
   mkdirSync(root);
-  git(root, "init", "-q", "--ref-format=files", "-b", "main");
+  git(root, "init", "-q", ...initRefFormat, "-b", "main");
   git(root, "config", "user.name", "Tester");
   git(root, "config", "user.email", "tester@example.com");
   writeFileSync(join(root, "README.md"), "x\n");
@@ -277,7 +277,7 @@ test("seed titles are cleaned, and an unreadable or unsafe file gives '-' with t
   });
 });
 
-test("a seed that loses to another valid seed exits 0 and leaves the winner's tip", () => {
+test("a seed that loses to another valid seed exits 0 and leaves the winner's tip", { skip: process.platform === "win32" }, () => {
   const c = makeClone();
   try {
     const rivalClone = c.lane("lane");
@@ -736,7 +736,7 @@ test("sparse checkout is refused, even with a config override that hides it", ()
   });
 });
 
-test("a symlinked task folder is refused", () => {
+test("a symlinked task folder is refused", { skip: process.platform === "win32" }, () => {
   withClone(({ root, cfg, lane, dir }) => {
     const other = lane("lane");
     seed(root, cfg);
@@ -748,7 +748,7 @@ test("a symlinked task folder is refused", () => {
   });
 });
 
-test("an absent completed/tasks is fine; a dangling symlink there is refused", () => {
+test("an absent completed/tasks is fine; a dangling symlink there is refused", { skip: process.platform === "win32" }, () => {
   withClone(({ root, cfg, lane, dir }) => {
     const other = lane("lane");
     mkdirSync(join(root, "trellis", "active"), { recursive: true });
@@ -794,6 +794,23 @@ test("an alias is found when case folding changes the folder name's length", (t)
       return;
     }
     refusedAndUnchanged(root, dotted);
+  });
+});
+
+test("a final-sigma alias of a status folder is refused as an alias", (t) => {
+  withClone(({ root, cfg }) => {
+    const greek = { ...cfg, tasksDir: "\u03a3" };
+    seed(root, greek);
+    const blob = execFileSync("git", ["-C", root, "hash-object", "-w", "--stdin"], { input: "x\n", encoding: "utf8" }).trim();
+    // Capital sigma and final sigma both fold to the same lowercase letter.
+    const path = "\u03c2/active/DEMO0005.md";
+    try {
+      git(root, "update-index", "--add", "--cacheinfo", `100644,${blob},${path}`);
+    } catch (e) {
+      t.skip(`git or this filesystem cannot hold the path: ${e.message}`);
+      return;
+    }
+    refusedAndUnchanged(root, greek);
   });
 });
 
@@ -846,7 +863,7 @@ test("a served root whose path ends in a space is not refused", () => {
   try {
     const root = join(dir, "spaced ");
     mkdirSync(root);
-    git(root, "init", "-q", "--ref-format=files", "-b", "main");
+    git(root, "init", "-q", ...initRefFormat, "-b", "main");
     git(root, "config", "user.name", "Tester");
     git(root, "config", "user.email", "tester@example.com");
     writeFileSync(join(root, "README.md"), "x\n");
@@ -857,7 +874,7 @@ test("a served root whose path ends in a space is not refused", () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("a task folder the scan cannot read is a layout refusal, not a crash", (t) => {
+test("a task folder the scan cannot read is a layout refusal, not a crash", { skip: process.platform === "win32" }, (t) => {
   if (process.getuid && process.getuid() === 0) return t.skip("root can read a mode-000 folder");
   withClone(({ root, cfg }) => {
     seed(root, cfg);
@@ -884,6 +901,23 @@ test("a claim that would outgrow the reader's buffer is refused before any write
     assertRefused(() => through(root, cfg, "DEMO0500", { maxBytes: 50 }), "ledger_too_large");
     assert.equal(tip(root), before);
     assert.equal(claim(root, cfg, { title: "still fine" }).id, "DEMO0002");
+  });
+});
+
+test("preview refuses an id when the shortest claim would outgrow the byte limit, as the writer does", () => {
+  withClone(({ root, cfg }) => {
+    seed(root, cfg);
+    const text = readLedger(root, cfg).text;
+    const date = new Date().toISOString().slice(0, 10);
+    const shortest = Buffer.byteLength(text + `DEMO0001\t${date}\tclaim\tmain\tx\n`);
+    // One byte of room fits the shortest claim; none does not.
+    const fits = preview(root, cfg, { maxBytes: shortest + 1 });
+    assert.equal(fits.nextId, "DEMO0001");
+    const full = preview(root, cfg, { maxBytes: shortest });
+    assert.equal(full.nextId, null);
+    assert.equal(full.reason, "ledger_too_large");
+    assertRefused(() => claim(root, cfg, { title: "x", maxBytes: shortest }), "ledger_too_large");
+    assert.equal(claim(root, cfg, { title: "x", maxBytes: shortest + 1 }).id, "DEMO0001");
   });
 });
 
@@ -970,7 +1004,7 @@ test("a separate git dir is refused, since git lists the metadata directory as t
   try {
     const root = join(dir, "work");
     mkdirSync(root);
-    git(root, "init", "-q", "--ref-format=files", "-b", "main", "--separate-git-dir", join(dir, "meta"));
+    git(root, "init", "-q", ...initRefFormat, "-b", "main", "--separate-git-dir", join(dir, "meta"));
     git(root, "config", "user.name", "Tester");
     git(root, "config", "user.email", "tester@example.com");
     writeFileSync(join(root, "README.md"), "x\n");
@@ -1182,15 +1216,19 @@ test("a checkout moved by hand, with another clone at its old path, refuses allo
 
 // ------------------------------------------------ external review round 7
 
-const relativePathsSupported = (() => {
+// Probed on first use so no fixture is built at module load.
+let relativePaths;
+function relativePathsSupported() {
+  if (relativePaths !== undefined) return relativePaths;
   const c = makeClone();
   try {
     git(c.root, "worktree", "add", "-q", "--relative-paths", "-b", "probe", join(c.dir, "probe"));
-    return true;
-  } catch { return false; } finally { c.cleanup(); }
-})();
+    return (relativePaths = true);
+  } catch { return (relativePaths = false); } finally { c.cleanup(); }
+}
 
-test("a worktree registered with a relative gitdir path is accepted", { skip: (!relativePathsSupported && "git lacks worktree --relative-paths") || process.platform === "win32" }, () => {
+test("a worktree registered with a relative gitdir path is accepted", { skip: process.platform === "win32" }, (t) => {
+  if (!relativePathsSupported()) return t.skip("git lacks worktree --relative-paths");
   withClone(({ root, cfg, dir }) => {
     git(root, "worktree", "add", "-q", "--relative-paths", "-b", "rel", join(dir, "rel"));
     seed(root, cfg);

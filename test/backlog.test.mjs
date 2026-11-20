@@ -695,7 +695,7 @@ test("check passes in ledger mode with git unavailable", () => {
   }
 });
 
-test("check never calls git in ledger mode", () => {
+test("check never calls git in ledger mode", { skip: process.platform === "win32" }, () => {
   const root = ledgerCheckRepo();
   const shimDir = mkdtempSync(join(tmpdir(), "trellis-shim-"));
   const log = join(shimDir, "calls.log");

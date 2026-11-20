@@ -497,6 +497,10 @@ function walkStatusDirs(worktree, cfg) {
   return dirs;
 }
 
+// Case-fold for comparing folder names. A lower-upper-lower round trip also maps
+// final sigma and capital sigma to the same letter, which toLowerCase alone does not.
+const foldPath = (s) => s.toLowerCase().toUpperCase().toLowerCase();
+
 // Splits repo-relative paths into exact status-folder ids and case aliases.
 function pickIds(paths, cfg) {
   const ids = new Set();
@@ -504,14 +508,14 @@ function pickIds(paths, cfg) {
   const exactRe = fileMatcher(cfg);
   const looseRe = fileMatcher(cfg, "i");
   const prefixes = STATUS_FOLDERS.map((s) => [...tasksParts(cfg), ...s].join("/"));
-  const folded = prefixes.map((x) => x.toLowerCase());
+  const folded = prefixes.map(foldPath);
   for (const p of paths) {
     // Split at the last slash and fold the parent whole: folding can change length, so slicing by prefix length is wrong.
     const cut = p.lastIndexOf("/");
     if (cut < 0) continue;
     const parent = p.slice(0, cut);
     const name = p.slice(cut + 1);
-    const lowerParent = parent.toLowerCase();
+    const lowerParent = foldPath(parent);
     for (let i = 0; i < prefixes.length; i++) {
       if (lowerParent !== folded[i]) continue;
       if (parent === prefixes[i]) {
@@ -661,11 +665,11 @@ export function checkLayout(repoRoot, cfg) {
 // A read-only look at the next id, for `next_id`, `list_tasks`, `regenerate` and
 // the `generate` note. Never throws for ledger problems: `nextId` is null and the
 // note says why.
-export function preview(repoRoot, cfg) {
+export function preview(repoRoot, cfg, { maxBytes = MAX_LEDGER_BYTES } = {}) {
   try {
     requirePlainPrefix(cfg);
     // A claim would refuse this branch, so the preview must not promise an id.
-    branchOf(repoRoot);
+    const branch = branchOf(repoRoot);
     const ledger = readLedger(repoRoot, cfg);
     if (ledger.missing) {
       return { nextId: null, reason: "missing_ledger", note: `no id ledger at ${refOf(cfg)}; ${SEED_HINT}. ${RECOVERY_HINT}.` };
@@ -674,6 +678,10 @@ export function preview(repoRoot, cfg) {
       return { nextId: null, reason: "invalid_ledger", note: `the id ledger at ${refOf(cfg)} is not usable: ${ledger.unusable}` };
     }
     const id = computeNext(cfg, ledger.rows, scanClone(repoRoot, cfg));
+    // The shortest valid claim has a one-character title; if even that cannot be written, promise no id.
+    if (overLimit(ledger.text + rowText({ id, date: today(), kind: "claim", branch, title: "x" }), maxBytes)) {
+      return { nextId: null, reason: "ledger_too_large", note: tooLargeMessage(maxBytes) };
+    }
     return { nextId: id, reason: null, note: `claim ids with \`trellis claim\` (preview only: ${id})` };
   } catch (e) {
     if (e instanceof LedgerError) return { nextId: null, reason: e.code, note: e.message };
@@ -682,11 +690,13 @@ export function preview(repoRoot, cfg) {
 }
 
 // ----------------------------------------------------------------- writing
+// The writer and the preview share this limit, so a preview never promises a claim the writer refuses.
+const overLimit = (text, maxBytes) => Buffer.byteLength(text) >= maxBytes;
+const tooLargeMessage = (maxBytes) => `the id ledger would grow past ${maxBytes} bytes, which the reader cannot load; nothing was written`;
+
 // Writes claims.tsv as a commit whose parent is `parent` (or none for a seed).
 function commitLedger(repoRoot, text, parent, message, maxBytes = MAX_LEDGER_BYTES) {
-  if (Buffer.byteLength(text) >= maxBytes) {
-    throw refuse(`the id ledger would grow past ${maxBytes} bytes, which the reader cannot load; nothing was written`, "ledger_too_large");
-  }
+  if (overLimit(text, maxBytes)) throw refuse(tooLargeMessage(maxBytes), "ledger_too_large");
   const blob = git(repoRoot, ["hash-object", "-w", "--stdin"], { input: text }).stdout.trim();
   const tree = git(repoRoot, ["mktree"], { input: `100644 blob ${blob}\t${LEDGER_FILE}\n` }).stdout.trim();
   const args = ["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", message];

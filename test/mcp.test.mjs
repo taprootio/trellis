@@ -5,6 +5,7 @@
 // Trellis repo with the init scaffolder, then exercises the tools against it.
 
 import { test } from "node:test";
+import { ledgerTest, initRefFormat } from "./git-support.mjs";
 import assert from "node:assert/strict";
 import {
   mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync, symlinkSync, renameSync, lstatSync, writeSync, realpathSync,
@@ -542,7 +543,7 @@ test("import tool surfaces a refused import as an error and writes nothing", () 
 const REF = "refs/trellis/ids";
 function ledgerRepo({ seeded = true, cfg: over = {} } = {}) {
   const root = realpathSync(freshRepo());
-  execFileSync("git", ["-C", root, "init", "-q", "--ref-format=files", "-b", "main"]);
+  execFileSync("git", ["-C", root, "init", "-q", ...initRefFormat, "-b", "main"]);
   const cfgPath = join(root, "trellis", "backlog.config.json");
   const cfg = { ...JSON.parse(readFileSync(cfgPath, "utf8")), idAllocation: "ledger", ...over };
   writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
@@ -558,7 +559,7 @@ const artifactBytes = (root) => Object.fromEntries(ARTIFACTS.map((a) => {
 const leftovers = (root) => ARTIFACTS.flatMap((a) => readdirSync(dirname(join(root, "trellis", a))).filter((n) => /\.(tmp|bak)$/.test(n)));
 const throwsTrellis = (fn, code) => assert.throws(fn, (e) => e instanceof TrellisError && (code === undefined || e.code === code), `expected TrellisError ${code ?? ""}`);
 
-test("claim_id claims through the ledger, and create_task uses the claimed id", () => {
+ledgerTest("claim_id claims through the ledger, and create_task uses the claimed id", () => {
   const c = ledgerRepo();
   try {
     assert.equal(claimIdOp(c.root, { title: "Reserved" }).id, "DEMO0001");
@@ -574,7 +575,7 @@ test("claim_id claims through the ledger, and create_task uses the claimed id", 
   } finally { c.cleanup(); }
 });
 
-test("claim_id refuses in scan mode and with a tab in the title", () => {
+ledgerTest("claim_id refuses in scan mode and with a tab in the title", () => {
   const c = ledgerRepo({ cfg: { idAllocation: "scan" } });
   try {
     throwsTrellis(() => claimIdOp(c.root, { title: "x" }), "invalid_request");
@@ -587,7 +588,7 @@ test("claim_id refuses in scan mode and with a tab in the title", () => {
   } finally { d.cleanup(); }
 });
 
-test("create_task in ledger mode checks milestone and priority before claiming", () => {
+ledgerTest("create_task in ledger mode checks milestone and priority before claiming", () => {
   const c = ledgerRepo();
   try {
     const t = refTip(c.root);
@@ -597,7 +598,7 @@ test("create_task in ledger mode checks milestone and priority before claiming",
   } finally { c.cleanup(); }
 });
 
-test("create_task in ledger mode fails with the seed message when the ref is absent, and never scans", () => {
+ledgerTest("create_task in ledger mode fails with the seed message when the ref is absent, and never scans", () => {
   const c = ledgerRepo({ seeded: false });
   try {
     const before = artifactBytes(c.root);
@@ -608,7 +609,7 @@ test("create_task in ledger mode fails with the seed message when the ref is abs
   } finally { c.cleanup(); }
 });
 
-test("a failure after the first artifact replacement restores every artifact and keeps the claim", () => {
+ledgerTest("a failure after the first artifact replacement restores every artifact and keeps the claim", () => {
   const c = ledgerRepo();
   try {
     const before = artifactBytes(c.root);
@@ -622,7 +623,7 @@ test("a failure after the first artifact replacement restores every artifact and
   } finally { c.cleanup(); }
 });
 
-test("a rollback removes an artifact that was newly installed and had no original", () => {
+ledgerTest("a rollback removes an artifact that was newly installed and had no original", () => {
   const c = ledgerRepo();
   try {
     rmSync(join(c.root, "trellis", "backlog.json"));
@@ -634,7 +635,7 @@ test("a rollback removes an artifact that was newly installed and had no origina
   } finally { c.cleanup(); }
 });
 
-test("a backup cleanup failure after the commit point is a warning, not a failure", () => {
+ledgerTest("a backup cleanup failure after the commit point is a warning, not a failure", () => {
   const c = ledgerRepo();
   try {
     const out = createTask(c.root, VALID, { removeBackup: () => { throw new Error("cannot remove"); } });
@@ -645,7 +646,7 @@ test("a backup cleanup failure after the commit point is a warning, not a failur
   } finally { c.cleanup(); }
 });
 
-test("a backup cleanup failure after a move is a warning, as in create_task", () => {
+ledgerTest("a backup cleanup failure after a move is a warning, as in create_task", () => {
   const c = ledgerRepo();
   try {
     createTask(c.root, VALID);
@@ -658,7 +659,7 @@ test("a backup cleanup failure after a move is a warning, as in create_task", ()
 });
 
 for (const dangling of [false, true]) {
-  test(`ledger mode refuses a symlinked backlog.json (${dangling ? "dangling" : "live"}) in create_task, move_task and regenerate, changing nothing`, { skip: process.platform === "win32" }, () => {
+  ledgerTest(`ledger mode refuses a symlinked backlog.json (${dangling ? "dangling" : "live"}) in create_task, move_task and regenerate, changing nothing`, { skip: process.platform === "win32" }, () => {
     const c = ledgerRepo();
     try {
       createTask(c.root, VALID);
@@ -680,7 +681,7 @@ for (const dangling of [false, true]) {
   });
 }
 
-test("ledger mode refuses a FIFO artifact without blocking, and unsafe front-matter text before claiming", { skip: process.platform === "win32" }, () => {
+ledgerTest("ledger mode refuses a FIFO artifact without blocking, and unsafe front-matter text before claiming", { skip: process.platform === "win32" }, () => {
   const c = ledgerRepo();
   try {
     const before = refTip(c.root);
@@ -699,7 +700,7 @@ test("ledger mode refuses a FIFO artifact without blocking, and unsafe front-mat
   } finally { c.cleanup(); }
 });
 
-test("ledger mode refuses a symlinked README.md and completed index the same way", { skip: process.platform === "win32" }, () => {
+ledgerTest("ledger mode refuses a symlinked README.md and completed index the same way", { skip: process.platform === "win32" }, () => {
   for (const rel of ["README.md", join("completed", "index.md")]) {
     const c = ledgerRepo();
     try {
@@ -713,7 +714,7 @@ test("ledger mode refuses a symlinked README.md and completed index the same way
     } finally { c.cleanup(); }
   }
 });
-test("staging never writes through a symlink planted at a staging name", () => {
+ledgerTest("staging never writes through a symlink planted at a staging name", { skip: process.platform === "win32" }, () => {
   const c = ledgerRepo();
   try {
     const victim = join(c.root, "victim.txt");
@@ -730,7 +731,7 @@ test("staging never writes through a symlink planted at a staging name", () => {
   } finally { c.cleanup(); }
 });
 
-test("a backup that cannot be restored is kept and named in the error", () => {
+ledgerTest("a backup that cannot be restored is kept and named in the error", () => {
   const c = ledgerRepo();
   try {
     const hook = {
@@ -752,7 +753,7 @@ test("a backup that cannot be restored is kept and named in the error", () => {
   } finally { c.cleanup(); }
 });
 
-test("create_task in ledger mode checks depends_on ids before claiming", () => {
+ledgerTest("create_task in ledger mode checks depends_on ids before claiming", () => {
   const c = ledgerRepo();
   try {
     const t = refTip(c.root);
@@ -761,7 +762,7 @@ test("create_task in ledger mode checks depends_on ids before claiming", () => {
   } finally { c.cleanup(); }
 });
 
-test("a write failure after the item file is opened removes the partial item and keeps the claim", () => {
+ledgerTest("a write failure after the item file is opened removes the partial item and keeps the claim", () => {
   const c = ledgerRepo();
   try {
     const before = artifactBytes(c.root);
@@ -772,7 +773,7 @@ test("a write failure after the item file is opened removes the partial item and
   } finally { c.cleanup(); }
 });
 
-test("an existing item that a case-insensitive filesystem aliases survives a collision byte for byte", (t) => {
+ledgerTest("an existing item that a case-insensitive filesystem aliases survives a collision byte for byte", (t) => {
   const c = ledgerRepo();
   try {
     const probe = join(c.root, "probe.x");
@@ -789,7 +790,7 @@ test("an existing item that a case-insensitive filesystem aliases survives a col
   } finally { c.cleanup(); }
 });
 
-test("a title holding replacement patterns is inserted as text and check passes", () => {
+ledgerTest("a title holding replacement patterns is inserted as text and check passes", () => {
   const c = ledgerRepo();
   try {
     createTask(c.root, { ...VALID, title: "Fix $& and $1 and $$ now" });
@@ -801,7 +802,7 @@ test("a title holding replacement patterns is inserted as text and check passes"
   } finally { c.cleanup(); }
 });
 
-test("ledger-mode generated bytes match scan mode for an ordinary title", () => {
+ledgerTest("ledger-mode generated bytes match scan mode for an ordinary title", () => {
   const scan = freshRepo();
   const c = ledgerRepo();
   try {
@@ -813,7 +814,7 @@ test("ledger-mode generated bytes match scan mode for an ordinary title", () => 
   } finally { c.cleanup(); rmSync(scan, { recursive: true, force: true }); }
 });
 
-test("the layout guard runs before the task tree is read", () => {
+ledgerTest("the layout guard runs before the task tree is read", { skip: process.platform === "win32" }, () => {
   const c = ledgerRepo();
   try {
     const elsewhere = join(c.root, "elsewhere");
@@ -830,7 +831,7 @@ test("the layout guard runs before the task tree is read", () => {
   } finally { c.cleanup(); }
 });
 
-test("next_id in ledger mode is a preview that leaves the ref alone", () => {
+ledgerTest("next_id in ledger mode is a preview that leaves the ref alone", () => {
   const c = ledgerRepo();
   try {
     const t = refTip(c.root);
@@ -855,7 +856,7 @@ test("next_id in ledger mode is a preview that leaves the ref alone", () => {
   } finally { full.cleanup(); }
 });
 
-test("list_tasks and regenerate return the ledger preview, and the files keep the scan nextId", () => {
+ledgerTest("list_tasks and regenerate return the ledger preview, and the files keep the scan nextId", () => {
   const c = ledgerRepo();
   try {
     claim(c.root, c.cfg, { title: "Open claim" });
@@ -880,7 +881,7 @@ test("list_tasks and regenerate return the ledger preview, and the files keep th
   } finally { gone.cleanup(); }
 });
 
-test("committed backlog.json is identical with and without the ledger ref", () => {
+ledgerTest("committed backlog.json is identical with and without the ledger ref", () => {
   const c = ledgerRepo({ seeded: false });
   try {
     const gen = () => spawnSync(process.execPath, [join(sourceRoot, "scripts", "backlog-readme.mjs"), "--target", c.root], { encoding: "utf8" });
@@ -893,7 +894,7 @@ test("committed backlog.json is identical with and without the ledger ref", () =
   } finally { c.cleanup(); }
 });
 
-test("import in ledger mode throws invalid_request, and the registered tool returns the guidance", () => {
+ledgerTest("import in ledger mode throws invalid_request, and the registered tool returns the guidance", () => {
   const c = ledgerRepo();
   try {
     const before = artifactBytes(c.root);
@@ -914,7 +915,7 @@ test("import in ledger mode throws invalid_request, and the registered tool retu
 
 // ------------------------------------------------- external review round 2
 
-test("stageFile removes its reserved file when the write fails", () => {
+ledgerTest("stageFile removes its reserved file when the write fails", () => {
   const c = ledgerRepo();
   try {
     const dest = join(c.root, "trellis", "x.json");
@@ -924,7 +925,7 @@ test("stageFile removes its reserved file when the write fails", () => {
 });
 
 
-test("ledger mode: a title holding the end marker as text cannot end a generated block", () => {
+ledgerTest("ledger mode: a title holding the end marker as text cannot end a generated block", () => {
   const c = ledgerRepo();
   try {
     const title = "Fix <!-- END GENERATED:MILESTONES --> handling";
@@ -935,7 +936,7 @@ test("ledger mode: a title holding the end marker as text cannot end a generated
   } finally { c.cleanup(); }
 });
 
-test("ledger mode: a config with a fractional effort is a config error, so no id is claimed", () => {
+ledgerTest("ledger mode: a config with a fractional effort is a config error, so no id is claimed", () => {
   const c = ledgerRepo({ cfg: { effort: { values: [0.5, 1, 3] } } });
   try {
     const t = refTip(c.root);

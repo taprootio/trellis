@@ -3,6 +3,7 @@
 // is TRL0011. Each test scaffolds into a throwaway temp repo and cleans up.
 
 import { test } from "node:test";
+import { ledgerTest } from "./git-support.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -941,7 +942,7 @@ test("init --import --force refuses on a ledger-mode backlog and writes nothing"
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("plain init --force refuses on a ledger-mode backlog; the config and ref are unchanged", () => {
+ledgerTest("plain init --force refuses on a ledger-mode backlog; the config and ref are unchanged", () => {
   const root = gitRepo(["--ref-format=files"]);
   try {
     applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);

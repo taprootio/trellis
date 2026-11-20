@@ -3,6 +3,7 @@
 // while package assets still come from this checkout.
 
 import { test } from "node:test";
+import { ledgerTest, initRefFormat } from "./git-support.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, realpathSync, symlinkSync, renameSync, lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -150,7 +151,7 @@ function claimRepo(cfgOverrides = {}) {
   const root = join(dir, "main");
   mkdirSync(root);
   const git = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-  git(root, "init", "-q", "--ref-format=files", "-b", "main");
+  git(root, "init", "-q", ...initRefFormat, "-b", "main");
   git(root, "config", "user.name", "Tester");
   git(root, "config", "user.email", "tester@example.com");
   applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
@@ -167,7 +168,7 @@ const run = (cwd, args, extra = {}) => spawnSync(process.execPath, [cliScript, .
 const REF = "refs/trellis/ids";
 const refTip = (root) => { try { return execFileSync("git", ["-C", root, "rev-parse", "--verify", "-q", REF], { encoding: "utf8" }).trim(); } catch { return null; } };
 
-test("claim: mode matrix and exit codes", () => {
+ledgerTest("claim: mode matrix and exit codes", () => {
   const c = claimRepo();
   try {
     // Ref absent: --title, --through and --list refuse and name --seed.
@@ -207,7 +208,7 @@ test("claim: mode matrix and exit codes", () => {
   } finally { c.cleanup(); }
 });
 
-test("claim: --seed lists seed rows and works before the config switches", () => {
+ledgerTest("claim: --seed lists seed rows and works before the config switches", () => {
   const c = claimRepo({ idAllocation: "scan" });
   try {
     mkdirSync(join(c.lane, "trellis/active"), { recursive: true });
@@ -236,7 +237,7 @@ test("claim: scan-mode --seed and --through refuse a prefix that is not plain", 
   }
 });
 
-test("claim: a tab or newline in --title exits 2 and writes nothing", () => {
+ledgerTest("claim: a tab or newline in --title exits 2 and writes nothing", () => {
   const c = claimRepo();
   try {
     run(c.root, ["claim", "--seed"]);
@@ -249,7 +250,7 @@ test("claim: a tab or newline in --title exits 2 and writes nothing", () => {
   } finally { c.cleanup(); }
 });
 
-test("claim: two spawned processes get distinct, consecutive ids", async () => {
+ledgerTest("claim: two spawned processes get distinct, consecutive ids", async () => {
   const c = claimRepo();
   try {
     run(c.root, ["claim", "--seed"]);
@@ -265,7 +266,7 @@ test("claim: two spawned processes get distinct, consecutive ids", async () => {
   } finally { c.cleanup(); }
 });
 
-test("claim: --seed --through on an existing ledger writes nothing and names claim --through", () => {
+ledgerTest("claim: --seed --through on an existing ledger writes nothing and names claim --through", () => {
   const c = claimRepo();
   try {
     run(c.root, ["claim", "--seed"]);
@@ -278,7 +279,7 @@ test("claim: --seed --through on an existing ledger writes nothing and names cla
   } finally { c.cleanup(); }
 });
 
-test("claim: exits 1 when every retry loses the compare-and-swap", { skip: process.platform === "win32" }, () => {
+ledgerTest("claim: exits 1 when every retry loses the compare-and-swap", { skip: process.platform === "win32" }, () => {
   const c = claimRepo();
   try {
     run(c.root, ["claim", "--seed"]);
@@ -307,7 +308,7 @@ exec "${realGit}" "$@"
   } finally { c.cleanup(); }
 });
 
-test("generate in ledger mode prints the claim note, never Next id", () => {
+ledgerTest("generate in ledger mode prints the claim note, never Next id", () => {
   const c = claimRepo();
   try {
     // Ref absent: the note carries the seed reason.
@@ -323,7 +324,7 @@ test("generate in ledger mode prints the claim note, never Next id", () => {
   } finally { c.cleanup(); }
 });
 
-test("generate in ledger mode names the exhaustion reason at the width limit", () => {
+ledgerTest("generate in ledger mode names the exhaustion reason at the width limit", () => {
   const c = claimRepo({ idWidth: 1 });
   try {
     run(c.root, ["claim", "--seed"]);
@@ -345,7 +346,7 @@ test("generate in scan mode still prints Next id", () => {
   } finally { c.cleanup(); }
 });
 
-test("the readme script in ledger mode refuses a dangling README before rendering", { skip: process.platform === "win32" }, () => {
+ledgerTest("the readme script in ledger mode refuses a dangling README before rendering", { skip: process.platform === "win32" }, () => {
   const c = claimRepo();
   try {
     assert.equal(run(c.root, ["claim", "--seed"]).status, 0);
@@ -361,7 +362,7 @@ test("the readme script in ledger mode refuses a dangling README before renderin
 });
 
 for (const dangling of [false, true]) {
-  test(`generate in ledger mode refuses a symlinked backlog.json (${dangling ? "dangling" : "live"}) and init does too`, { skip: process.platform === "win32" }, () => {
+  ledgerTest(`generate in ledger mode refuses a symlinked backlog.json (${dangling ? "dangling" : "live"}) and init does too`, { skip: process.platform === "win32" }, () => {
     const c = claimRepo();
     try {
       assert.equal(run(c.root, ["claim", "--seed"]).status, 0);
