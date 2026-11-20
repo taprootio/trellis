@@ -62,6 +62,15 @@ failure**, so a refused import leaves the target exactly as it was.
 - **A real run leaves the backlog `--check`-green**, or rolls back to the
   pre-import state if anything fails.
 
+### Not in ledger mode
+
+Import is unsupported when the target's `idAllocation` is `"ledger"` (SPEC §3.1).
+`trellis import` (preview and `--apply`), the MCP `import` tool, `init --import` and
+plain `init --force` all refuse before any write: the CLI exits 2 and the MCP tool
+returns an error with the same guidance. The importer assigns ids from a scan, and in a
+ledger-mode backlog that could pick an id that is an open claim. Import first, in scan
+mode, then switch `idAllocation` to `"ledger"` and run `trellis claim --seed`.
+
 ### Preserve source ids (`--preserve-ids`)
 
 By default an import assigns fresh ids. With `--preserve-ids`, an item **keeps its own

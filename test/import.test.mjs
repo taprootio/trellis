@@ -7,13 +7,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
-import { planImport, applyImport } from "../src/import.mjs";
+import { planImport, applyImport, ImportRefused } from "../src/import.mjs";
 import { loadProfile, listProfiles } from "../src/profiles.mjs";
 import { loadConfig, readBacklog, generateArtifacts, parseFrontMatter, nextId } from "../src/backlog.mjs";
 
@@ -1000,4 +1000,51 @@ test("stripIdPrefix is opt-in — without the flag the numbered title is kept ve
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ------------------------------------------------------ ledger-mode refusals
+// A ledger-mode target (TRL0037): import and init --force/--import refuse before any
+// write. `snapshotAll` lists every file with its bytes, so "wrote nothing" is exact.
+function snapshotAll(root) {
+  const out = {};
+  const walk = (d) => {
+    for (const name of readdirSync(d)) {
+      if (name === ".git") continue;
+      const abs = join(d, name);
+      if (statSync(abs).isDirectory()) walk(abs);
+      else out[relative(root, abs)] = readFileSync(abs, "utf8");
+    }
+  };
+  walk(root);
+  return out;
+}
+function ledgerTarget(root) {
+  const cfgPath = join(root, "trellis", "backlog.config.json");
+  const cfg = { ...JSON.parse(readFileSync(cfgPath, "utf8")), idAllocation: "ledger" };
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+  return root;
+}
+
+test("import --dry-run and --apply refuse in ledger mode with exit 2 and write nothing", () => {
+  const root = ledgerTarget(initTarget());
+  try {
+    const script = join(projectRoot, "scripts", "trellis-import.mjs");
+    const before = snapshotAll(root);
+    for (const extra of [[], ["--dry-run"], ["--apply"]]) {
+      const r = spawnSync(process.execPath, [script, legacySrc, "--profile", "taproot-ai-backlog", "--target", root, ...extra], { encoding: "utf8" });
+      assert.equal(r.status, 2, extra.join(" "));
+      assert.match(r.stderr, /ledger/);
+      assert.match(r.stderr, /Import before switching/);
+      assert.deepEqual(snapshotAll(root), before);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("applyImport throws a typed ImportRefused in ledger mode, for preview and apply", () => {
+  const root = ledgerTarget(initTarget());
+  try {
+    for (const dryRun of [true, false]) {
+      assert.throws(() => applyImport(root, legacySrc, mapping, { dryRun }), (e) => e instanceof ImportRefused);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

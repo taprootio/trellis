@@ -4,12 +4,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { applyScaffold, shouldPromptVocab } from "../src/init.mjs";
+import { seed, claim } from "../src/ledger.mjs";
 import { loadConfig, loadRoster, readBacklog, generateArtifacts } from "../src/backlog.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -902,4 +903,67 @@ test("shouldPromptVocab never prompts for a retire-only run, even a valueless on
   assert.equal(shouldPromptVocab({ prefix: "X", milestones: ["A"] }, true), false, "nothing missing → no prompt");
   assert.equal(shouldPromptVocab({}, false), false, "non-interactive never prompts");
   assert.equal(shouldPromptVocab({ dryRun: true }, true), false, "a dry run never prompts");
+});
+
+// ------------------------------------------------------ ledger-mode refusals
+// A ledger-mode target (TRL0037): import and init --force/--import refuse before any
+// write. `snapshotAll` lists every file with its bytes, so "wrote nothing" is exact.
+function snapshotAll(root) {
+  const out = {};
+  const walk = (d) => {
+    for (const name of readdirSync(d)) {
+      if (name === ".git") continue;
+      const abs = join(d, name);
+      if (statSync(abs).isDirectory()) walk(abs);
+      else out[relative(root, abs)] = readFileSync(abs, "utf8");
+    }
+  };
+  walk(root);
+  return out;
+}
+function ledgerTarget(root) {
+  const cfgPath = join(root, "trellis", "backlog.config.json");
+  const cfg = { ...JSON.parse(readFileSync(cfgPath, "utf8")), idAllocation: "ledger" };
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+  return root;
+}
+
+test("init --import --force refuses on a ledger-mode backlog and writes nothing", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    ledgerTarget(root);
+    const before = snapshotAll(root);
+    const r = spawnSync(process.execPath, [initScript, root, "--import", legacySrc, "--profile", "taproot-ai-backlog", "--force"], { encoding: "utf8" });
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /ledger/);
+    assert.deepEqual(snapshotAll(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("plain init --force refuses on a ledger-mode backlog; the config and ref are unchanged", () => {
+  const root = gitRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    ledgerTarget(root);
+    const { cfg } = loadConfig(root);
+    seed(root, cfg);
+    claim(root, cfg, { title: "Open claim" });
+    const refBefore = git(root, ["rev-parse", "refs/trellis/ids"]);
+    const before = snapshotAll(root);
+    const r = spawnSync(process.execPath, [initScript, root, "--force"], { encoding: "utf8" });
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /ledger/);
+    assert.deepEqual(snapshotAll(root), before);
+    assert.equal(git(root, ["rev-parse", "refs/trellis/ids"]), refBefore);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("init --force still works on a scan-mode backlog", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    const r = spawnSync(process.execPath, [initScript, root, "--force", "--prefix", "DEMO"], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

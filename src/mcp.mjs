@@ -32,7 +32,7 @@ import {
   paths,
   composeFile,
 } from "./backlog.mjs";
-import { applyImport } from "./import.mjs";
+import { applyImport, ImportRefused } from "./import.mjs";
 import { loadProfile } from "./profiles.mjs";
 import { deriveTaskHistory, deriveAllHistory, HistoryError } from "./history.mjs";
 import { LedgerError, claim, preview, checkLayout } from "./ledger.mjs";
@@ -546,7 +546,13 @@ export function importOp(repoRoot, args = {}) {
   const source = isAbsolute(src) ? src : join(repoRoot, src);
   if (args.idFloor != null && (!Number.isInteger(args.idFloor) || args.idFloor < 0)) throw new TrellisError("`idFloor` must be a non-negative integer");
   const dryRun = !args.apply;
-  const { summary } = applyImport(repoRoot, source, mapping, { dryRun, preserveIds: args.preserveIds === true, idFloor: args.idFloor });
+  let summary;
+  try {
+    ({ summary } = applyImport(repoRoot, source, mapping, { dryRun, preserveIds: args.preserveIds === true, idFloor: args.idFloor }));
+  } catch (e) {
+    if (e instanceof ImportRefused) throw new TrellisError(e.message, "invalid_request");
+    throw e;
+  }
   if (summary.errors.length) throw new TrellisError(summary.errors.join("; "), "import_failed");
   return { ...summary, dryRun };
 }

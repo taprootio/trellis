@@ -789,3 +789,22 @@ test("committed backlog.json is identical with and without the ledger ref", () =
     assert.equal(readFileSync(join(c.root, "trellis", "backlog.json"), "utf8"), without);
   } finally { c.cleanup(); }
 });
+
+test("import in ledger mode throws invalid_request, and the registered tool returns the guidance", () => {
+  const c = ledgerRepo();
+  try {
+    const before = artifactBytes(c.root);
+    const args = { source: join(fixtures, "legacy-backlog"), profile: "taproot-ai-backlog" };
+    for (const apply of [false, true]) {
+      throwsTrellis(() => importOp(c.root, { ...args, apply }), "invalid_request");
+    }
+    const handlers = {};
+    registerTools({ registerTool: (name, _m, h) => { handlers[name] = h; } }, c.root);
+    const res = handlers.import({ ...args, apply: true });
+    assert.equal(res.isError, true);
+    assert.match(res.content[0].text, /ledger/);
+    assert.match(res.content[0].text, /Import before switching/);
+    assert.deepEqual(artifactBytes(c.root), before);
+    assert.equal(existsSync(join(c.root, "trellis", "active", "DEMO0001.md")), false);
+  } finally { c.cleanup(); }
+});

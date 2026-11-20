@@ -15,7 +15,7 @@ import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
-import { applyImport } from "../src/import.mjs";
+import { applyImport, assertNotLedgerMode, ImportRefused } from "../src/import.mjs";
 import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
 
 const HELP = `trellis init — scaffold the Trellis backlog into a repo
@@ -36,7 +36,8 @@ Flags:
   --id-floor <N>        with --import, floor the organic next id (default: auto — next 1000 above the band)
   --retire-source <p>   history-preservingly git-rm an imported source tree at <p>
                         (a separate, later step — see below; cannot combine with --import)
-  --force               overwrite existing files instead of skipping
+  --force               overwrite existing files instead of skipping (refused when the
+                        existing config has idAllocation "ledger")
   --dry-run             report what would change without writing
   -h, --help            show this help
 
@@ -265,6 +266,19 @@ if ("retireSource" in opts) {
   const { summary: ret } = retireSource(targetRoot, opts.retireSource, { dryRun });
   reportRetire(ret, dryRun);
   process.exit(ret.errors.length ? 1 : 0);
+}
+
+// A ledger-mode backlog owns its config and its claimed ids, so --force and --import
+// are refused before anything is scaffolded, by reading the existing config first.
+if (opts.force || opts.import) {
+  try {
+    if (opts.import) assertNotLedgerMode(targetRoot, "init --import");
+    else assertNotLedgerMode(targetRoot, "init --force", "it would overwrite the config that holds the ledger settings");
+  } catch (e) {
+    if (!(e instanceof ImportRefused)) throw e;
+    console.error(`error: ${e.message}`);
+    process.exit(2);
+  }
 }
 
 const { summary } = applyScaffold(targetRoot, opts, { dryRun }, sourceRoot);

@@ -52,7 +52,36 @@ import {
   parseFrontMatter,
   paths,
   composeFile,
+  CONFIG_DIR,
 } from "./backlog.mjs";
+
+// A typed refusal for a ledger-mode target (TRL0037). It is thrown, not put in
+// `summary.errors`, so each caller can map it to exit 2 / `invalid_request`.
+export class ImportRefused extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ImportRefused";
+  }
+}
+
+// Throws ImportRefused when the target's config says `idAllocation: "ledger"`.
+// Import could assign an id that is an open claim, so it is unsupported there; and
+// `init --force` would rewrite a config that owns the ledger settings. The config is
+// read raw: a missing or unparseable one is not ledger mode, and the later steps
+// report it their own way.
+export const LEDGER_IMPORT_WHY = "ids come from the local ledger, and an import could reuse an open claim. Import before switching to ledger mode and running `trellis claim --seed`";
+
+export function assertNotLedgerMode(targetRoot, what, why = LEDGER_IMPORT_WHY) {
+  let cfg;
+  try {
+    cfg = JSON.parse(readFileSync(join(targetRoot, CONFIG_DIR, "backlog.config.json"), "utf8"));
+  } catch {
+    return;
+  }
+  if (cfg && cfg.idAllocation === "ledger") {
+    throw new ImportRefused(`${what} is not supported when idAllocation is "ledger": ${why}. Nothing was written.`);
+  }
+}
 
 // Target subdir for each status; statuses are always processed in this fixed order
 // (not the mapping's key order) so id assignment is deterministic.
@@ -600,6 +629,7 @@ function generatedRels(root) {
 // restore the artifacts) so a rejected import leaves the target exactly as it was.
 // `dryRun` returns the plan without writing. The source tree is never written.
 export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, gitDate, preserveIds = false, idFloor } = {}) {
+  assertNotLedgerMode(targetRoot, "import");
   const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, provenance: null, root: null, preserved: 0, reassigned: [], idFloor: null, warnings: [], errors: [] };
   const plan = planImport(targetRoot, sourceRoot, mapping, { gitDate, preserveIds, idFloor });
   summary.idMap = plan.idMap;
