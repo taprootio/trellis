@@ -334,16 +334,20 @@ function hasBacklogShape(abs) {
     const counts = obj.counts;
     return typeof obj.prefix === "string" && Array.isArray(obj.milestones) && (obj.nextId === null || typeof obj.nextId === "string")
       && !!counts && typeof counts === "object" && !Array.isArray(counts)
-      && ["active", "completed", "removed"].every((k) => typeof counts[k] === "number")
-      && Array.isArray(obj.tasks);
+      && ["active", "completed", "removed"].every((k) => Number.isInteger(counts[k]) && counts[k] >= 0)
+      && Array.isArray(obj.tasks)
+      && obj.tasks.every((t) => !!t && typeof t === "object" && !Array.isArray(t) && typeof t.id === "string" && typeof t.status === "string");
   } catch { return false; }
 }
 function isGeneratedArtifact(rel, abs) {
   const parts = rel.split(/[/\\]/);
   if (COMMITTED_ARTIFACTS.has(parts.join("/"))) return true;
-  if (parts[parts.length - 1] === "backlog.json" && parts[parts.length - 2] === GENERATED_DIR) return hasBacklogShape(abs);
+  // The folder is the source file's own parent, not a mapping-relative segment: a source
+  // root that is itself `.generated` (dirs ["."]) has no such segment in `rel`.
+  const inGenerated = basename(dirname(resolve(abs))) === GENERATED_DIR;
+  if (parts[parts.length - 1] === "backlog.json" && inGenerated) return hasBacklogShape(abs);
   const head = LOCAL_HEADS.get(parts[parts.length - 1]);
-  if (!head || parts[parts.length - 2] !== GENERATED_DIR) return false;
+  if (!head || !inGenerated) return false;
   try { return readFileSync(abs, "utf8").replace(/\r\n/g, "\n").startsWith(head); } catch { return false; }
 }
 

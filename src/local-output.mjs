@@ -23,8 +23,9 @@ export class OutputRefused extends LedgerError {
 }
 
 // Test seams: `beforeWrite` runs before each file is written (path and index);
-// `rename` replaces the rename used to install files and back them up.
-export const testSeams = { beforeWrite: null, rename: null };
+// `rename` replaces the rename used to install files and back them up; `unlink` replaces
+// the removal of a staging file after a failed write.
+export const testSeams = { beforeWrite: null, rename: null, unlink: null };
 
 const firstLine = (s) => String(s || "").trim().split("\n")[0] || "git error";
 const posix = (rel) => rel.split(sep).join("/");
@@ -102,8 +103,20 @@ export function pathspec(rel, icase) {
 // ignored, 1 is not, 128 is a git error to report) and literal `ls-files` for
 // tracked outputs. Returns `{ inside: false }` when git does not apply.
 export function verifyOutputPaths(repoRoot, cfg) {
-  if (discoverGit(repoRoot) !== "inside") return { inside: false, unignored: [], tracked: [] };
   const outputs = artifactSet(repoRoot, cfg).generated;
+  if (discoverGit(repoRoot) !== "inside") {
+    // A non-git target can still hold a nested checkout at an output folder; its own
+    // repository would track or ignore the files, so refuse that too.
+    for (const e of outputs) {
+      let dir = dirname(e.path);
+      while (!existsSync(dir)) dir = dirname(dir);
+      const t = probe(dir, ["rev-parse", "--show-toplevel"]);
+      if (t.status === 0) {
+        throw new OutputRefused(`${posix(relative(repoRoot, dir)) || "."} is inside a git work tree (${t.stdout.replace(/\n$/, "")}) although the target is not one, so git cannot say whether ${posix(e.rel)} is ignored. Remove the nested checkout or move the backlog root out of it`);
+      }
+    }
+    return { inside: false, unignored: [], tracked: [] };
+  }
   // A nested checkout between the target and an output would answer the ignore and
   // tracked questions for its own repository, not the target's.
   const topOf = (dir) => {
@@ -244,7 +257,14 @@ export function stageFile(dest, ext, content, mode) {
   } catch (e) {
     // The path was reserved by this call, so a failed write must not leave it behind.
     try { closeSync(fd); } catch { /* already closed */ }
-    try { unlinkSync(name); } catch { /* best-effort cleanup */ }
+    try {
+      (testSeams.unlink || unlinkSync)(name);
+    } catch (ue) {
+      // Name the file that is still there, so the user can remove it.
+      const err = new LedgerError(`${e.message}; could not remove the staging file ${name}: ${ue.message}`, "generate_failed");
+      err.stagePath = name;
+      throw err;
+    }
     throw e;
   }
   return name;
@@ -285,6 +305,7 @@ export function installStaged(entries, hooks = {}, failureText = "could not rest
   } catch (e) {
     const kept = [];
     const failed = [];
+    if (e.stagePath) failed.push(`the staging file ${e.stagePath} is still there`);
     for (const p of installed.reverse()) {
       try {
         if (p.backup) move(p.backup, p.entry.path); else rmSync(p.entry.path, { force: true });

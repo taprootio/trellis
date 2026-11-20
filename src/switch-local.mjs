@@ -197,9 +197,14 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
   const warnings = [];
   const pairs = [[readme, MARKERS.milestones, null], [completedIdx, MARKERS.completed, completedSkeleton()], [removedIdx, MARKERS.removed, removedSkeleton()]];
   for (const [f, own, skeleton] of pairs) {
-    if (!existsSync(f.path)) continue;
-    const text = readText(f.path, rel(f.path));
     const r = posix(f.rel);
+    // A tracked file missing from the work tree (sparse checkout or a deletion) cannot be
+    // checked for markers, so it is refused instead of skipped.
+    if (!existsSync(f.path)) {
+      if (tracked.has(r)) refuse(`${r} is tracked by git but missing from the work tree (a sparse checkout or a deletion), so the switch cannot check it for generated markers. Restore it (git checkout -- ${r}, or clear the sparse patterns), then run again`);
+      continue;
+    }
+    const text = readText(f.path, rel(f.path));
     if (!inspectMarkers(r, text, own)) continue;
     const stripped = stripBlock(text, own);
     // An index file holding only Trellis's own skeleton around the block is generated only:

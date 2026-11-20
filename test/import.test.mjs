@@ -1346,13 +1346,14 @@ test("import and init --import refuse a mapped source file that is a local outpu
   for (const how of ["direct", "symlink"]) {
     const root = make();
     const dirs = how === "direct" ? ["trellis/.generated"] : ["linked"];
+    const mapDir = mkdtempSync(join(tmpdir(), "trellis-map-"));
     try {
       if (how === "symlink") { mkdirSync(join(root, "linked")); symlinkSync(join(root, "trellis", ".generated", "index.md"), join(root, "linked", "notes.md")); }
       const before = tree(root);
       assert.throws(() => applyImport(root, root, JSON.parse(mapFile(dirs))), (e) => e instanceof ImportRefused && /generated output/.test(e.message), how);
       assert.deepEqual(tree(root), before);
-      writeFileSync(join(root, "..", `map-${how}.json`), mapFile(dirs));
-      const mapPath = join(root, "..", `map-${how}.json`);
+      const mapPath = join(mapDir, "map.json");
+      writeFileSync(mapPath, mapFile(dirs));
       const cli = spawnSync(process.execPath, [importScript, root, "--mapping", mapPath, "--target", root, "--apply"], { encoding: "utf8" });
       assert.equal(cli.status, 2, cli.stderr);
       assert.match(cli.stderr, /generated output/);
@@ -1360,26 +1361,25 @@ test("import and init --import refuse a mapped source file that is a local outpu
       assert.equal(ini.status, 2, ini.stderr);
       assert.match(ini.stderr, /generated output/);
       assert.deepEqual(tree(root), before, "init --import scaffolded nothing");
-      rmSync(mapPath, { force: true });
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally { rmSync(mapDir, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
   }
 });
 
 // ------------------------------------------------------- review round 5 (TRL0038)
 test("init --import in local mode generates no output before the import checks run", { skip: process.platform === "win32" }, () => {
   const root = localTarget();
+  const mapDir = mkdtempSync(join(tmpdir(), "trellis-map-"));
   try {
     const gen = join(root, "trellis", ".generated");
     assert.equal(existsSync(gen), false);
     const map = JSON.stringify({ ...loadProfile("trellis").mapping, sources: { active: { dirs: ["trellis/.generated"], file: "*.md" } } });
-    const mapPath = join(root, "..", "map-deferred.json");
+    const mapPath = join(mapDir, "map.json");
     writeFileSync(mapPath, map);
     const ini = spawnSync(process.execPath, [initScript, root, "--import", root, "--mapping", mapPath], { encoding: "utf8" });
-    rmSync(mapPath, { force: true });
     // Nothing was read from an output that did not exist: no scaffold-made file was imported.
     assert.doesNotMatch(ini.stderr, /generated output/);
     assert.deepEqual(readdirSync(join(root, "trellis", "active")).filter((n) => /index|completed|removed/.test(n)), []);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { rmSync(mapDir, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
 
 test("a mapped file reaching an output through another case spelling is refused by identity", { skip: process.platform === "win32" }, () => {
@@ -1410,4 +1410,47 @@ test("a .generated/backlog.json with the five keys but wrong types imports as an
     writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, nextId: null }));
     assert.equal(planImport(root, src, at, {}).counts.total, 0, "the real generated shape is skipped");
   } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+// ------------------------------------------------------- review round 6 (TRL0038)
+test("a .generated/backlog.json whose tasks lack an id and status imports as an ordinary file", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-genjson4-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.json" } } };
+    const base = { prefix: "X", milestones: [], nextId: "X1", counts: { active: 0, completed: 0, removed: 0 }, tasks: [] };
+    const bad = [{ tasks: [{ name: "Legacy task" }] }, { tasks: ["x"] }, { tasks: [{ id: "X1", status: 3 }] }, { counts: { active: -1, completed: 0, removed: 0 } }, { counts: { active: 1.5, completed: 0, removed: 0 } }];
+    for (const b of bad) {
+      writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, ...b }));
+      assert.equal(planImport(root, src, at, {}).counts.total, 1, `imported: ${JSON.stringify(b)}`);
+    }
+    writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, tasks: [{ id: "X1", status: "active" }] }));
+    assert.equal(planImport(root, src, at, {}).counts.total, 0, "the real generated shape is skipped");
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a source root that is itself .generated skips local artifacts by the file's own parent folder", () => {
+  const parent = mkdtempSync(join(tmpdir(), "trellis-genroot-"));
+  const src = join(parent, ".generated");
+  const root = initTarget();
+  try {
+    mkdirSync(src);
+    cpSync(join(trellisSrc, "active", "TR0001.md"), join(src, "TR0001.md"));
+    writeFileSync(join(src, "index.md"), `${localHead(LOCAL_TITLES.index)}\n| ID |\n`);
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["."], file: "*.md" } } };
+    assert.equal(planImport(root, src, at, {}).counts.total, 1, "only the real item");
+  } finally { rmSync(parent, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("init --import reports a mapping loader error before scaffolding anything", () => {
+  const root = mkdtempSync(join(tmpdir(), "trellis-badmap-"));
+  const mapDir = mkdtempSync(join(tmpdir(), "trellis-map-"));
+  try {
+    const mapPath = join(mapDir, "map.json");
+    writeFileSync(mapPath, "{ not json");
+    const ini = spawnSync(process.execPath, [initScript, root, "--import", root, "--mapping", mapPath], { encoding: "utf8" });
+    assert.equal(ini.status, 2, ini.stderr);
+    assert.deepEqual(readdirSync(root), [], "nothing was scaffolded");
+  } finally { rmSync(mapDir, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });

@@ -319,6 +319,8 @@ if ("retireSource" in opts) {
 
 // A ledger-mode backlog owns its config and its claimed ids, so --force and --import
 // are refused before anything is scaffolded, by reading the existing config first.
+// The import mapping is loaded and parsed once; loader errors are reported before anything is scaffolded.
+let importMapping = null;
 if (opts.force || opts.import) {
   try {
     // `init --force` would replace a local config with a committed one and overwrite the
@@ -329,8 +331,10 @@ if (opts.force || opts.import) {
       // A local-mode target with a leftover marker is refused before init scaffolds anything.
       assertNoLeftoverMarkers(targetRoot, "init --import");
       // A mapped source file that is one of the local outputs is refused the same way.
-      const { mapping } = opts.profile ? loadProfile(opts.profile) : loadMappingFile(opts.mapping);
-      assertSourceNotLocalOutput(targetRoot, isAbsolute(opts.import) ? opts.import : resolve(targetRoot, opts.import), mapping, "init --import");
+      const loaded = opts.profile ? loadProfile(opts.profile) : loadMappingFile(opts.mapping);
+      if (loaded.error) { console.error(`error: ${loaded.error}`); process.exit(2); }
+      importMapping = loaded.mapping;
+      assertSourceNotLocalOutput(targetRoot, isAbsolute(opts.import) ? opts.import : resolve(targetRoot, opts.import), importMapping, "init --import");
     } else assertNotLedgerMode(targetRoot, "init --force", "it would overwrite the config that holds the ledger settings");
   } catch (e) {
     if (!(e instanceof ImportRefused)) throw e;
@@ -361,8 +365,7 @@ if (summary.errors.length) process.exit(1);
 
 // --import on-ramp: scaffold, then import an existing backlog in one command.
 if (opts.import) {
-  const { mapping, error } = opts.profile ? loadProfile(opts.profile) : loadMappingFile(opts.mapping);
-  if (error) { console.error(`error: ${error}`); process.exit(2); }
+  const mapping = importMapping;
   const importSource = isAbsolute(opts.import) ? opts.import : resolve(targetRoot, opts.import);
   if (dryRun) {
     // A dry run scaffolds nothing, so there is no initialized target to plan the

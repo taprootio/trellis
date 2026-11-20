@@ -341,6 +341,8 @@ const refusals = {
   "an unstaged deletion of the tracked legacy backlog.json": { setup: (f) => rmSync(f.T("backlog.json")), re: /backlog\.json has uncommitted changes/ },
   "a README marked assume-unchanged": { setup: (f) => { git(f.root, "update-index", "--assume-unchanged", "trellis/README.md"); writeFileSync(f.T("README.md"), readFileSync(f.T("README.md"), "utf8") + "\nhidden\n"); }, re: /README\.md is marked assume-unchanged or skip-worktree/ },
   "a legacy backlog.json marked skip-worktree": { setup: (f) => git(f.root, "update-index", "--skip-worktree", "trellis/backlog.json"), re: /backlog\.json is marked assume-unchanged or skip-worktree/ },
+  "a tracked README deleted from the work tree": { setup: (f) => rmSync(f.T("README.md")), re: /trellis\/README\.md is tracked by git but missing from the work tree/ },
+  "a tracked index file skipped by sparse checkout": { setup: (f) => { git(f.root, "update-index", "--skip-worktree", "trellis/completed/index.md"); rmSync(f.T("completed", "index.md")); }, re: /trellis\/completed\/index\.md is tracked by git but missing from the work tree/ },
   "a tracked README symlink": { setup: (f) => { rmSync(f.T("README.md")); writeFileSync(join(f.root, "real-readme.md"), "# Real\n"); symlinkSync(join(f.root, "real-readme.md"), f.T("README.md")); f.commit(); }, re: /README\.md is a symlink/ },
 };
 for (const [name, c] of Object.entries(refusals)) {

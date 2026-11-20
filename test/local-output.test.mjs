@@ -11,7 +11,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { loadConfig } from "../src/backlog.mjs";
 import { gitEnv, seed } from "../src/ledger.mjs";
 import {
-  OutputRefused, outputPreflight, previewNextId, writeArtifactFiles, ignoreLineFor, verifyOutputPaths, discoverGit, gitPrefix, testSeams,
+  OutputRefused, outputPreflight, previewNextId, writeArtifactFiles, installStaged, ignoreLineFor, verifyOutputPaths, discoverGit, gitPrefix, testSeams,
 } from "../src/local-output.mjs";
 
 const BASE = { specVersion: "2.5", idPrefix: "DEMO", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1, 2, 3], generatedArtifacts: "local" };
@@ -425,4 +425,26 @@ test("an independent nested checkout at the backlog root refuses the preflight",
     refused(() => outputPreflight(c.root, c.cfg), /separate git work tree/);
     refused(() => verifyOutputPaths(c.root, c.cfg), /separate git work tree/);
   } finally { c.cleanup(); }
+});
+
+// ------------------------------------------------------- review round 6 (TRL0038)
+test("a nested checkout under a non-git target refuses the output paths", () => {
+  const c = localRepo({ inGit: false, tasksDir: "planning" });
+  try {
+    assert.equal(verifyOutputPaths(c.root, c.cfg).inside, false);
+    mkdirSync(join(c.root, "planning"), { recursive: true });
+    git(join(c.root, "planning"), "init", "-q", ...initRefFormat, "-b", "main");
+    refused(() => outputPreflight(c.root, c.cfg), /inside a git work tree/);
+    refused(() => verifyOutputPaths(c.root, c.cfg), /inside a git work tree/);
+  } finally { c.cleanup(); }
+});
+
+test("a failed write whose staging cleanup also fails names the staging file", () => {
+  const c = localRepo({ inGit: false });
+  try {
+    mkdirSync(c.dir, { recursive: true });
+    testSeams.unlink = () => { throw new Error("stuck"); };
+    // A numeric body makes the write itself fail.
+    assert.throws(() => installStaged([{ path: join(c.dir, "index.md"), content: 42 }]), (e) => /could not remove the staging file .*\.tmp: stuck/.test(e.message) && e.failed.some((f) => /\.tmp is still there/.test(f)));
+  } finally { testSeams.unlink = null; c.cleanup(); }
 });
