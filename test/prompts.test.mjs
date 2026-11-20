@@ -396,17 +396,43 @@ test("PR template folders count under .github, the root and docs, including syml
   }
 });
 
-test("the undetected pr-draft recovery adds --skip pr-template unless the scaffold's own template exists", () => {
-  const none = bareRepo({ template: false });
-  const outside = bareRepo({ template: false });
-  const own = bareRepo();
+test("the undetected recovery command restores only the playbooks, for all three prompts", () => {
+  const root = bareRepo({ template: false });
   try {
-    writeFileSync(join(outside, "PULL_REQUEST_TEMPLATE.md"), "# t\n");
-    assert.ok(textOf(none, "pr-draft").includes("--skip pr-template"));
-    assert.ok(textOf(outside, "pr-draft").includes("--skip pr-template"));
-    assert.ok(!textOf(own, "pr-draft").includes("--skip pr-template"));
-    assert.ok(!textOf(none, "code-review").includes("--skip pr-template"));
-  } finally { for (const r of [none, outside, own]) rmSync(r, { recursive: true, force: true }); }
+    for (const name of NAMES) assert.ok(textOf(root, name).includes("--with-playbooks --skip ci,pr-template,branch-protection,agents"), name);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a stray notes.md in active/ is not a task id", () => {
+  const root = freshRepo();
+  try {
+    writeFileSync(join(root, "trellis", "active", "notes.md"), "---\nid: notes\n---\n");
+    assert.throws(() => textOf(root, "work-task", { id: "notes" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a .txt PR template and a root PULL_REQUEST_TEMPLATE folder are found", () => {
+  const txt = bareRepo({ template: false });
+  const folder = bareRepo({ template: false });
+  try {
+    mkdirSync(join(txt, "docs"));
+    writeFileSync(join(txt, "docs", "pull_request_template.txt"), "t\n");
+    assert.ok(textOf(txt, "pr-draft").includes("docs/pull_request_template.txt"));
+    mkdirSync(join(folder, "PULL_REQUEST_TEMPLATE"));
+    writeFileSync(join(folder, "PULL_REQUEST_TEMPLATE", "feature.md"), "# t\n");
+    assert.ok(textOf(folder, "pr-draft").includes("PULL_REQUEST_TEMPLATE/"));
+    assert.ok(!textOf(folder, "pr-draft").includes(PROMPT_TOKENS.noTemplate));
+  } finally { for (const r of [txt, folder]) rmSync(r, { recursive: true, force: true }); }
+});
+
+test("the work-task prompt on a repo without AGENTS.md carries the fallback rule wherever AGENTS.md is required", () => {
+  const root = freshRepo();
+  try {
+    rmSync(join(root, "AGENTS.md"));
+    const text = textOf(root, "work-task");
+    assert.ok(text.includes("If the repo has no AGENTS.md"), "the playbook carries the fallback");
+    assert.ok(text.includes("SPEC.md"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("without an AGENTS.md the prompts do not require the conventions resource", () => {

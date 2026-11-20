@@ -14,7 +14,7 @@ does not.
 
 ## With a PR template
 
-The repo has a PR template (`pull_request_template.md`, in `.github/`, the repo root
+The repo has a PR template (`pull_request_template.md` or `.txt`, in `.github/`, the repo root
 or `docs/`, or a `PULL_REQUEST_TEMPLATE/` folder of templates in any of those). Use
 the one you find there; the description conforms to it.
 

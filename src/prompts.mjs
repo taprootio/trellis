@@ -197,7 +197,7 @@ function findPrTemplate(repoRoot) {
   const isRegularFile = (rel) => { try { return statSync(join(repoRoot, rel)).isFile(); } catch { return false; } };
   const entries = (dir) => { try { return readdirSync(join(repoRoot, dir), { withFileTypes: true }); } catch { return []; } };
   for (const dir of [".github", ".", "docs"]) {
-    const hit = entries(dir).find((e) => /^pull_request_template\.md$/i.test(e.name) && isRegularFile(dir === "." ? e.name : `${dir}/${e.name}`));
+    const hit = entries(dir).find((e) => /^pull_request_template\.(md|txt)$/i.test(e.name) && isRegularFile(dir === "." ? e.name : `${dir}/${e.name}`));
     if (hit) return dir === "." ? hit.name : `${dir}/${hit.name}`;
   }
   // Template folders count when they hold at least one real .md file; a symlinked folder is followed.
@@ -219,9 +219,9 @@ function missingPlaybook(repoRoot, p, args, cfg, cfgErrors) {
   const detected = detectGoodAgent(repoRoot);
   if (p.name === "work-task") lines.push(`Task: **${requireId(repoRoot, args.id, cfg, cfgErrors)}**`);
   if (!detected) {
-    // A repo with no template, or one kept outside the scaffold path, must not get the scaffolded one.
-    const needsSkip = p.name === "pr-draft" && findPrTemplate(repoRoot) !== ".github/pull_request_template.md";
-    lines.push(`The ${p.name} playbook (${p.playbook}) is absent from this repo. From the repo this server serves (path on the next line), run \`trellis init --with-playbooks\`, repeating your other \`--skip\` values and dropping only \`playbooks\`.${needsSkip ? " Also pass `--skip pr-template`, so init does not add a template you do not use." : ""}`, `run from: ${repoRoot}`);
+    // The server cannot know earlier skips, so the command skips every other part: existing
+    // files are kept anyway, and this restores only the playbooks.
+    lines.push(`The ${p.name} playbook (${p.playbook}) is absent from this repo. From the repo this server serves (path on the next line), run \`trellis init --with-playbooks --skip ci,pr-template,branch-protection,agents\`.`, `run from: ${repoRoot}`);
   } else if (p.name === "pr-draft") {
     lines.push(`Good-agent is detected (${detected}). Use its \`review-loop\` skill, and follow this repo's own PR instructions. ${PROMPT_TOKENS.prFlow}`);
   } else {

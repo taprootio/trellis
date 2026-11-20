@@ -2202,3 +2202,12 @@ test("an appended AGENTS.md kept out by the size guard also gets a README that l
     assert.ok(!readme.includes("AGENTS.md") && readme.includes("SPEC.md"));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("a detected repo with --skip ci prints the restore command with that skip", () => {
+  const root = tempRepo();
+  try {
+    seedMarker(root);
+    const r = cliRun(root, ["--skip", "ci"]);
+    assert.ok(r.stdout.includes("trellis init --with-playbooks --skip ci"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

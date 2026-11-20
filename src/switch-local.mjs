@@ -276,7 +276,11 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
         if (will > AGENTS_BYTE_LIMIT && was <= AGENTS_BYTE_LIMIT) {
           refuse(`the edit would make AGENTS.md ${will} bytes, over the ${AGENTS_BYTE_LIMIT}-byte limit Codex reads. Trim AGENTS.md, or edit the generated-files bullet by hand, then run again`);
         }
-        if (will > AGENTS_BYTE_LIMIT) warnings.push(`AGENTS.md is ${was} bytes, already over the ${AGENTS_BYTE_LIMIT}-byte limit Codex reads. Trim it`);
+        if (was > AGENTS_BYTE_LIMIT) {
+          warnings.push(will > AGENTS_BYTE_LIMIT
+            ? `AGENTS.md is ${was} bytes, already over the ${AGENTS_BYTE_LIMIT}-byte limit Codex reads. Trim it`
+            : `AGENTS.md was ${was} bytes, over the ${AGENTS_BYTE_LIMIT}-byte limit Codex reads; the edit brings it to ${will} bytes, back within the limit`);
+        }
         edits.push({ path: agentsPath, rel: "AGENTS.md", before: text, after, why: "updated the generated-files bullet" });
       } else if (at !== -1 || !["full", "compact"].some((v) => findWholeLines(block, artifactBullet(root, "local", v)) !== -1)) {
         warnings.push(`AGENTS.md: the generated-files bullet in the Trellis block differs from Trellis's own text, so it was left alone. Edit it by hand to say the index is generated into ${root}/${GENERATED_DIR}/ and that no committed file is generated`);

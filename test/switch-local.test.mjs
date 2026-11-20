@@ -770,3 +770,16 @@ test("the closing message says to repeat the --skip flags", () => {
     assert.ok(r.stdout.includes("--skip"));
   } finally { f.cleanup(); }
 });
+
+test("a file just over the limit that the edit shrinks back within it gets an advisory with the new size", () => {
+  const f = fixture({ goodAgent: true });
+  try {
+    // The compact block's local text is shorter, so the edit shrinks the file.
+    padAgents(f, LIMIT + 50);
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    const size = readFileSync(join(f.root, "AGENTS.md")).length;
+    assert.ok(size <= LIMIT);
+    assert.ok(r.stderr.includes(String(LIMIT + 50)) && r.stderr.includes(String(size)));
+  } finally { f.cleanup(); }
+});
