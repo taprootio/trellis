@@ -45,11 +45,13 @@ export function probe(repoRoot, args, { literal = false } = {}) {
   });
 }
 
+const OUTSIDE_REPO = "fatal: not a git repository (or any of the parent directories): .git";
+
 // "inside" a work tree, or "skip": git is absent or the directory is confirmed to
-// be outside any work tree. That is only a successful answer of `false`, or git's own
-// not-a-repository exit (128) with its standard message at the start of stderr. Any
-// other failure or answer (ownership, permission, an odd reply) refuses, since the
-// writer cannot tell whether an output is ignored.
+// be outside any work tree. That is only a successful answer of `false`, or exit 128
+// with stderr exactly git's outside-repository message. `fatal: not a git repository: <path>`
+// is a broken worktree pointer, so it refuses like any other failure or odd answer
+// (ownership, permission), since the writer cannot tell whether an output is ignored.
 export function discoverGit(repoRoot) {
   const r = probe(repoRoot, ["rev-parse", "--is-inside-work-tree", "--show-prefix"]);
   if (r.error) {
@@ -62,7 +64,7 @@ export function discoverGit(repoRoot) {
     if (answer === "false") return "skip";
     throw new OutputRefused(`git gave an unexpected answer when inspecting ${repoRoot}: ${JSON.stringify(answer)}`);
   }
-  if (r.status === 128 && r.stderr.startsWith("fatal: not a git repository")) return "skip";
+  if (r.status === 128 && r.stderr.replace(/\n$/, "") === OUTSIDE_REPO) return "skip";
   throw new OutputRefused(`git could not inspect ${repoRoot}: ${firstLine(r.stderr)}`);
 }
 
@@ -265,21 +267,27 @@ export function installStaged(entries, hooks = {}, failureText = "could not rest
     if (hooks.after) hooks.after();
   } catch (e) {
     const kept = [];
+    const failed = [];
     for (const p of installed.reverse()) {
       try {
         if (p.backup) move(p.backup, p.entry.path); else rmSync(p.entry.path, { force: true });
         p.backup = null;
-      } catch {
+      } catch (re) {
         if (p.backup) kept.push(`${p.backup} (original of ${p.entry.path})`);
+        else failed.push(`could not remove ${p.entry.path}: ${re.message}`);
         p.backup = null;
       }
     }
     for (const p of plan) {
       if (p.temp) { try { rmSync(p.temp, { force: true }); } catch { /* best-effort cleanup */ } }
     }
-    if (kept.length) {
-      const err = new LedgerError(`${e.message}; ${failureText}; originals kept at: ${kept.join(", ")}`, "generate_failed");
+    if (kept.length || failed.length) {
+      const parts = [e.message, failureText];
+      if (kept.length) parts.push(`originals kept at: ${kept.join(", ")}`);
+      if (failed.length) parts.push(failed.join("; "));
+      const err = new LedgerError(parts.join("; "), "generate_failed");
       err.kept = kept;
+      err.failed = failed;
       err.original = e.message;
       throw err;
     }

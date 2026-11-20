@@ -263,7 +263,10 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
       after: () => { if (testSeams.afterWrites) testSeams.afterWrites(); },
     });
   } catch (e) {
-    if (e.kept) throw new Error(`the switch failed and could not restore every file; originals kept at: ${e.kept.join(", ")}: ${e.original}`);
+    if (e.kept) {
+      const notes = [...(e.kept.length ? [`originals kept at: ${e.kept.join(", ")}`] : []), ...e.failed];
+      throw new Error(`the switch failed and could not restore every file; ${notes.join("; ")}: ${e.original}`);
+    }
     throw new Error(`the switch failed and every edited file was restored: ${e.message}`);
   }
   warnings.push(...outcome.leftover);

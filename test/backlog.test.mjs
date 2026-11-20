@@ -778,6 +778,18 @@ test("generatedArtifacts: only committed or local is accepted, and null is not",
   }
 });
 
+test("local mode requires an ASCII tasksDir; committed mode does not", () => {
+  const unicode = ["planning", "r\u00e9sum\u00e9", "\u212a/backlog"];
+  withRepo({ ...ARRAY_CFG, generatedArtifacts: "local", tasksDir: unicode[1] }, {}, (root) => {
+    assert.match(loadConfig(root).errors.join("\n"), /`tasksDir` must be ASCII when `generatedArtifacts` is "local"/);
+  });
+  withRepo({ ...ARRAY_CFG, generatedArtifacts: "local", tasksDir: unicode[2] }, {}, (root) => {
+    assert.match(loadConfig(root).errors.join("\n"), /must be ASCII/);
+  });
+  withRepo({ ...ARRAY_CFG, generatedArtifacts: "local", tasksDir: "docs/plan" }, {}, (root) => assert.deepEqual(loadConfig(root).errors, []));
+  withRepo({ ...ARRAY_CFG, generatedArtifacts: "committed", tasksDir: unicode[1] }, {}, (root) => assert.deepEqual(loadConfig(root).errors, []));
+});
+
 test("committed output is byte-identical to the pinned fixture", () => {
   const cfg = { ...ARRAY_CFG, milestones: ["Alpha", "Beta"], effort: [1, 2, 3, 5] };
   withRepo(cfg, ITEMS, (root) => {

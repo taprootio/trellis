@@ -260,6 +260,22 @@ test("validate reports errors on a corrupted item", () => {
   }
 });
 
+test("committed regenerate still writes through a symlinked artifact", { skip: process.platform === "win32" }, () => {
+  const root = freshRepo();
+  try {
+    createTask(root, VALID);
+    const real = join(root, "elsewhere.json");
+    const link = join(root, "trellis", "backlog.json");
+    writeFileSync(real, "stale\n");
+    rmSync(link);
+    symlinkSync(real, link);
+    const out = regenerateOp(root);
+    assert.ok(out.changed.includes("trellis/backlog.json"));
+    assert.ok(lstatSync(link).isSymbolicLink(), "the link is kept, not replaced by a file");
+    assert.match(readFileSync(real, "utf8"), /"tasks"/, "the target was updated");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("regenerate rewrites a stale artifact and reports what changed", () => {
   const root = freshRepo();
   try {

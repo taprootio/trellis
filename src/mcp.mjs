@@ -244,10 +244,34 @@ function writeArtifacts(repoRoot, cfg, data, hooks = {}, pv = ledgerPreview(repo
   const { files, nextId: next, errors } = generateArtifacts(repoRoot, cfg, data, { nextIdOverride });
   if (errors.length) throw new TrellisError(`generate failed: ${errors.join("; ")}`, "generate_failed");
   if (isLedgerMode(cfg)) return writeArtifactsStaged(repoRoot, files, next, hooks);
-  // The shared writer snapshots prior bytes, so a mid-loop write failure (ENOSPC/EACCES)
-  // restores every artifact — honouring the Risk's "never left … with stale generated files."
-  const changed = writeArtifactFiles(files).map((path) => relative(repoRoot, path));
-  return { changed, nextId: next };
+  // Local mode uses the shared staged writer, which rolls back a failed write.
+  if (isLocalMode(cfg)) {
+    const changed = writeArtifactFiles(files).map((path) => relative(repoRoot, path));
+    return { changed, nextId: next };
+  }
+  // Committed mode keeps its original write, which follows a symlinked artifact.
+  // Snapshot prior bytes first so a mid-loop write failure (ENOSPC/EACCES) restores
+  // every artifact — honouring the Risk's "never left … with stale generated files."
+  const prior = files.map((f) => ({ path: f.path, before: existsSync(f.path) ? readFileSync(f.path, "utf8") : null }));
+  const done = [];
+  try {
+    const changed = [];
+    for (const f of files) {
+      const { before } = prior.find((p) => p.path === f.path);
+      if (before !== f.content) {
+        writeFileSync(f.path, f.content);
+        done.push(f.path);
+        changed.push(relative(repoRoot, f.path));
+      }
+    }
+    return { changed, nextId: next };
+  } catch (e) {
+    for (const p of prior) {
+      if (!done.includes(p.path)) continue;
+      try { p.before === null ? rmSync(p.path, { force: true }) : writeFileSync(p.path, p.before); } catch { /* best-effort restore */ }
+    }
+    throw e;
+  }
 }
 
 // Ledger-mode artifact write (TRL0037). A claimed id cannot be released, so the

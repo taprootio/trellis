@@ -322,6 +322,13 @@ test("a git error that merely mentions 'not a git repository' refuses, and an od
     withGitShim("--show-prefix", `    echo "fatal: not a git repository (or any of the parent directories): .git" >&2\n    exit 128`, () => {
       assert.equal(discoverGit(c.root), "skip");
     });
+    // A broken worktree pointer names a path, so it is not the outside-repository answer.
+    withGitShim("--show-prefix", `    echo "fatal: not a git repository: /work/x/.git/worktrees/y" >&2\n    exit 128`, () => {
+      refused(() => discoverGit(c.root), /not a git repository: \/work/);
+    });
+    withGitShim("--show-prefix", `    echo "fatal: not a git repository (or any of the parent directories): .git: extra" >&2\n    exit 128`, () => {
+      refused(() => discoverGit(c.root), /extra/);
+    });
     withGitShim("--show-prefix", `    echo maybe\n    exit 0`, () => {
       refused(() => discoverGit(c.root), /unexpected answer/);
     });
@@ -385,4 +392,15 @@ test("a backup that cannot be renamed back is kept and named", () => {
     assert.throws(() => writeArtifactFiles(files), (e) => /boom; could not restore every file; originals kept at: .*\.bak \(original of .*index\.md\)/.test(e.message));
     assert.equal(readdirSync(c.dir).filter((n) => n.endsWith(".bak")).length, 1, "the backup is still on disk");
   } finally { testSeams.beforeWrite = null; testSeams.rename = null; c.cleanup(); }
+});
+
+test("a rollback that cannot remove a new file names it in the error", { skip: process.platform === "win32" || (process.getuid && process.getuid() === 0) }, () => {
+  const c = localRepo();
+  try {
+    mkdirSync(c.dir);
+    const files = OUTPUTS.map((n, i) => ({ path: join(c.dir, n), content: `new ${i}\n` }));
+    // Locks the folder just before write 1, so removing the new file from write 0 fails.
+    testSeams.beforeWrite = (_p, i) => { if (i === 1) { chmodSync(c.dir, 0o555); throw new Error("boom"); } };
+    assert.throws(() => writeArtifactFiles(files), (e) => /^boom; could not restore every file; could not remove .*index\.md: /.test(e.message) && e.failed.length === 1);
+  } finally { testSeams.beforeWrite = null; chmodSync(c.dir, 0o755); c.cleanup(); }
 });

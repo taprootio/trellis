@@ -15,7 +15,7 @@ import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
-import { applyImport, assertNotLedgerMode, assertNotLocalMode, assertNoLeftoverMarkers, ImportRefused } from "../src/import.mjs";
+import { applyImport, assertNotLedgerMode, assertNotLocalMode, assertNoLeftoverMarkers, assertSourceNotLocalOutput, ImportRefused } from "../src/import.mjs";
 import { loadConfig } from "../src/backlog.mjs";
 import { switchToLocal } from "../src/switch-local.mjs";
 import { LedgerError, refuseSymlinkedArtifacts, artifactPaths } from "../src/ledger.mjs";
@@ -328,6 +328,9 @@ if (opts.force || opts.import) {
       assertNotLedgerMode(targetRoot, "init --import");
       // A local-mode target with a leftover marker is refused before init scaffolds anything.
       assertNoLeftoverMarkers(targetRoot, "init --import");
+      // A mapped source file that is one of the local outputs is refused the same way.
+      const { mapping } = opts.profile ? loadProfile(opts.profile) : loadMappingFile(opts.mapping);
+      assertSourceNotLocalOutput(targetRoot, isAbsolute(opts.import) ? opts.import : resolve(targetRoot, opts.import), mapping, "init --import");
     } else assertNotLedgerMode(targetRoot, "init --force", "it would overwrite the config that holds the ledger settings");
   } catch (e) {
     if (!(e instanceof ImportRefused)) throw e;

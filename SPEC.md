@@ -506,6 +506,8 @@ artifact under `<tasksDir>/.generated/` and nothing generated is committed:
   metacharacters escaped). Outside a work tree, or without git, that check is
   skipped; any other failure to inspect the repo is a refusal. `--check` never
   runs git.
+- **ASCII backlog root.** In local mode `tasksDir` must be ASCII (a config error
+  otherwise), so no Unicode filesystem alias can hide an output from git's ignore check.
 - **`--check`** validates config, roster and items (§8.3 item 1), runs the marker
   scan above, and compares no generated file. It remains the required CI gate
   (§10), and it passes with no `.generated/` folder present.

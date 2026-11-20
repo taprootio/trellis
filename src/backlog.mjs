@@ -184,6 +184,11 @@ export function loadConfig(repoRoot) {
       // CLI summary) don't inherit a doubled separator from a trailing slash.
       // join() already tolerates it, but the echoed strings should be clean.
       cfg.tasksDir = cfg.tasksDir.replace(/[/\\]+$/, "");
+      // Git's case-insensitive pathspec folds only ASCII, so a Unicode folder name could
+      // alias an output on a folding filesystem without git seeing it (TRL0038). Git-free.
+      if (cfg.generatedArtifacts === "local" && /[^\x00-\x7f]/.test(cfg.tasksDir)) {
+        errors.push("config: `tasksDir` must be ASCII when `generatedArtifacts` is \"local\"");
+      }
     }
   }
 

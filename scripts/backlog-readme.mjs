@@ -125,7 +125,7 @@ if (isCheck) {
     try {
       writeArtifactFiles(files);
     } catch (e) {
-      console.error(`Could not write the generated files (nothing was kept): ${e.message}`);
+      console.error(`Could not write the generated files: ${e.message}`);
       process.exit(1);
     }
   } else {
