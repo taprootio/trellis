@@ -13,3 +13,5 @@ jobs:
         with:
           node-version: "lts/*"
       - run: node scripts/backlog-readme.mjs --check
+      - run: npm ci
+      - run: npm run check:agent
