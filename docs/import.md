@@ -337,7 +337,7 @@ them. The migration is five steps, in this order:
    file before init could overwrite it. It never prompts, stages, commits or edits
    `.gitignore`. Index files that hold nothing but a generated block are left
    exactly as they are and reported.
-3. Run the `git --literal-pathspecs rm -- '<path>'` commands it prints. They delete
+3. Run the `git -C '<repo root>' --literal-pathspecs rm -- '<path>'` commands it prints. They delete
    the untouched generated-only index files and the legacy `backlog.json`.
 4. Run `npx @taprootio/trellis init`, without `--force` (init refuses `--force` on a
    local repo). It creates nothing under the README or index paths.
