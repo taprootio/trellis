@@ -78,15 +78,23 @@ three are installed under `.agents/skills/` and `.claude/skills/` by `npx
 good-agent init --skill` as generated copies; do not edit them. For this
 repo's own task work they replace the loop pointers to `trellis/playbooks/`.
 The backlog lifecycle above still governs: where a task file lives, the
-Loop contract seam points, and closing a task. Run the external round with
-`npx --no-install good-agent review --author <claude|codex> --base <start
-sha> --task <task path> --verified "<check>"`, where the task path is
-`trellis/active/<id>.md` while the task is open and
-`trellis/completed/tasks/<id>.md` for a re-review after closeout. A commit
+Loop contract seam points, and closing a task. Run the external diff review with `npx --no-install good-agent review
+--author <claude|codex> --base <base sha> --task <task path> --verified
+"<check>"`; plan and story reviews add `--prompt plan` or `--prompt story`.
+The task path is `trellis/active/<id>.md` while the task is open and
+`trellis/completed/tasks/<id>.md` for a re-review after closeout. The base
+is the task branch's starting commit, or for a PR-time re-review after a
+merge or rebase, the freshly fetched PR base commit. A commit
 that only updates a task's review record needs no further review round.
 `npm run check:agent` is one of the `gates`; contributor tooling needs
 Node 22 or later (good-agent's floor), while the published package still
 supports Node 18.
+
+Releases: merging a `package.json` `version` change to `main` publishes
+(`.github/workflows/release.yml`), and the GitHub release uses generated
+notes. There is no changelog file, so the skills' changelog step does not
+apply here. Record the version decision (bump and why, or no release) in
+the task and the PR body.
 <!-- END GOOD-AGENT -->
 
 ## Roadmap
