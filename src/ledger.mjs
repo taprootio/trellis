@@ -10,9 +10,9 @@
 // `check` never depends on git or on local state (SPEC §8.3).
 
 import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { spawnSync } from "node:child_process";
-import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, PLAIN_PREFIX_RE, parseFrontMatter, paths } from "./backlog.mjs";
+import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, PLAIN_PREFIX_RE, parseFrontMatter, paths, refNameProblem } from "./backlog.mjs";
 
 // A typed failure the CLI maps to an exit code and the MCP adapter maps to a
 // TrellisError. Exit 2 is "refused, nothing written"; exit 1 is a real failure
@@ -224,6 +224,8 @@ function parseClaims(text, cfg) {
     }
     if (!KINDS.has(kind)) return { reason: `${at} has an unknown kind` };
     if (!branch || !title || unsafeText(branch) || unsafeText(title)) return { reason: `${at} has an empty or unsafe branch or title` };
+    // A real branch name must be one git accepts; `-` stands for no branch.
+    if (branch !== "-" && (branch.startsWith("-") || branch === "@" || refNameProblem(branch))) return { reason: `${at} has a branch that is not a valid git branch name` };
     if (kind === "through" && branch !== "-") return { reason: `${at} is a through row with a branch` };
     rows.push({ id, date, kind, branch, title });
   }
@@ -379,17 +381,44 @@ function listWorktrees(repoRoot) {
 // primary worktree, and then the real checkout would never be scanned.
 function verifyWorktrees(repoRoot, worktrees) {
   const real = new Set();
+  const common = runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: repoRoot });
+  const commonDir = common.status === 0 ? realpathSync.native(common.stdout.replace(/\n$/, "")) : "";
   for (const w of worktrees) {
     const top = runGit(["rev-parse", "--show-toplevel"], { cwd: w.path });
     const topPath = top.stdout.replace(/\n$/, "");
     if (top.status !== 0 || !topPath || realpathSync.native(topPath) !== realpathSync.native(w.path)) {
       throw refuse(`cannot locate the checkout of the listed worktree ${w.path}; the id ledger does not support this layout (a separate git dir, for one)`, "unsupported_layout");
     }
+    // A checkout moved by hand leaves its registration pointing at the old path, where
+    // another clone may now sit. The checkout must resolve to the git dir registered for it.
+    const actual = runGit(["rev-parse", "--absolute-git-dir"], { cwd: w.path });
+    const actualDir = actual.status === 0 ? realpathSync.native(actual.stdout.replace(/\n$/, "")) : "";
+    if (!commonDir || !actualDir || actualDir !== registeredGitDir(commonDir, w.path)) {
+      throw refuse(`the checkout at ${w.path} is not the one git registered for it (moved by hand?); the id ledger does not support this layout`, "unsupported_layout");
+    }
     real.add(realpathSync.native(w.path));
   }
   if (!real.has(realpathSync.native(repoRoot))) {
     throw refuse(`${repoRoot} is not in the worktree list of its clone; the id ledger does not support this layout`, "unsupported_layout");
   }
+}
+
+// The git dir registered for a checkout: its `worktrees/<name>` directory when a
+// gitdir file points at it, else the common dir (the main worktree).
+function registeredGitDir(commonDir, path) {
+  const dir = join(commonDir, "worktrees");
+  const want = realpathSync.native(path);
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch { /* no linked worktrees */ }
+  for (const name of names) {
+    try {
+      const target = readFileSync(join(dir, name, "gitdir"), "utf8").trim();
+      if (target && realpathSync.native(dirname(target)) === want) return realpathSync.native(join(dir, name));
+    } catch { /* an unreadable entry cannot be the match */ }
+  }
+  return commonDir;
 }
 
 // Reads the full symbolic ref and strips refs/heads/ itself: `--short` would print
@@ -606,7 +635,7 @@ export function preview(repoRoot, cfg) {
     requirePlainPrefix(cfg);
     const ledger = readLedger(repoRoot, cfg);
     if (ledger.missing) {
-      return { nextId: null, reason: "missing_ledger", note: `no id ledger at ${refOf(cfg)}; ${SEED_HINT}` };
+      return { nextId: null, reason: "missing_ledger", note: `no id ledger at ${refOf(cfg)}; ${SEED_HINT}. ${RECOVERY_HINT}.` };
     }
     if (ledger.unusable) {
       return { nextId: null, reason: "invalid_ledger", note: `the id ledger at ${refOf(cfg)} is not usable: ${ledger.unusable}` };

@@ -32,6 +32,7 @@ import {
   parseFrontMatter,
   paths,
   composeFile,
+  activeItemErrors,
 } from "./backlog.mjs";
 import { applyImport, ImportRefused } from "./import.mjs";
 import { loadProfile } from "./profiles.mjs";
@@ -456,6 +457,18 @@ export function createTask(repoRoot, args = {}, hooks = {}) {
     }
     if (!cfg.milestones.includes(milestone)) throw new TrellisError(`milestone must be one of ${cfg.milestones.join(", ")}`, "invalid_request");
     if (!cfg.priorities.includes(priority)) throw new TrellisError(`priority must be one of ${cfg.priorities.join(", ")}`, "invalid_request");
+  }
+  // Compose and re-parse the item as the re-read will, with a stand-in id of the
+  // right shape, so a value that does not survive the round trip fails before the claim.
+  if (ledgerMode) {
+    const probe = cfg.idPrefix + "9".repeat(cfg.idWidth);
+    const probeFm = { id: probe, title, status: "active", milestone, priority, effort: effort.value, depends_on, summary };
+    if (owner) probeFm.owner = owner;
+    if (collaborators.length) probeFm.collaborators = collaborators;
+    const parseErrors = [];
+    const parsed = parseFrontMatter(composeFile(probeFm, ""), "new item", parseErrors);
+    const problems = parsed ? [...parseErrors, ...activeItemErrors(cfg, data, { ...parsed, _file: `${probe}.md` })] : parseErrors;
+    if (problems.length) throw new TrellisError(`the new item would not validate: ${problems.join("; ")}`, "invalid_request");
   }
   // A symlinked artifact is refused by the write, so it must fail before the claim too.
   if (ledgerMode) ledgerCall(() => refuseSymlinkedArtifacts(artifactPaths(repoRoot, cfg)));

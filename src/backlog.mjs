@@ -29,13 +29,9 @@ export const LEDGER_NAMESPACE = "refs/trellis/";
 // and every existing id matcher can use it unescaped.
 export const PLAIN_PREFIX_RE = /^[A-Za-z][A-Za-z0-9]*$/;
 
-// Returns a problem description, or null when `ref` is a valid ledger ref. These
-// are the `git check-ref-format` rules as a pattern, plus the namespace rule.
-export function ledgerRefProblem(ref) {
-  if (typeof ref !== "string" || !ref) return "must be a non-empty string";
-  if (!ref.startsWith(LEDGER_NAMESPACE) || ref.length === LEDGER_NAMESPACE.length) {
-    return `must name a ref under ${LEDGER_NAMESPACE}`;
-  }
+// The `git check-ref-format` character and sequence rules as a pattern, shared by
+// the ledger ref and the branch names in the ledger. Returns a problem or null.
+export function refNameProblem(ref) {
   if (/[\x00-\x20\x7f~^:?*[\\]/.test(ref)) return "contains a character git forbids in ref names";
   if (ref.includes("..") || ref.includes("//") || ref.includes("@{")) return "contains a sequence git forbids in ref names";
   if (ref.endsWith("/") || ref.endsWith(".")) return "ends in a character git forbids at the end of a ref name";
@@ -43,6 +39,16 @@ export function ledgerRefProblem(ref) {
     return "has a component starting with `.` or ending in `.lock`";
   }
   return null;
+}
+
+// Returns a problem description, or null when `ref` is a valid ledger ref: the
+// namespace rule plus the ref-name rules.
+export function ledgerRefProblem(ref) {
+  if (typeof ref !== "string" || !ref) return "must be a non-empty string";
+  if (!ref.startsWith(LEDGER_NAMESPACE) || ref.length === LEDGER_NAMESPACE.length) {
+    return `must name a ref under ${LEDGER_NAMESPACE}`;
+  }
+  return refNameProblem(ref);
 }
 
 export const MARKERS = {
@@ -156,7 +162,7 @@ function validateIdAllocation(cfg, errors) {
   }
   if (cfg.idAllocation !== "ledger") return;
   // Checked on the text, so `check` stays git-free. Writes under .git could corrupt the ledger ref.
-  if (typeof cfg.tasksDir === "string" && /^(\.\/)*\.git(\/|\\|$)/.test(cfg.tasksDir.replace(/^(\.[/\\])+/, "").replace(/[/\\]+$/, "") + "/")) {
+  if (typeof cfg.tasksDir === "string" && /^(\.\/)*\.git(\/|\\|$)/i.test(cfg.tasksDir.replace(/^(\.[/\\])+/, "").replace(/[/\\]+$/, "") + "/")) {
     errors.push("config: `tasksDir` must not be inside the repository's `.git` directory when `idAllocation` is \"ledger\"");
   }
   if (typeof cfg.idPrefix === "string" && cfg.idPrefix && !PLAIN_PREFIX_RE.test(cfg.idPrefix)) {
@@ -483,49 +489,8 @@ function idsFromDir(dir, fileRe) {
   return readdirSync(dir).map((f) => f.match(fileRe)).filter(Boolean).map((m) => m[1]);
 }
 
-export function readBacklog(repoRoot, cfg) {
-  const p = paths(repoRoot, cfg);
-  const fileRe = new RegExp(`^(${cfg.idPrefix}\\d{${cfg.idWidth}})\\.md$`);
-  const errors = [];
-
-  // The roster lives at the fixed config home; its load/validation errors are
-  // config-class and surface here so `--check`/validate fail on a malformed team.json
-  // (SPEC §7.2). An absent roster is empty — owner/collaborators stay optional.
-  const { roster, errors: rosterErrors } = loadRoster(repoRoot);
-  errors.push(...rosterErrors);
-
-  const byId = new Map();
-  for (const [label, dir] of [["active", p.active], ["completed/tasks", p.completedTasks], ["removed", p.removed]]) {
-    for (const id of idsFromDir(dir, fileRe)) {
-      const at = byId.get(id) || []; at.push(label); byId.set(id, at);
-    }
-  }
-  for (const [id, at] of byId) if (at.length > 1) errors.push(`${id}: duplicate id in ${at.join(", ")}`);
-  const ids = new Set(byId.keys());
-
-  const readDir = (dir, kind, isActive) => {
-    const out = [];
-    if (!existsSync(dir)) return out;
-    for (const f of readdirSync(dir).sort()) {
-      if (!fileRe.test(f)) {
-        if (isActive && /\.md$/.test(f)) errors.push(`active/${f}: filename must be ${cfg.idPrefix} + ${cfg.idWidth} digits`);
-        continue;
-      }
-      const fm = parseFrontMatter(readFileSync(join(dir, f), "utf8"), `${kind}/${f}`, errors);
-      if (fm) out.push({ ...fm, _file: f });
-    }
-    return out;
-  };
-
-  const active = readDir(p.active, "active", true);
-  const completed = readDir(p.completedTasks, "completed", false);
-  const removed = readDir(p.removed, "removed", false);
-
-  // Validation. Active items are checked in full against the live config. Closed
-  // items are checked for lifecycle integrity (status, ISO close date, reason,
-  // required depends_on with referential checks); their historical enum values
-  // (milestone/priority/effort) are NOT re-validated against the current config
-  // (SPEC.md §5.1, §8.3).
+// The per-item checks, shared by readBacklog and the ledger create preflight (TRL0037).
+function makeValidators(cfg, roster, ids) {
   const idRe = new RegExp(`^${cfg.idPrefix}\\d{${cfg.idWidth}}$`);
   const isoDate = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
@@ -585,15 +550,70 @@ export function readBacklog(repoRoot, cfg) {
     }
   };
 
-  for (const it of active) {
-    const err = (m) => errors.push(`active/${it._file}: ${m}`);
+  const checkActive = (it, err) => {
     checkCommon(it, "active", err);
     if (!it.summary) err("missing `summary`");
     if (!cfg.priorities.includes(it.priority)) err(`priority must be one of ${cfg.priorities.join(", ")}`);
     attachEffort(it, err);
     if (!cfg.milestones.includes(it.milestone)) err(`milestone must be one of ${cfg.milestones.join(", ")}`);
     validateAssignees(it, err, true);
+  };
+  return { checkActive, checkCommon, checkHistorical, attachEffort, validateAssignees, isoDate };
+}
+
+// Problems an active item would have on re-read; used before a ledger id is claimed.
+export function activeItemErrors(cfg, data, it) {
+  const errors = [];
+  makeValidators(cfg, data.roster, data.ids).checkActive(it, (m) => errors.push(m));
+  return errors;
+}
+
+export function readBacklog(repoRoot, cfg) {
+  const p = paths(repoRoot, cfg);
+  const fileRe = new RegExp(`^(${cfg.idPrefix}\\d{${cfg.idWidth}})\\.md$`);
+  const errors = [];
+
+  // The roster lives at the fixed config home; its load/validation errors are
+  // config-class and surface here so `--check`/validate fail on a malformed team.json
+  // (SPEC §7.2). An absent roster is empty — owner/collaborators stay optional.
+  const { roster, errors: rosterErrors } = loadRoster(repoRoot);
+  errors.push(...rosterErrors);
+
+  const byId = new Map();
+  for (const [label, dir] of [["active", p.active], ["completed/tasks", p.completedTasks], ["removed", p.removed]]) {
+    for (const id of idsFromDir(dir, fileRe)) {
+      const at = byId.get(id) || []; at.push(label); byId.set(id, at);
+    }
   }
+  for (const [id, at] of byId) if (at.length > 1) errors.push(`${id}: duplicate id in ${at.join(", ")}`);
+  const ids = new Set(byId.keys());
+
+  const readDir = (dir, kind, isActive) => {
+    const out = [];
+    if (!existsSync(dir)) return out;
+    for (const f of readdirSync(dir).sort()) {
+      if (!fileRe.test(f)) {
+        if (isActive && /\.md$/.test(f)) errors.push(`active/${f}: filename must be ${cfg.idPrefix} + ${cfg.idWidth} digits`);
+        continue;
+      }
+      const fm = parseFrontMatter(readFileSync(join(dir, f), "utf8"), `${kind}/${f}`, errors);
+      if (fm) out.push({ ...fm, _file: f });
+    }
+    return out;
+  };
+
+  const active = readDir(p.active, "active", true);
+  const completed = readDir(p.completedTasks, "completed", false);
+  const removed = readDir(p.removed, "removed", false);
+
+  // Validation. Active items are checked in full against the live config. Closed
+  // items are checked for lifecycle integrity (status, ISO close date, reason,
+  // required depends_on with referential checks); their historical enum values
+  // (milestone/priority/effort) are NOT re-validated against the current config
+  // (SPEC.md §5.1, §8.3).
+  const { checkActive, checkCommon, checkHistorical, attachEffort, validateAssignees, isoDate } = makeValidators(cfg, roster, ids);
+
+  for (const it of active) checkActive(it, (m) => errors.push(`active/${it._file}: ${m}`));
   for (const it of completed) {
     const err = (m) => errors.push(`completed/${it._file}: ${m}`);
     checkCommon(it, "completed", err);
@@ -634,7 +654,11 @@ function cell(s) { return String(s ?? "").replace(/\|/g, "\\|"); }
 // `literal` (ledger mode only, TRL0037) inserts the body through a callback, so a
 // title holding `$&` or `$1` is text. Scan mode keeps its exact bytes.
 function fillMarkers(text, [begin, end], body, where, errors, literal = false) {
-  const re = new RegExp(`${begin}[\\s\\S]*?${end}`);
+  // Ledger mode matches each delimiter only as a whole line, so a title that holds
+  // the end marker as text cannot close the block early (TRL0037).
+  const re = literal
+    ? new RegExp(`^${begin}$[\\s\\S]*?^${end}$`, "m")
+    : new RegExp(`${begin}[\\s\\S]*?${end}`);
   if (!re.test(text)) { errors.push(`${where}: generated markers not found (${begin} ... ${end})`); return text; }
   const filled = `${begin}\n${body}\n${end}`;
   return text.replace(re, literal ? () => filled : filled);

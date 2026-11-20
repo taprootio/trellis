@@ -572,7 +572,7 @@ test("idLedgerRef must sit under refs/trellis/ and pass the ref-format rules", (
 });
 
 test("ledger mode refuses a tasksDir inside .git; scan mode and lookalikes pass", () => {
-  for (const tasksDir of [".git", ".git/trellis", "./.git/x", ".git/"]) {
+  for (const tasksDir of [".git", ".git/trellis", "./.git/x", ".git/", ".GIT", ".Git/x", "./.gIt"]) {
     assert.ok(configErrors({ ...LEDGER_CFG, tasksDir }).some((e) => e.includes("tasksDir")), `ledger rejects ${tasksDir}`);
   }
   for (const tasksDir of [".github", ".gitx/t", "docs/.git"]) {

@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync, chmodSync, symlinkSync, readFileSync, existsSync, readdirSync,
+  mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync, chmodSync, symlinkSync, readFileSync, existsSync, readdirSync, renameSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -376,6 +376,7 @@ test("preview returns the next id without changing the ref", () => {
   withClone(({ root, cfg }) => {
     assert.equal(preview(root, cfg).nextId, null);
     assert.match(preview(root, cfg).note, /trellis claim --seed/);
+    assert.match(preview(root, cfg).note, /--through .*upper bound/);
     seed(root, cfg);
     const t = tip(root);
     const p = preview(root, cfg);
@@ -1088,5 +1089,32 @@ test("refuseSymlinkedArtifacts refuses a symlink, dangling or not, and passes re
     assertRefused(() => refuseSymlinkedArtifacts([join(dir, "folder.json")]), "invalid_request");
     execFileSync("mkfifo", [join(dir, "pipe.json")]);
     assertRefused(() => refuseSymlinkedArtifacts([join(dir, "pipe.json")]), "invalid_request");
+  });
+});
+
+test("a branch field that is not a valid git branch name makes the ledger unusable", () => {
+  withClone(({ root, cfg }) => {
+    for (const branch of ["bad branch", "-x", "a..b", "x.lock", "@"]) {
+      rawLedger(root, HEADER + `DEMO0001\t2026-11-19\tclaim\t${branch}\tok\n`);
+      assert.match(readLedger(root, cfg).unusable ?? "", /valid git branch name/, branch);
+    }
+    rawLedger(root, HEADER + "DEMO0001\t2026-11-19\tclaim\tfeature/x-1\tok\n");
+    assert.equal(readLedger(root, cfg).unusable, undefined);
+  });
+});
+
+test("a checkout moved by hand, with another clone at its old path, refuses allocation", { skip: process.platform === "win32" }, () => {
+  withClone(({ root, cfg, dir, lane }) => {
+    const path = lane("lane");
+    seed(root, cfg);
+    assert.doesNotThrow(() => claim(root, cfg, { title: "ok" }));
+    const moved = join(dir, "lane-moved");
+    renameSync(path, moved);
+    // A different clone now sits where the registration still points.
+    mkdirSync(path);
+    git(path, "init", "-q", "-b", "other");
+    const before = tip(root);
+    assertRefused(() => claim(root, cfg, { title: "x" }), "unsupported_layout");
+    assert.equal(tip(root), before);
   });
 });
