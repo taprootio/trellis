@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
-import { applyScaffold, planScaffold, shouldPromptVocab, DEFAULTS } from "../src/init.mjs";
+import { applyScaffold, planScaffold, shouldPromptVocab, agentsBlock, AGENTS_MARKERS, DEFAULTS } from "../src/init.mjs";
 import { assertNotLegacyConfig } from "../src/import.mjs";
 import { testSeams as outputSeams, previewNextId } from "../src/local-output.mjs";
 import { initRefFormat } from "./git-support.mjs";
@@ -1448,5 +1448,38 @@ test("an archived title holding $& survives init and check in a scan-mode repo w
     const index = readFileSync(T(root, "completed", "index.md"), "utf8");
     assert.match(index, /\| Explain \$& \|/);
     assert.equal(index.split("BEGIN GENERATED:COMPLETED").length, 2, "the markers are not duplicated");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ------------------------------------------- AGENTS block fixtures (TRL0040)
+const fixturePath = (name) => join(sourceRoot, "test", "fixtures", name);
+const readFixture = (name) => readFileSync(fixturePath(name), "utf8");
+const BLOCK_OPTS = { prefix: "DEMO", idWidth: 5, milestones: DEFAULTS.milestones, priorities: DEFAULTS.priorities, effort: DEFAULTS.effort };
+// The text from the begin marker through the end marker and its newline.
+function markedBlock(text) {
+  const [begin, end] = AGENTS_MARKERS;
+  const bi = text.indexOf(begin);
+  return text.slice(bi, text.indexOf(end, bi) + end.length + 1);
+}
+
+test("the full AGENTS block renderer matches the pinned fixtures", () => {
+  for (const mode of ["committed", "local"]) {
+    assert.equal(agentsBlock(BLOCK_OPTS, "trellis", mode), readFixture(`agents-block-${mode}.md`));
+  }
+});
+
+test("a scaffold writes the pinned full block into AGENTS.md", () => {
+  const fresh = tempRepo();
+  try {
+    applyScaffold(fresh, { prefix: "DEMO", idWidth: 5 }, {}, sourceRoot);
+    const text = readFileSync(join(fresh, "AGENTS.md"), "utf8");
+    assert.ok(text.startsWith("# AGENTS\n\n"));
+    assert.equal(markedBlock(text), readFixture("agents-block-committed.md"));
+  } finally { rmSync(fresh, { recursive: true, force: true }); }
+
+  const root = localInit({ cfg: { idPrefix: "DEMO", idWidth: 5 } });
+  try {
+    applyScaffold(root, {}, {}, sourceRoot);
+    assert.equal(markedBlock(readFileSync(join(root, "AGENTS.md"), "utf8")), readFixture("agents-block-local.md"));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
