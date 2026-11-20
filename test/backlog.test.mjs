@@ -632,3 +632,28 @@ test("check never calls git in ledger mode", () => {
     rmSync(shimDir, { recursive: true, force: true });
   }
 });
+
+// ------------------------------------------------ nextIdOverride hook (TRL0037)
+
+test("nextIdOverride: undefined computes the scan value, null and strings are emitted as given", () => {
+  withRepo(ARRAY_CFG, { active: [{ id: "DEMO0002", title: "Two", effort: 3 }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    const json = (opts) => JSON.parse(buildBacklogJson(cfg, data, opts));
+    assert.equal(buildBacklogJson(cfg, data), buildBacklogJson(cfg, data, {}), "default output is unchanged");
+    assert.equal(buildBacklogJson(cfg, data), buildBacklogJson(cfg, data, { nextIdOverride: undefined }));
+    assert.equal(json().nextId, "DEMO0003");
+    assert.equal(json({ nextIdOverride: null }).nextId, null);
+    assert.equal(json({ nextIdOverride: "DEMO0042" }).nextId, "DEMO0042");
+
+    const plain = generateArtifacts(root, cfg, data);
+    assert.equal(plain.nextId, "DEMO0003");
+    const nulled = generateArtifacts(root, cfg, data, { nextIdOverride: null });
+    assert.equal(nulled.nextId, null);
+    const file = (r) => r.files.find((f) => f.path.endsWith("backlog.json")).content;
+    assert.equal(JSON.parse(file(nulled)).nextId, null);
+    assert.equal(file(plain), file(generateArtifacts(root, cfg, data, { nextIdOverride: undefined })));
+    // Only backlog.json carries the next id.
+    assert.deepEqual(plain.files.filter((f) => !f.path.endsWith("backlog.json")), nulled.files.filter((f) => !f.path.endsWith("backlog.json")));
+  });
+});

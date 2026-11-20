@@ -675,11 +675,14 @@ function assigneeFields(a) {
   return { owner: a.owner || null, collaborators: a.collaborators ?? [] };
 }
 
-export function buildBacklogJson(cfg, data) {
+// `nextIdOverride` lets a caller outside the git-free core publish a different
+// next id (TRL0037): `undefined` computes the scan value, an explicit `null`
+// is emitted as `null`.
+export function buildBacklogJson(cfg, data, { nextIdOverride } = {}) {
   const backlog = {
     prefix: cfg.idPrefix,
     milestones: cfg.milestones,
-    nextId: nextId(data.ids, cfg),
+    nextId: nextIdOverride === undefined ? nextId(data.ids, cfg) : nextIdOverride,
     counts: { active: data.active.length, completed: data.completed.length, removed: data.removed.length },
     tasks: [
       ...data.active.map((a) => ({ id: a.id, title: a.title, status: "active", milestone: a.milestone, priority: a.priority, effort: a.effort, ...effortFields(a, cfg), depends_on: a.depends_on ?? [], ...assigneeFields(a), summary: a.summary })),
@@ -692,10 +695,10 @@ export function buildBacklogJson(cfg, data) {
 
 // Compute each generated artifact's path + new content. Pure except for reading
 // the current files (needed to replace content between their markers).
-export function generateArtifacts(repoRoot, cfg, data) {
+export function generateArtifacts(repoRoot, cfg, data, { nextIdOverride } = {}) {
   const p = paths(repoRoot, cfg);
   const errors = [];
-  const next = nextId(data.ids, cfg);
+  const next = nextIdOverride === undefined ? nextId(data.ids, cfg) : nextIdOverride;
 
   let block = "";
   for (const ms of cfg.milestones) {
@@ -717,7 +720,7 @@ export function generateArtifacts(repoRoot, cfg, data) {
     { path: p.readme, content: fillMarkers(readText(p.readme), MARKERS.milestones, readmeBody, relative(repoRoot, p.readme), errors) },
     { path: p.completedIndex, content: fillMarkers(readText(p.completedIndex), MARKERS.completed, completedTable(data.completed), relative(repoRoot, p.completedIndex), errors) },
     { path: p.removedIndex, content: fillMarkers(readText(p.removedIndex), MARKERS.removed, removedTable(data.removed), relative(repoRoot, p.removedIndex), errors) },
-    { path: p.backlogJson, content: buildBacklogJson(cfg, data) },
+    { path: p.backlogJson, content: buildBacklogJson(cfg, data, { nextIdOverride }) },
   ];
   return { files, nextId: next, errors };
 }
