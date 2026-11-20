@@ -5,9 +5,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync, chmodSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   loadConfig,
   loadRoster,
@@ -536,4 +538,97 @@ test("serializeFrontMatter/parseFrontMatter round-trip owner and collaborators",
   const parsed = parseFrontMatter(text, "x", []);
   assert.equal(parsed.owner, "alice");
   assert.deepEqual(parsed.collaborators, ["bob", "carol"]);
+});
+
+// ------------------------------------------------- id ledger config (TRL0037)
+
+const LEDGER_CFG = { ...ARRAY_CFG, specVersion: "2.5", idAllocation: "ledger" };
+const configErrors = (config) => withRepo(config, {}, (root) => loadConfig(root).errors);
+
+test("idAllocation accepts scan and ledger and rejects anything else", () => {
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, idAllocation: "scan" }), []);
+  assert.deepEqual(configErrors(LEDGER_CFG), []);
+  assert.ok(configErrors({ ...ARRAY_CFG, idAllocation: "local" }).some((e) => e.includes("idAllocation")));
+});
+
+test("idLedgerRef must sit under refs/trellis/ and pass the ref-format rules", () => {
+  assert.deepEqual(configErrors({ ...LEDGER_CFG, idLedgerRef: "refs/trellis/my-ids" }), []);
+  const bad = [
+    "refs/heads/ids", "refs/trellis/", "refs/trellis", "refs/trellis/my ids", "refs/trellis/a..b",
+    "refs/trellis//a", "refs/trellis/a@{b", "refs/trellis/a~", "refs/trellis/a^", "refs/trellis/a:b",
+    "refs/trellis/a?", "refs/trellis/a*", "refs/trellis/a[", "refs/trellis/a\\b", "refs/trellis/a\u007f",
+    "refs/trellis/a\tb", "refs/trellis/a/", "refs/trellis/a.", "refs/trellis/.a", "refs/trellis/a.lock/b",
+    "", 7,
+  ];
+  for (const ref of bad) {
+    assert.ok(configErrors({ ...LEDGER_CFG, idLedgerRef: ref }).some((e) => e.includes("idLedgerRef")), `rejects ${JSON.stringify(ref)}`);
+  }
+});
+
+test("ledger mode caps idWidth at 9", () => {
+  assert.deepEqual(configErrors({ ...LEDGER_CFG, idWidth: 9 }), []);
+  assert.ok(configErrors({ ...LEDGER_CFG, idWidth: 10 }).some((e) => e.includes("idWidth")));
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, idWidth: 10 }), [], "scan mode keeps any width");
+});
+
+test("ledger mode needs a plain prefix; scan mode accepts the same prefixes", () => {
+  for (const idPrefix of ["A,B", " A", "R+", "A.B", "1A", "A-B", "A/B", "A\tB"]) {
+    assert.ok(configErrors({ ...LEDGER_CFG, idPrefix }).some((e) => e.includes("idPrefix")), `ledger rejects ${JSON.stringify(idPrefix)}`);
+    assert.deepEqual(configErrors({ ...ARRAY_CFG, idPrefix }), [], `scan accepts ${JSON.stringify(idPrefix)}`);
+  }
+  assert.deepEqual(configErrors({ ...LEDGER_CFG, idPrefix: "Ab9" }), []);
+});
+
+test("a scan backlog configured with R+ still checks RR0001.md", () => {
+  withRepo({ ...ARRAY_CFG, idPrefix: "R+" }, { active: [{ id: "RR0001", title: "Regex quirk", effort: 3 }] }, (root) => {
+    const { cfg, errors } = loadConfig(root);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(readBacklog(root, cfg).errors, []);
+  });
+});
+
+// Run the real check CLI with PATH replaced, so any git call is observable or fails.
+const CHECK_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "backlog-readme.mjs");
+function runCheck(root, pathDir) {
+  return spawnSync(process.execPath, [CHECK_CLI, "--check", "--target", root], {
+    encoding: "utf8",
+    env: { PATH: pathDir, HOME: root },
+  });
+}
+
+function ledgerCheckRepo() {
+  const root = makeRepo({ ...LEDGER_CFG, idLedgerRef: "refs/trellis/ids" }, { active: [{ id: "DEMO0001", title: "One", effort: 3 }] });
+  // `generate` once so the check has current artifacts to compare.
+  const { cfg } = loadConfig(root);
+  const { files } = generateArtifacts(root, cfg, readBacklog(root, cfg));
+  for (const f of files) writeFileSync(f.path, f.content);
+  return root;
+}
+
+test("check passes in ledger mode with git unavailable", () => {
+  const root = ledgerCheckRepo();
+  const empty = mkdtempSync(join(tmpdir(), "trellis-nopath-"));
+  try {
+    const r = runCheck(root, empty);
+    assert.equal(r.status, 0, r.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+test("check never calls git in ledger mode", () => {
+  const root = ledgerCheckRepo();
+  const shimDir = mkdtempSync(join(tmpdir(), "trellis-shim-"));
+  const log = join(shimDir, "calls.log");
+  writeFileSync(join(shimDir, "git"), `#!/bin/sh\necho "$@" >> "${log}"\nexit 1\n`);
+  chmodSync(join(shimDir, "git"), 0o755);
+  try {
+    const r = runCheck(root, shimDir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(log) ? readFileSync(log, "utf8") : "", "", "no git invocation");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(shimDir, { recursive: true, force: true });
+  }
 });

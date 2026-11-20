@@ -12,7 +12,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
-export const SPEC_VERSION = "2.4";
+export const SPEC_VERSION = "2.5";
 
 // The backlog root defaults to `trellis/` and is overridable per repo via the
 // config's `tasksDir` key (SPEC §2/§7). The config file itself lives at a FIXED
@@ -20,6 +20,30 @@ export const SPEC_VERSION = "2.4";
 // it before it knows where the task tree is — see paths().
 export const DEFAULT_TASKS_DIR = "trellis";
 export const CONFIG_DIR = "trellis";
+
+// Id ledger config (SPEC §3.1, §7; TRL0037). Validation lives here so `check`
+// can reject a bad ledger config without git; reading the ledger is src/ledger.mjs.
+export const DEFAULT_LEDGER_REF = "refs/trellis/ids";
+export const LEDGER_NAMESPACE = "refs/trellis/";
+// A prefix with no regex, comma, whitespace or path characters, so ledger rows
+// and every existing id matcher can use it unescaped.
+export const PLAIN_PREFIX_RE = /^[A-Za-z][A-Za-z0-9]*$/;
+
+// Returns a problem description, or null when `ref` is a valid ledger ref. These
+// are the `git check-ref-format` rules as a pattern, plus the namespace rule.
+export function ledgerRefProblem(ref) {
+  if (typeof ref !== "string" || !ref) return "must be a non-empty string";
+  if (!ref.startsWith(LEDGER_NAMESPACE) || ref.length === LEDGER_NAMESPACE.length) {
+    return `must name a ref under ${LEDGER_NAMESPACE}`;
+  }
+  if (/[\x00-\x20\x7f~^:?*[\\]/.test(ref)) return "contains a character git forbids in ref names";
+  if (ref.includes("..") || ref.includes("//") || ref.includes("@{")) return "contains a sequence git forbids in ref names";
+  if (ref.endsWith("/") || ref.endsWith(".")) return "ends in a character git forbids at the end of a ref name";
+  if (ref.split("/").some((c) => c.startsWith(".") || c.endsWith(".lock"))) {
+    return "has a component starting with `.` or ending in `.lock`";
+  }
+  return null;
+}
 
 export const MARKERS = {
   milestones: ["<!-- BEGIN GENERATED:MILESTONES -->", "<!-- END GENERATED:MILESTONES -->"],
@@ -81,6 +105,7 @@ export function loadConfig(repoRoot) {
       errors.push(`config: \`nextIdFloor\` (${cfg.nextIdFloor}) must be < 10^idWidth (${10 ** cfg.idWidth}) to fit ${cfg.idWidth} digits`);
     }
   }
+  validateIdAllocation(cfg, errors);
   if (!Array.isArray(cfg.milestones) || cfg.milestones.length === 0) errors.push("config: `milestones` must be a non-empty array");
   if (!Array.isArray(cfg.priorities) || cfg.priorities.length === 0) errors.push("config: `priorities` must be a non-empty array");
   const effortValues = Array.isArray(cfg.effort) ? cfg.effort : cfg.effort && cfg.effort.values;
@@ -116,6 +141,25 @@ export function loadConfig(repoRoot) {
     warnings.push(`config \`specVersion\` ${cfg.specVersion} differs in major version from this tool's spec ${SPEC_VERSION}`);
   }
   return { cfg, warnings, errors };
+}
+
+// `idAllocation` is "scan" (default) or "ledger" (TRL0037). Ledger mode also
+// limits the prefix and width so ledger rows stay unambiguous and id math exact.
+function validateIdAllocation(cfg, errors) {
+  if (cfg.idAllocation != null && cfg.idAllocation !== "scan" && cfg.idAllocation !== "ledger") {
+    errors.push('config: `idAllocation` must be "scan" or "ledger" when present');
+  }
+  if (cfg.idLedgerRef != null) {
+    const problem = ledgerRefProblem(cfg.idLedgerRef);
+    if (problem) errors.push(`config: \`idLedgerRef\` ${problem}`);
+  }
+  if (cfg.idAllocation !== "ledger") return;
+  if (typeof cfg.idPrefix === "string" && cfg.idPrefix && !PLAIN_PREFIX_RE.test(cfg.idPrefix)) {
+    errors.push("config: `idPrefix` must be a letter followed by letters or digits when `idAllocation` is \"ledger\"");
+  }
+  if (Number.isInteger(cfg.idWidth) && cfg.idWidth > 9) {
+    errors.push("config: `idWidth` must be at most 9 when `idAllocation` is \"ledger\"");
+  }
 }
 
 // ------------------------------------------------------------- team roster

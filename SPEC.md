@@ -1,6 +1,6 @@
 # Trellis Backlog Spec
 
-**Version:** 2.4.0 · **Status:** stable
+**Version:** 2.5.0 · **Status:** stable
 
 Trellis is a tool-agnostic convention for running a software backlog as plain
 files in a git repository. Work items are Markdown files with YAML front-matter;
@@ -63,9 +63,74 @@ configured width — e.g. with prefix `AB` and width 4, `AB0042`.
 - The id MUST match the item's filename (`AB0042` ⇄ `AB0042.md`).
 - Ids are assigned monotonically from the `nextId` published in the generated
   `backlog.json` (§8.2); `nextId` is `max(highest-existing + 1, nextIdFloor)` when a
-  `nextIdFloor` is configured (§7).
+  `nextIdFloor` is configured (§7). In ledger mode (`idAllocation: "ledger"`, §3.1),
+  `trellis claim` and the MCP claim path hand out ids instead; the published
+  `nextId` stays the scan value.
 - An id is permanent and globally unique across all three directories. It MUST
   NOT be reused, even after an item is removed.
+
+### 3.1 Id ledger (optional)
+
+Scan allocation (`nextId`) lets two branches or worktrees read the same highest id
+and both claim the next one. A repo can opt into a **local id ledger** with
+`"idAllocation": "ledger"` (§7) so every worktree of one clone hands out each id
+exactly once. Nothing is pushed: the ledger is local to the clone.
+
+**Format.** The ledger is a git ref (default `refs/trellis/ids`, configurable with
+`idLedgerRef`, always under `refs/trellis/`) pointing at a commit on an orphan
+history. The tip tree holds exactly one file, `claims.tsv`. Its first line is
+`id<TAB>date<TAB>kind<TAB>branch<TAB>title`. Each later line has the same five
+fields:
+
+- `id` matches `idPrefix` and `idWidth`;
+- `date` is an ISO date;
+- `kind` is `seed`, `claim` or `through`;
+- `branch` is the worktree's branch, or `-` when detached or for `through`;
+- `title` is one line with no tabs or control characters (`-` when unknown).
+
+A reader validates every row and treats any bad row as "not a ledger"; it never
+skips a row. Lines are only appended, each in one commit whose parent is the
+previous tip. Only `claim` lines whose id has no item file are open claims. The
+ledger never holds story text.
+
+**Claim.** The next id is `max(highest id in the ledger or in any worktree's task
+tree + 1, nextIdFloor)`. The tip moves with a compare-and-swap (`git update-ref`
+with the old value), so concurrent claims retry and each id is issued once. An id
+above `10^idWidth - 1` fails with no write. Ids are never reused; a claim that is
+never written leaves a gap, which is allowed.
+
+**Seed and through.** `trellis claim --seed` creates the ledger with one `seed`
+line per id found in any worktree's task tree. `--seed --through <ID>` also records
+a `through` line, a high-water mark for ids held on branches that are not checked
+out anywhere. `trellis claim --through <ID>` appends one to an existing ledger.
+Pause other writers while reserving a range, and check `trellis claim --list` for
+claims in that range first: a claim that won the swap earlier may already have
+issued one of those ids.
+
+**Scope.** The guarantee holds among writers that use ledger mode with the same
+ref and compatible `idPrefix`, `idWidth` and `tasksDir`. Ledger mode needs a plain
+prefix (letters and digits) and an `idWidth` of at most 9. Sparse checkouts,
+symlinked task folders and a served root that is not the worktree root are refused.
+Import is unsupported in ledger mode: import first, then switch and seed. Ledger
+operations need git 2.44.1 or later with the `files` ref format; `check` never
+runs git.
+
+**Cutover.** Upgrade and restart every CLI and MCP writer first, since an older
+Trellis ignores `idAllocation` and keeps scanning. Pause scan-mode writers until
+every open worktree has merged the ledger config and the seed has run. A lane still
+in scan mode can pick an open claim's id until it rebases.
+
+**Recovery.** If the ref is deleted, re-seed with `--through` set to a confirmed
+upper bound on every id ever allocated, claims and `through` reservations alike. A
+plain re-seed sees only ids that have files and could hand out a lost claim again.
+
+**Concurrency.** The ledger is safe across worktrees. Run one file-writing Trellis
+command per worktree at a time, since concurrent regeneration in one worktree is
+not serialized.
+
+**`check`.** `check` never reads the ledger: it must not depend on local state
+(§8.3), and ids claimed in another clone would arrive above this clone's ledger. The
+existing duplicate-id rule still catches collisions.
 
 ## 4. Status lifecycle
 
@@ -217,6 +282,8 @@ custom **effort scale** for display.
 | `priorities` | ordered priority names, highest first |
 | `effort` | canonical values, or the effort-scale object (§6.1) |
 | `tasksDir` | optional backlog-root path, repo-relative; defaults to `trellis/` |
+| `idAllocation` | optional; `"scan"` (default) or `"ledger"` (§3.1). Ledger mode requires a plain `idPrefix` (`^[A-Za-z][A-Za-z0-9]*$`) and `idWidth` of at most 9 |
+| `idLedgerRef` | optional; the ledger ref, under `refs/trellis/` and valid per `git check-ref-format`; defaults to `refs/trellis/ids` |
 | `nextIdFloor` | optional; floors the next organically-assigned id — `nextId` = max(floor, highest+1) — so hand-created tasks begin above a reserved band (must fit `idWidth`) |
 
 `tasksDir` locates the task tree and the generated artifacts; omit it to accept
@@ -384,6 +451,9 @@ This spec uses SemVer. A repo declares the version it targets via `specVersion`
 (`major.minor`). Within a major version, changes are additive and backward
 compatible; a major bump may change required fields or artifact shape. Tooling
 warns on a major mismatch between `specVersion` and the implemented spec.
+
+**2.5** (additive): the optional `idAllocation` and `idLedgerRef` config keys and
+the local id ledger (§3.1). Repos that omit them behave as in 2.4.
 
 ## 10. CI and branch protection
 
