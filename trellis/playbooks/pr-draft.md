@@ -24,7 +24,9 @@ Also gather the PR template from where the repo keeps it.
 > based only on its actual commits and diff (do not invent changes).
 >
 > - **Description:** fill every section of the repo's PR template
->   (Summary, Task, Changes, Verification, Follow-ups). Tick a checklist item
+>   (use the sections of the template you find; Summary, Task, Changes,
+>   Verification and Follow-ups are only the default, in the template Trellis
+>   ships). Tick a checklist item
 >   only when the evidence supports it; otherwise leave it unchecked and say why.
 > - **Output:** a single fenced `markdown` block whose first line is the title as
 >   `# <ID>: …`, followed by the completed template body — so it copies in one
@@ -33,7 +35,8 @@ Also gather the PR template from where the repo keeps it.
 One copy-ready Markdown block:
 
 - first line: `# <ID>: <summary>` (the title)
-- then the filled template (Summary, Task, Changes, Verification, Follow-ups)
+- then the filled template, using the sections of the template you found
+  (Summary, Task, Changes, Verification, Follow-ups in the template Trellis ships)
 
 ## Without a PR template
 

@@ -286,17 +286,19 @@ test("each prompt falls back on its own: a directory with only code-review.md st
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("prompt ids follow `check`: a scan-mode R+ prefix serves RR0001.md through both prompt paths", () => {
+test("prompt ids: the literal format, or an existing task file that `check` reads, for a prefix with a regex character", () => {
   const root = mkdtempSync(join(tmpdir(), "trellis-prompts-"));
   try {
     applyScaffold(root, { prefix: "R+" }, {}, sourceRoot);
     writeFileSync(join(root, "trellis", "active", "RR0001.md"), "---\nid: RR0001\ntitle: Odd prefix\nstatus: active\nmilestone: Alpha\npriority: High\neffort: 3\ndepends_on: []\nsummary: Summary.\n---\n\nBody.\n");
     const { cfg } = loadConfig(root);
     assert.deepEqual(readBacklog(root, cfg).errors, [], "check accepts the id");
-    assert.ok(textOf(root, "work-task", { id: "RR0001" }).includes("RR0001"), "playbook present");
-    rmSync(join(root, "trellis", "playbooks"), { recursive: true });
-    assert.ok(textOf(root, "work-task", { id: "RR0001" }).includes("RR0001"), "playbook absent");
-    assert.throws(() => textOf(root, "work-task", { id: "nope" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+    for (const playbooks of [true, false]) {
+      if (!playbooks) rmSync(join(root, "trellis", "playbooks"), { recursive: true });
+      assert.ok(textOf(root, "work-task", { id: "R+0001" }).includes("R+0001"), "accepted by format");
+      assert.ok(textOf(root, "work-task", { id: "RR0001" }).includes("RR0001"), "an existing file is served");
+      for (const bad of ["RR0002", "nope"]) assert.throws(() => textOf(root, "work-task", { id: bad }), (e) => e instanceof TrellisError && e.code === "invalid_request", bad);
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -304,7 +306,9 @@ test("the missing-playbook recovery command names the served repo and keeps othe
   const root = bareRepo();
   try {
     const text = textOf(root, "code-review");
-    assert.ok(text.includes(root) && text.includes("--with-playbooks") && text.includes("--skip"));
+    assert.ok(text.includes("--with-playbooks") && text.includes("--skip"));
+    assert.ok(text.split("\n").includes(`run from: ${root}`), "the path is on its own line, not in a shell command");
+    assert.ok(!text.includes(`"${root}"`));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -314,10 +318,12 @@ test("the pr-draft handoff finds a repo-owned PR template in GitHub's standard p
     [(r) => { mkdirSync(join(r, "docs")); writeFileSync(join(r, "docs", "pull_request_template.md"), "# t\n"); }, "docs/pull_request_template.md"],
     [(r) => { mkdirSync(join(r, ".github", "PULL_REQUEST_TEMPLATE")); writeFileSync(join(r, ".github", "PULL_REQUEST_TEMPLATE", "a.md"), "# t\n"); }, ".github/PULL_REQUEST_TEMPLATE/"],
   ];
+  cases.push([(r) => symlinkSync(join(r, "real.md"), join(r, "pull_request_template.md")), "pull_request_template.md"]);
   for (const detected of [true, false]) {
     for (const [seed, where] of cases) {
       const root = bareRepo({ detected, template: false });
       try {
+        writeFileSync(join(root, "real.md"), "# t\n");
         seed(root);
         const text = textOf(root, "pr-draft");
         assert.ok(!text.includes(PROMPT_TOKENS.noTemplate), where);
@@ -335,5 +341,14 @@ test("the pr-draft catalog description is template-neutral, and a present playbo
     assert.ok(text.includes(PLAYBOOK_SEPARATOR));
     assert.ok(!text.includes(PROMPT_TOKENS.handoff));
     assert.ok(text.includes(readFileSync(join(root, "trellis", "playbooks", "pr-draft.md"), "utf8").trimEnd()));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a PR template folder with no .md template does not count as a template", () => {
+  const root = bareRepo({ template: false });
+  try {
+    mkdirSync(join(root, ".github", "PULL_REQUEST_TEMPLATE"));
+    writeFileSync(join(root, ".github", "PULL_REQUEST_TEMPLATE", ".gitkeep"), "");
+    assert.ok(textOf(root, "pr-draft").includes(PROMPT_TOKENS.noTemplate));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

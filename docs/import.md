@@ -416,8 +416,10 @@ gets a warning and the switch goes on. A rerun after a finished switch changes n
 ### Onboarding notes for repos with their own CI or good-agent
 
 - A copy of `trellis/playbooks/pr-draft.md` from an older release lacks the
-  no-template branch. Init keeps existing files, so merge the `## Without a PR
-  template` branch into your copy by hand (no rerun needed). Or move the old file aside
+  two-branch rewrite. Init keeps existing files, so merge the whole rewrite into your
+  copy by hand: the `## With a PR template`, `## Without a PR template` and `## Title
+  and attribution (both branches)` sections and the template-neutral introduction (no
+  rerun needed). Or move the old file aside
   and rerun `trellis init --with-playbooks` with your other `--skip` flags, `playbooks`
   dropped from them; add `--skip pr-template` to stay template-free, since a repo
   scaffolded before that flag existed would otherwise get the template back. A bare

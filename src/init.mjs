@@ -645,6 +645,11 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
     }
   }
 
+  // When the size guard keeps the block out of AGENTS.md, a new README must not send readers there.
+  const agentsPlan = actions.find((a) => a.rel === "AGENTS.md");
+  const readmePlan = actions.find((a) => a.rel === `${root}/README.md`);
+  if (agentsPlan && agentsPlan.action === "print" && agentsPlan.reason === "size" && readmePlan && readmePlan.action === "create") readmePlan.content = readmeSkeleton(true);
+
   // Read-only reconciliation scan (TRL0027): stale backlog guidance for the agent to
   // rewrite by hand. Advisory — kept separate from `warnings` (scaffold mechanics) and
   // from `errors` (it never blocks).

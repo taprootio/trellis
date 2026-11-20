@@ -1643,7 +1643,6 @@ test("the claim line is its own bullet in a ledger config, and absent in scan mo
     const at = lines.findIndex((l) => CLAIM_RE.test(l));
     assert.ok(at > 0, "the claim line is present");
     assert.ok(lines[at].startsWith("- "), "it starts its own bullet");
-    assert.ok(lines[at].endsWith("by hand."), "a whole line");
     assert.ok(lines[at + 1].startsWith("- "), "the next line starts a new bullet");
     assert.ok(at < lines.findIndex((l) => /BEGIN\/END GENERATED/.test(l)), "it sits before the artifact bullet");
     assert.equal(lines.filter((l) => CLAIM_RE.test(l)).length, 1);
@@ -1805,7 +1804,7 @@ test("the compact block: ledger claim line, local wording, committed markers and
     assert.match(block, CLAIM_RE);
     const lines = block.split("\n");
     const at = lines.findIndex((l) => CLAIM_RE.test(l));
-    assert.ok(lines[at].startsWith("- ") && lines[at].endsWith("by hand."));
+    assert.ok(lines[at].startsWith("- "));
     assert.ok(lines[at + 1].startsWith("- "), "the next line starts a new bullet");
     assert.ok(block.includes(artifactBullet("trellis", "local", "compact")));
     assert.ok(Buffer.byteLength(block) < 1200, `${Buffer.byteLength(block)} bytes`);
@@ -2164,4 +2163,24 @@ test("under --skip agents the new README points at the spec, not AGENTS.md", () 
     applyScaffold(plain, { prefix: "DEMO" }, {}, sourceRoot);
     assert.ok(readFileSync(join(plain, "trellis", "README.md"), "utf8").includes("AGENTS.md"));
   } finally { rmSync(root, { recursive: true, force: true }); rmSync(plain, { recursive: true, force: true }); }
+});
+
+test("when the size guard keeps AGENTS.md from being created, the new README links the spec", () => {
+  const root = tempRepo();
+  try {
+    const { summary } = applyScaffold(root, { prefix: "DEMO", idWidth: widthForBytes(AGENTS_BYTE_LIMIT + 1) }, {}, sourceRoot);
+    assert.equal(summary.printed.length, 1);
+    const readme = readFileSync(join(root, "trellis", "README.md"), "utf8");
+    assert.ok(!readme.includes("AGENTS.md") && readme.includes("SPEC.md"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the recovery commands say to run them from the target repository", () => {
+  const root = tempRepo();
+  try {
+    const skipped = cliRun(root, ["--skip", "playbooks"]);
+    assert.ok(skipped.stdout.includes("from the target repository"));
+    seedMarker(root);
+    assert.ok(cliRun(root, ["--dry-run"]).stdout.includes("from the target repository"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

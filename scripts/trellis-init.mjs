@@ -174,10 +174,10 @@ async function promptMissing(opts) {
 function reportDetection(summary) {
   if (summary.detected) {
     console.log(`  detected good-agent: ${summary.detected}`);
-    if (summary.playbooksOmittedBy === "detection") console.log("  playbooks left out because of it; add them with `trellis init --with-playbooks` (repeat your other --skip flags)");
+    if (summary.playbooksOmittedBy === "detection") console.log("  playbooks left out because of it; add them by running `trellis init --with-playbooks` from the target repository (repeat your other --skip flags)");
     else if (summary.playbooksOmittedBy === "skip") console.log("  playbooks left out by --skip playbooks");
   } else if (summary.playbooksOmittedBy === "skip") {
-    console.log(`  ${INIT_TOKENS.blockNotUpdated} To add the playbooks later, run \`trellis init --with-playbooks\` (repeat your other --skip flags); the TRELLIS block is not updated, so add the playbook pointers by hand`);
+    console.log(`  ${INIT_TOKENS.blockNotUpdated} To add the playbooks later, run \`trellis init --with-playbooks\` from the target repository (repeat your other --skip flags); the TRELLIS block is not updated, so add the playbook pointers by hand`);
   }
 }
 
