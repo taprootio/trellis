@@ -7,7 +7,7 @@
 // (src/backlog.mjs) so that `check` never depends on git (SPEC §8.3).
 
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
-import { dirname, normalize, relative, sep } from "node:path";
+import { dirname, join, normalize, posix as posixPath, relative, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { DEFAULT_TASKS_DIR, GENERATED_DIR, artifactSet, isLocalMode, markerLineErrors } from "./backlog.mjs";
 import { LedgerError, gitEnv, preview } from "./ledger.mjs";
@@ -43,16 +43,23 @@ export function probe(repoRoot, args, { literal = false } = {}) {
 }
 
 // "inside" a work tree, or "skip": git is absent or the directory is confirmed to
-// be outside any work tree. Any other failure (ownership, permission, an
-// unexpected exit) refuses, since the writer cannot tell whether an output is ignored.
+// be outside any work tree. That is only a successful answer of `false`, or git's own
+// not-a-repository exit (128) with its standard message at the start of stderr. Any
+// other failure or answer (ownership, permission, an odd reply) refuses, since the
+// writer cannot tell whether an output is ignored.
 export function discoverGit(repoRoot) {
   const r = probe(repoRoot, ["rev-parse", "--is-inside-work-tree", "--show-prefix"]);
   if (r.error) {
     if (r.error.code === "ENOENT") return "skip";
     throw new OutputRefused(`cannot run git to inspect ${repoRoot}: ${r.error.message}`);
   }
-  if (r.status === 0) return r.stdout.split("\n")[0].trim() === "true" ? "inside" : "skip";
-  if (/not a git repository/i.test(r.stderr)) return "skip";
+  if (r.status === 0) {
+    const answer = r.stdout.split("\n")[0].trim();
+    if (answer === "true") return "inside";
+    if (answer === "false") return "skip";
+    throw new OutputRefused(`git gave an unexpected answer when inspecting ${repoRoot}: ${JSON.stringify(answer)}`);
+  }
+  if (r.status === 128 && r.stderr.startsWith("fatal: not a git repository")) return "skip";
   throw new OutputRefused(`git could not inspect ${repoRoot}: ${firstLine(r.stderr)}`);
 }
 
@@ -60,15 +67,16 @@ export function discoverGit(repoRoot) {
 // printed ignore line is right for the root `.gitignore`. "" when git cannot say.
 export function gitPrefix(repoRoot) {
   const r = probe(repoRoot, ["rev-parse", "--show-prefix"]);
-  return r.status === 0 ? r.stdout.split("\n")[0].trim() : "";
+  return r.status === 0 ? r.stdout.replace(/\n$/, "").split("\n")[0] : "";
 }
 
 // The line a user adds to the repository root `.gitignore` so the generated folder
 // is ignored: the git-root prefix plus the backlog root as a normalized literal
 // path, every gitignore metacharacter escaped.
 export function ignoreLineFor(tasksDir, prefix = "") {
-  const dir = normalize(String(tasksDir || DEFAULT_TASKS_DIR)).split(sep).filter((p) => p && p !== ".").join("/");
-  const escaped = (prefix + dir).replace(/[*?[\]!#\\]/g, "\\$&").replace(/^ /, "\\ ").replace(/ $/, "\\ ");
+  const own = normalize(String(tasksDir || DEFAULT_TASKS_DIR)).split(sep).join("/");
+  const dir = posixPath.normalize(prefix + own).split("/").filter((p) => p && p !== ".").join("/");
+  const escaped = dir.replace(/[*?[\]!#\\]/g, "\\$&").replace(/^ /, "\\ ").replace(/ $/, "\\ ");
   return `${escaped}/${GENERATED_DIR}/`;
 }
 
@@ -105,6 +113,16 @@ export function checkOutputFiles(repoRoot, cfg) {
     }
   };
   const dirRel = posix(relative(repoRoot, set.dir));
+  // Every folder from the target root down to `.generated` (the backlog root included)
+  // must be a real directory, or a write could leave the checkout through a link.
+  let at = repoRoot;
+  for (const part of relative(repoRoot, dirname(set.dir)).split(sep).filter(Boolean)) {
+    at = join(at, part);
+    const st = inspect(at);
+    if (!st) break;
+    if (st.isSymbolicLink()) throw new OutputRefused(`${posix(relative(repoRoot, at))} is a symlink; local mode writes only through real directories. Replace it with a directory`);
+    if (!st.isDirectory()) throw new OutputRefused(`${posix(relative(repoRoot, at))} is not a directory; local mode generates into a folder below it`);
+  }
   const dir = inspect(set.dir);
   if (!dir) return;
   if (dir.isSymbolicLink()) throw new OutputRefused(`${dirRel} is a symlink; local mode writes only into a real directory. Replace it with a directory`);

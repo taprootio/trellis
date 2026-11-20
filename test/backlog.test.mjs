@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync, chmodSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -919,6 +919,18 @@ test("the marker scan fails on each of the six marker lines, in any author-owned
       }
       writeFileSync(file, original);
     });
+  });
+});
+
+test("the marker scan reports a FIFO README without reading it", { skip: process.platform === "win32" }, () => {
+  withLocalRepo((root) => {
+    const { cfg } = loadConfig(root);
+    const readme = join(root, "trellis", "README.md");
+    rmSync(readme);
+    execFileSync("mkfifo", [readme]);
+    const errors = markerLineErrors(root, cfg);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /^trellis\/README\.md: cannot read/);
   });
 });
 

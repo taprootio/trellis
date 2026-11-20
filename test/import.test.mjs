@@ -1106,19 +1106,37 @@ test("local import writes .generated/ through the shared writer, no committed in
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("a .generated source folder is skipped only when the target is in local mode", () => {
+test("generated artifact paths are skipped in both target modes, but a real task in a .generated folder imports", () => {
   const src = mkdtempSync(join(tmpdir(), "trellis-gensrc-"));
   mkdirSync(join(src, ".generated"));
-  cpSync(join(trellisSrc, "active", "TR0001.md"), join(src, ".generated", "G1.md"));
+  cpSync(join(trellisSrc, "active", "TR0001.md"), join(src, ".generated", "TR0001.md"));
+  for (const n of ["index", "completed", "removed"]) writeFileSync(join(src, ".generated", `${n}.md`), `# ${n}\n\n| ID |\n`);
   const dotMapping = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.md" } } };
   const committed = initTarget();
   const local = localTarget();
   try {
-    assert.equal(planImport(committed, src, dotMapping, {}).counts.total, 1, "committed mode imports it");
-    assert.equal(planImport(local, src, dotMapping, {}).counts.total, 0, "local mode skips it");
+    for (const target of [committed, local]) {
+      const plan = planImport(target, src, dotMapping, {});
+      assert.deepEqual(plan.errors, []);
+      assert.equal(plan.counts.total, 1, "only the real task; the three generated tables are skipped");
+    }
   } finally {
     for (const d of [src, committed, local]) rmSync(d, { recursive: true, force: true });
   }
+});
+
+test("an imported item with a large body is written whole", () => {
+  const root = initTarget();
+  const src = realpathSync(mkdtempSync(join(tmpdir(), "trellis-bigsrc-")));
+  try {
+    mkdirSync(join(src, "active"));
+    const big = "line of body text\n".repeat(200000);
+    writeFileSync(join(src, "active", "TR0001.md"), readFileSync(join(trellisSrc, "active", "TR0001.md"), "utf8").trimEnd() + "\n\n" + big);
+    const { summary } = applyImport(root, src, { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["active"], file: "*.md" } } });
+    assert.deepEqual(summary.errors, []);
+    const written = readFileSync(join(root, summary.created[0]), "utf8");
+    assert.ok(written.endsWith(big), "the whole body reached the file");
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(src, { recursive: true, force: true }); }
 });
 
 test("a leftover README marker refuses local import, apply and init --import, leaving the target unchanged", () => {

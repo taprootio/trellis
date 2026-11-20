@@ -39,7 +39,7 @@ import {
 import { applyImport, ImportRefused } from "./import.mjs";
 import { loadProfile } from "./profiles.mjs";
 import { deriveTaskHistory, deriveAllHistory, HistoryError } from "./history.mjs";
-import { outputPreflight, previewNextId, writeArtifactFiles, makeDirs, removeCreatedDirs } from "./local-output.mjs";
+import { outputPreflight, writeArtifactFiles, makeDirs, removeCreatedDirs } from "./local-output.mjs";
 import { LedgerError, unsafeText, claim, preview, checkLayout, refuseSymlinkedArtifacts, artifactPaths } from "./ledger.mjs";
 
 // A domain error the transport maps to an MCP tool error (isError result) rather
@@ -232,11 +232,12 @@ function guardOutputs(repoRoot, cfg) {
 // w.r.t. the item files — only the generated artifacts are touched (the four
 // committed files, or the four under `.generated/` in local mode).
 // `hooks` are test seams (see writeArtifactsStaged).
-function writeArtifacts(repoRoot, cfg, data, hooks = {}) {
+// `pv` is the operation's one ledger preview, so the file and the reply always agree.
+function writeArtifacts(repoRoot, cfg, data, hooks = {}, pv = ledgerPreview(repoRoot, cfg)) {
   // Refuse a bad artifact before anything is rendered.
   if (isLedgerMode(cfg)) ledgerCall(() => refuseSymlinkedArtifacts(artifactPaths(repoRoot, cfg)));
   // Local mode publishes the ledger preview in its uncommitted backlog.json.
-  const nextIdOverride = previewNextId(repoRoot, cfg);
+  const nextIdOverride = isLocalMode(cfg) && pv ? pv.nextId : undefined;
   const { files, nextId: next, errors } = generateArtifacts(repoRoot, cfg, data, { nextIdOverride });
   if (errors.length) throw new TrellisError(`generate failed: ${errors.join("; ")}`, "generate_failed");
   if (isLedgerMode(cfg)) return writeArtifactsStaged(repoRoot, files, next, hooks);
@@ -402,10 +403,10 @@ export function validateOp(repoRoot) {
 export function regenerateOp(repoRoot) {
   const { cfg, data } = loadClean(repoRoot);
   guardOutputs(repoRoot, cfg);
-  const { changed, nextId: next, warnings } = writeArtifacts(repoRoot, cfg, data);
-  const counts = backlogObject(cfg, data).counts;
   // In committed mode the files on disk keep the scan value; only the reply carries the ledger preview.
   const pv = ledgerPreview(repoRoot, cfg);
+  const { changed, nextId: next, warnings } = writeArtifacts(repoRoot, cfg, data, {}, pv);
+  const counts = backlogObject(cfg, data).counts;
   if (pv) return { changed, nextId: pv.nextId, note: pv.note, counts, ...(warnings && warnings.length ? { warnings } : {}) };
   return { changed, nextId: next, counts };
 }

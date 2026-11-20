@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, lstatSync, symlinkSync, realpathSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, renameSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, lstatSync, symlinkSync, realpathSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,8 +73,9 @@ function tree(root) {
   walk(root);
   return out;
 }
-const commandsOf = (stdout) => stdout.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("git --literal-pathspecs rm --"));
-const runCommands = (root, stdout) => { for (const c of commandsOf(stdout)) assert.equal(spawnSync("sh", ["-c", c], { cwd: root, env: GIT_ENV }).status, 0, c); };
+const commandsOf = (stdout) => stdout.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("git -C "));
+const runCommands = (root, stdout, cwd = root) => { for (const c of commandsOf(stdout)) assert.equal(spawnSync("sh", ["-c", c], { cwd, env: GIT_ENV }).status, 0, c); };
+const rm = (root, path) => `git -C '${root}' --literal-pathspecs rm -- '${path}'`;
 const tracked = (root) => git(root, "ls-files").split("\n").filter(Boolean);
 const refusedWith = (root, re, args = []) => {
   const before = tree(root);
@@ -103,7 +104,7 @@ test("the migration order ends with check passing, keeps authored text and is a 
     assert.equal(readFileSync(f.T("completed", "index.md"), "utf8"), AUTHORED_COMPLETED);
     // The generated-only file is untouched and reported; so is the legacy backlog.json.
     assert.equal(readFileSync(f.T("removed", "index.md"), "utf8"), removedBefore);
-    assert.deepEqual(commandsOf(r.stdout), ["git --literal-pathspecs rm -- 'trellis/removed/index.md'", "git --literal-pathspecs rm -- 'trellis/backlog.json'"]);
+    assert.deepEqual(commandsOf(r.stdout), [rm(f.root, "trellis/removed/index.md"), rm(f.root, "trellis/backlog.json")]);
     assert.deepEqual(git(f.root, "diff", "--cached", "--name-only").trim(), "", "nothing staged");
     // Step 3: run the printed commands, which delete both files.
     runCommands(f.root, r.stdout);
@@ -148,7 +149,7 @@ test("a tracked, markerless, blank index file is author-owned: kept, with no rem
     const r = runSwitch(f.root);
     assert.equal(r.status, 0, r.stderr);
     assert.equal(readFileSync(f.T("removed", "index.md"), "utf8"), "");
-    assert.deepEqual(commandsOf(r.stdout), ["git --literal-pathspecs rm -- 'trellis/backlog.json'"]);
+    assert.deepEqual(commandsOf(r.stdout), [rm(f.root, "trellis/backlog.json")]);
   } finally { f.cleanup(); }
 });
 
@@ -212,6 +213,53 @@ test("a customized last line of the artifact bullet makes the switch warn and le
   } finally { f.cleanup(); }
 });
 
+test("an artifact bullet with text appended after its final period warns and leaves AGENTS.md alone", () => {
+  const f = fixture();
+  try {
+    const path = join(f.root, "AGENTS.md");
+    writeFileSync(path, readFileSync(path, "utf8").replace("`BEGIN/END GENERATED` markers.", "`BEGIN/END GENERATED` markers. Ask the owner."));
+    f.commit();
+    const before = readFileSync(path, "utf8");
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(path, "utf8"), before);
+    assert.match(r.stderr, /AGENTS\.md: the generated-files bullet/);
+  } finally { f.cleanup(); }
+});
+
+test("stripping the block keeps every other byte, including an indented code block after it", () => {
+  const f = fixture();
+  try {
+    writeFileSync(f.T("README.md"), `# B\n\n${README_PAIR}\n    indented code\n\n\nTail.`);
+    f.commit();
+    assert.equal(runSwitch(f.root).status, 0);
+    assert.equal(readFileSync(f.T("README.md"), "utf8"), "# B\n\n    indented code\n\n\nTail.");
+  } finally { f.cleanup(); }
+});
+
+test("a printed removal command, run from the git root, removes only the nested target's file", { skip: process.platform === "win32" }, () => {
+  const f = fixture({ inGit: false });
+  const outer = realpathSync(mkdtempSync(join(tmpdir(), "trellis-outer-")));
+  try {
+    const pkg = join(outer, "pkg");
+    renameSync(f.root, pkg);
+    mkdirSync(join(outer, "trellis"));
+    writeFileSync(join(outer, "trellis", "backlog.json"), "{}\n");
+    git(outer, "init", "-q", ...initRefFormat, "-b", "main");
+    git(outer, "config", "user.name", "Tester");
+    git(outer, "config", "user.email", "tester@example.com");
+    git(outer, "config", "commit.gpgsign", "false");
+    git(outer, "add", "-A");
+    git(outer, "commit", "-q", "-m", "fixture");
+    const r = runSwitch(pkg);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(commandsOf(r.stdout).length, 2);
+    runCommands(pkg, r.stdout, outer);
+    assert.equal(existsSync(join(pkg, "trellis", "backlog.json")), false);
+    assert.ok(tracked(outer).includes("trellis/backlog.json"), "the root-level file is untouched");
+  } finally { rmSync(outer, { recursive: true, force: true }); f.cleanup(); }
+});
+
 test("a repo with no TRELLIS block keeps AGENTS.md byte-identical", () => {
   const f = fixture();
   try {
@@ -242,6 +290,9 @@ const refusals = {
   "an ignored directory at .generated/index.md": { setup: (f) => mkdirSync(f.T(".generated", "index.md"), { recursive: true }), re: /index\.md is not a regular file/ },
   "a symlinked .generated/": { setup: (f) => { mkdirSync(join(f.root, "elsewhere")); symlinkSync(join(f.root, "elsewhere"), f.T(".generated")); }, re: /\.generated is a symlink/ },
   "a regular file at .generated": { setup: (f) => writeFileSync(f.T(".generated"), "x\n"), re: /\.generated is not a directory/ },
+  "an unstaged deletion of the tracked legacy backlog.json": { setup: (f) => rmSync(f.T("backlog.json")), re: /backlog\.json has uncommitted changes/ },
+  "a README marked assume-unchanged": { setup: (f) => { git(f.root, "update-index", "--assume-unchanged", "trellis/README.md"); writeFileSync(f.T("README.md"), readFileSync(f.T("README.md"), "utf8") + "\nhidden\n"); }, re: /README\.md is marked assume-unchanged or skip-worktree/ },
+  "a legacy backlog.json marked skip-worktree": { setup: (f) => git(f.root, "update-index", "--skip-worktree", "trellis/backlog.json"), re: /backlog\.json is marked assume-unchanged or skip-worktree/ },
   "a tracked README symlink": { setup: (f) => { rmSync(f.T("README.md")); writeFileSync(join(f.root, "real-readme.md"), "# Real\n"); symlinkSync(join(f.root, "real-readme.md"), f.T("README.md")); f.commit(); }, re: /README\.md is a symlink/ },
 };
 for (const [name, c] of Object.entries(refusals)) {
@@ -322,7 +373,7 @@ test("with tasksDir planning*, a tracked planning-old/backlog.json is left alone
     f.commit();
     const r = runSwitch(f.root);
     assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(commandsOf(r.stdout), ["git --literal-pathspecs rm -- 'planning*/removed/index.md'", "git --literal-pathspecs rm -- 'planning*/backlog.json'"]);
+    assert.deepEqual(commandsOf(r.stdout), [rm(f.root, "planning*/removed/index.md"), rm(f.root, "planning*/backlog.json")]);
     assert.doesNotMatch(r.stdout, /planning-old/);
     assert.ok(tracked(f.root).includes("planning-old/backlog.json"));
     // Running the printed commands removes only the targets.

@@ -281,3 +281,48 @@ test("the printed ignore line carries the git-root prefix and satisfies the pref
     outputPreflight(root, loaded.cfg);
   } finally { rmSync(top, { recursive: true, force: true }); }
 });
+
+// ------------------------------------------------------- review round 1 (TRL0038)
+test("the ignore line normalizes the prefix with the backlog root, so a prefix and '.' print pkg/.generated/", () => {
+  assert.equal(ignoreLineFor(".", "pkg/"), "pkg/.generated/");
+  assert.equal(ignoreLineFor("trellis", "pkg/"), "pkg/trellis/.generated/");
+  assert.equal(ignoreLineFor("../shared", "pkg/"), "shared/.generated/");
+});
+
+test("the git prefix keeps its leading and trailing spaces", () => {
+  const top = realpathSync(mkdtempSync(join(tmpdir(), "trellis-space-")));
+  try {
+    git(top, "init", "-q", ...initRefFormat, "-b", "main");
+    const root = join(top, " lead dir ");
+    mkdirSync(root);
+    assert.equal(gitPrefix(root), " lead dir /");
+    assert.equal(ignoreLineFor("trellis", gitPrefix(root)), "\\ lead dir /trellis/.generated/");
+  } finally { rmSync(top, { recursive: true, force: true }); }
+});
+
+test("a git error that merely mentions 'not a git repository' refuses, and an odd success answer refuses", { skip: process.platform === "win32" }, () => {
+  const c = localRepo({ ignore: false });
+  try {
+    withGitShim("--show-prefix", `    echo "fatal: detected dubious ownership in repository at '/work/not a git repository/x'" >&2\n    exit 128`, () => {
+      refused(() => discoverGit(c.root), /dubious ownership/);
+    });
+    withGitShim("--show-prefix", `    echo "fatal: not a git repository (or any of the parent directories): .git" >&2\n    exit 128`, () => {
+      assert.equal(discoverGit(c.root), "skip");
+    });
+    withGitShim("--show-prefix", `    echo maybe\n    exit 0`, () => {
+      refused(() => discoverGit(c.root), /unexpected answer/);
+    });
+  } finally { c.cleanup(); }
+});
+
+for (const inGit of [true, false]) {
+  test(`preflight refuses a symlinked backlog root, ${inGit ? "inside" : "outside"} git`, { skip: process.platform === "win32" }, () => {
+    const c = localRepo({ inGit, tasksDir: "linked" });
+    try {
+      const real = join(c.root, "elsewhere");
+      mkdirSync(real);
+      symlinkSync(real, join(c.root, "linked"));
+      refused(() => outputPreflight(c.root, c.cfg), /linked is a symlink/);
+    } finally { c.cleanup(); }
+  });
+}

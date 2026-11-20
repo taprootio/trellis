@@ -1201,3 +1201,19 @@ test("a forced mid-write failure in scan mode restores outputs and removes new o
     assert.deepEqual(snapshotTree(c.root), before, "changed outputs are restored");
   } finally { writerSeams.beforeWrite = null; c.cleanup(); }
 });
+
+ledgerTest("local ledger regenerate reads the ledger preview once, so the file and the reply agree", { skip: process.platform === "win32" }, () => {
+  const c = localMcpRepo({ ledger: true });
+  const bin = realpathSync(mkdtempSync(join(tmpdir(), "trellis-mcp-count-")));
+  const log = join(bin, "calls.log");
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  writeFileSync(join(bin, "git"), `#!/bin/sh\nfor a in "$@"; do\n  if [ "$a" = "--exists" ]; then echo "$@" >> "${log}"; fi\ndone\nexec "${realGit}" "$@"\n`);
+  chmodSync(join(bin, "git"), 0o755);
+  const old = process.env.PATH;
+  process.env.PATH = `${bin}:${old}`;
+  try {
+    const out = regenerateOp(c.root);
+    assert.equal(readFileSync(log, "utf8").split("\n").filter((l) => l.includes("refs/trellis")).length, 1, "one ledger read per operation");
+    assert.equal(JSON.parse(readFileSync(join(c.gen, "backlog.json"), "utf8")).nextId, out.nextId);
+  } finally { process.env.PATH = old; rmSync(bin, { recursive: true, force: true }); c.cleanup(); }
+});

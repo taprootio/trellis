@@ -8,7 +8,7 @@
 // clean and a finished switch is a no-op.
 
 import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { DEFAULT_TASKS_DIR, GENERATED_DIR, MARKERS, SPEC_VERSION, artifactSet, loadConfig, paths } from "./backlog.mjs";
 import { AGENTS_MARKERS, artifactBullet, completedSkeleton, removedSkeleton } from "./init.mjs";
 import { OutputRefused, checkOutputFiles, discoverGit, gitPrefix, ignoreLineFor, probe, verifyOutputPaths } from "./local-output.mjs";
@@ -47,15 +47,29 @@ function requireRegular(path, rel) {
   if (!st.isFile()) refuse(`${rel} is not a regular file. Fix it, then run again`);
 }
 
-// Removes the first generated block, with its two marker lines, from a file whose
-// markers were already verified. Keeps one blank line where the block was.
+// Removes the lines from the begin marker through the end marker, newline included,
+// from a file whose markers were already verified. Every other byte stays as it was,
+// so an indented code block after the block keeps its indentation.
 function stripBlock(text, [begin, end]) {
-  const lines = text.split("\n");
-  const at = (m) => lines.findIndex((l) => trimEnd(l) === m);
-  const head = lines.slice(0, at(begin)).join("\n").replace(/\s+$/, "");
-  const tail = lines.slice(at(end) + 1).join("\n").replace(/^\s+/, "");
-  const joined = head && tail.trim() ? `${head}\n\n${tail}` : head || tail;
-  return joined ? joined.replace(/\n*$/, "\n") : "";
+  let offset = 0;
+  let from = -1;
+  let to = -1;
+  for (const line of text.split("\n")) {
+    const next = offset + line.length + 1;
+    if (from === -1 && trimEnd(line) === begin) from = offset;
+    if (from !== -1 && trimEnd(line) === end) { to = Math.min(next, text.length); break; }
+    offset = next;
+  }
+  return text.slice(0, from) + text.slice(to);
+}
+
+// True when `needle` fills whole lines of `text`: it starts a line and ends one.
+function hasWholeLines(text, needle) {
+  for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + 1)) {
+    const after = text[i + needle.length];
+    if ((i === 0 || text[i - 1] === "\n") && (after === undefined || after === "\n")) return true;
+  }
+  return false;
 }
 
 // Checks that a file holds either no generated marker or exactly one well-formed pair
@@ -131,18 +145,28 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
 
   // 3. What git knows: which candidates are tracked, and which are clean.
   const candidates = [readme, completedIdx, removedIdx, legacyBacklog].map((f) => posix(f.rel)).concat("AGENTS.md", rel(configPath));
-  const tracked = new Set(git(repoRoot, ["ls-files", "-z", "--", ...candidates.map((c) => `./${c}`)]).split("\0").filter(Boolean).map(posix));
+  // `ls-files -v` tags a path with a lowercase letter when it is assume-unchanged and with
+  // S when it is skip-worktree; either hides edits from `git status`, so it is refused.
+  const tracked = new Set();
+  const hidden = new Set();
+  for (const entry of git(repoRoot, ["ls-files", "-v", "-z", "--", ...candidates.map((c) => `./${c}`)]).split("\0").filter(Boolean)) {
+    const path = posix(entry.slice(2));
+    tracked.add(path);
+    if (/[a-zS]/.test(entry[0])) hidden.add(path);
+  }
   const isDirty = (r) => git(repoRoot, ["status", "--porcelain=v1", "--", `./${r}`]).trim() !== "";
   // A file the switch edits or removes must be tracked and unchanged, so the printed
   // plain `git rm` works and the user's own edits are never mixed with ours.
   const requireClean = (r, what) => {
     if (!tracked.has(r)) refuse(`${r} is untracked and ${what}. Commit it (or move it away), then run again`);
+    if (hidden.has(r)) refuse(`${r} is marked assume-unchanged or skip-worktree, so git cannot show whether it changed and ${what}. Clear the flag (git update-index --no-assume-unchanged --no-skip-worktree), then run again`);
     if (isDirty(r)) refuse(`${r} has uncommitted changes and ${what}. Commit them, then run again`);
   };
 
   const legacyRel = posix(legacyBacklog.rel);
-  const hasLegacy = existsSync(legacyBacklog.path);
-  if (hasLegacy && !tracked.has(legacyRel)) refuse(`${legacyRel} exists but is not tracked by git. Inspect it, then remove or move it, and run again`);
+  // Tracked, not present on disk, decides: an unstaged deletion is a dirty tracked file.
+  const hasLegacy = tracked.has(legacyRel);
+  if (!hasLegacy && existsSync(legacyBacklog.path)) refuse(`${legacyRel} exists but is not tracked by git. Inspect it, then remove or move it, and run again`);
 
   // 4. The README and index files: strip the generated block, keep authored text.
   const edits = [];
@@ -180,10 +204,10 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
       const block = text.slice(bi, ei);
       const committed = artifactBullet(root, "committed");
       const local = artifactBullet(root, "local");
-      if (block.includes(committed)) {
+      if (hasWholeLines(block, committed)) {
         requireClean("AGENTS.md", "holds the Trellis block the switch updates");
         edits.push({ path: agentsPath, rel: "AGENTS.md", before: text, after: text.slice(0, bi) + block.replace(committed, () => local) + text.slice(ei), why: "updated the generated-files bullet" });
-      } else if (!block.includes(local)) {
+      } else if (!hasWholeLines(block, local)) {
         warnings.push(`AGENTS.md: the generated-files bullet in the Trellis block differs from Trellis's own text, so it was left alone. Edit it by hand to say the index is generated into ${root}/${GENERATED_DIR}/ and that no committed file is generated`);
       }
     }
@@ -201,8 +225,10 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
     edits.push({ path: configPath, rel: rel(configPath), before: configText, after: JSON.stringify(obj, null, 2) + "\n", why: 'set generatedArtifacts to "local" and raised specVersion when it was lower' });
   }
 
+  // Each command names the target with -C, so it works from any directory (the target
+  // may be a subfolder of the git root) and removes only this target's file.
   const quote = (s) => `'${s.replace(/'/g, "'\\''")}'`;
-  for (const r of removals) r.command = `git --literal-pathspecs rm -- ${quote(r.rel)}`;
+  for (const r of removals) r.command = `git -C ${quote(resolve(repoRoot))} --literal-pathspecs rm -- ${quote(r.rel)}`;
   const result = { edits: edits.map((e) => ({ rel: e.rel, why: e.why })), removals, warnings, dryRun };
   if (dryRun || !edits.length) return result;
 

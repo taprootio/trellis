@@ -8,7 +8,7 @@
 // Front-matter is the small, fixed YAML subset from SPEC.md §5, parsed in-house
 // on purpose so Trellis stays drop-in with no install step.
 
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readdirSync, existsSync, constants as fsConstants } from "node:fs";
 import { join, relative, isAbsolute, normalize, sep } from "node:path";
 
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
@@ -842,6 +842,18 @@ export function generateArtifacts(repoRoot, cfg, data, { nextIdOverride } = {}) 
 // on a line of its own: that is a half-finished switch from committed mode.
 const MARKER_LINES = new Set(Object.values(MARKERS).flat());
 
+// Reads a file only when it is a regular file (after following a link). A FIFO is
+// opened non-blocking and refused from its fstat, so a README that is a pipe cannot hang.
+function readRegularText(path) {
+  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK || 0));
+  try {
+    if (!fstatSync(fd).isFile()) throw Object.assign(new Error("not a regular file"), { code: "ENOTREG" });
+    return readFileSync(fd, "utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
 // Errors for each author-owned file (README and the two index files) that holds a
 // marker line, ignoring trailing spaces, tabs and `\r`. Text that merely mentions
 // a marker is fine. An absent file is skipped; git is never consulted.
@@ -850,7 +862,7 @@ export function markerLineErrors(repoRoot, cfg) {
   for (const f of artifactSet(repoRoot, cfg).authorOwned) {
     let text;
     try {
-      text = readFileSync(f.path, "utf8");
+      text = readRegularText(f.path);
     } catch (e) {
       if (e.code !== "ENOENT" && e.code !== "ENOTDIR") errors.push(`${f.rel}: cannot read (${e.message})`);
       continue;

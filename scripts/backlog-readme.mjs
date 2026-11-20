@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { relative } from "node:path";
 import { loadConfig, readBacklog, generateArtifacts, checkGenerated, validateLocal, isLocalMode } from "../src/backlog.mjs";
 import { LedgerError, preview, refuseSymlinkedArtifacts, artifactPaths } from "../src/ledger.mjs";
-import { outputPreflight, previewNextId, writeArtifactFiles } from "../src/local-output.mjs";
+import { outputPreflight, writeArtifactFiles } from "../src/local-output.mjs";
 import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 
 const HELP = `trellis generate/check — validate and regenerate Trellis artifacts
@@ -107,7 +107,9 @@ const data = readBacklog(repoRoot, cfg);
 if (data.errors.length) die(data.errors);
 
 // A local ledger repo publishes the ledger preview in its uncommitted backlog.json.
-const nextIdOverride = local ? previewNextId(repoRoot, cfg) : undefined;
+// The preview is read once, so the file and the printed note agree.
+const pv = !isCheck && cfg.idAllocation === "ledger" ? preview(repoRoot, cfg) : null;
+const nextIdOverride = local && pv ? pv.nextId : undefined;
 const { files, nextId, errors } = isCheck ? checkGenerated(repoRoot, cfg, data) : generateArtifacts(repoRoot, cfg, data, { nextIdOverride });
 if (errors.length) die(errors);
 
@@ -130,6 +132,6 @@ if (isCheck) {
     for (const f of files) writeFileSync(f.path, f.content);
   }
   // In ledger mode ids come from `trellis claim`, so the scan value is not the next id.
-  const idNote = cfg.idAllocation === "ledger" ? preview(repoRoot, cfg).note : `Next id: ${nextId}`;
+  const idNote = pv ? pv.note : `Next id: ${nextId}`;
   console.log(`Backlog OK: ${data.active.length} active, ${data.completed.length} completed, ${data.removed.length} removed. ${idNote}`);
 }

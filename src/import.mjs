@@ -39,7 +39,7 @@
 // to the item's source id (plus an optional `. : - – —` and whitespace) is dropped from
 // the stored title (TRL0029); it is set on the numeric-prefix profiles, off elsewhere.
 
-import { readFileSync, readdirSync, writeFileSync, existsSync, rmSync, statSync, openSync, writeSync, closeSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, existsSync, rmSync, statSync, openSync, closeSync } from "node:fs";
 import { join, relative, dirname, isAbsolute, sep } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
@@ -55,7 +55,6 @@ import {
   artifactSet,
   isLocalMode,
   markerLineErrors,
-  GENERATED_DIR,
   CONFIG_DIR,
 } from "./backlog.mjs";
 import { OutputRefused, makeDirs, outputPreflight, previewNextId, removeCreatedDirs, writeArtifactFiles } from "./local-output.mjs";
@@ -301,21 +300,18 @@ function buildBody(raw, newId, title) {
 }
 
 // --------------------------------------------------------------- discovery
-// The source-relative PATHS the Trellis generator owns in committed mode (SPEC §8): a
-// source that is itself a Trellis backlog carries these alongside its tasks, so never
-// select one as an importable item — a `*.md` glob would otherwise pull them in and
-// fail validation. Derived from `artifactSet` so the names have one owner. Matched by
-// PATH, not basename, so a real task that merely happens to be named `active/index.md`
-// still imports.
-const COMMITTED_ARTIFACTS = new Set(
-  artifactSet(".", { tasksDir: "." }).generated.filter((e) => e.rel.endsWith(".md")).map((e) => e.rel.split(sep).join("/")),
+// The source-relative PATHS the Trellis generator owns (SPEC §8): a source that is
+// itself a Trellis backlog carries these alongside its tasks, so never select one as an
+// importable item — a `*.md` glob would otherwise pull them in and fail validation. Both
+// the committed files and the local `.generated/` files are listed, whatever the
+// target's mode (the source's own mode is unknown), and derived from `artifactSet` so
+// the names have one owner. Matched by exact PATH, not basename or folder, so a real
+// task named `active/index.md` or kept in a `.generated/` folder still imports.
+const GENERATED_ARTIFACTS = new Set(
+  ["committed", "local"].flatMap((mode) => artifactSet(".", { tasksDir: ".", generatedArtifacts: mode }).generated)
+    .map((e) => e.rel.split(sep).join("/")),
 );
-// A `.generated/` folder (local mode, TRL0038) holds only generated tables, so when the
-// target is in local mode nothing under one is an item either.
-const isGeneratedArtifact = (rel, local) => {
-  const parts = rel.split(/[/\\]/);
-  return COMMITTED_ARTIFACTS.has(parts.join("/")) || (local && parts.includes(GENERATED_DIR));
-};
+const isGeneratedArtifact = (rel) => GENERATED_ARTIFACTS.has(rel.split(/[/\\]/).join("/"));
 
 function listFiles(dir, re) {
   if (!existsSync(dir)) return null; // null = dir absent (a warning), [] = present-but-empty
@@ -326,7 +322,7 @@ function listFiles(dir, re) {
 
 // Gather every source item across the mapped status dirs, in a deterministic global
 // order (status order, then path) so fresh-sequential ids are reproducible.
-function discoverSources(sourceRoot, mapping, warnings, local) {
+function discoverSources(sourceRoot, mapping, warnings) {
   const out = [];
   for (const status of STATUS_ORDER) {
     const spec = mapping.sources[status];
@@ -339,7 +335,7 @@ function discoverSources(sourceRoot, mapping, warnings, local) {
       if (files === null) { warnings.push(`source dir not found, skipped: ${d}`); continue; }
       for (const f of files) {
         const rel = relative(sourceRoot, join(dir, f));
-        if (isGeneratedArtifact(rel, local)) continue; // a Trellis generated artifact at its known path — not a task
+        if (isGeneratedArtifact(rel)) continue; // a Trellis generated artifact at its known path — not a task
         hits.push({ status, dir, file: join(dir, f), basename: f.replace(/\.[^.]+$/, ""), rel });
       }
     }
@@ -404,7 +400,7 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   const roster = data.roster; // resolve owners/collaborators against the target roster (SPEC §7.2)
 
   const warnings = [];
-  const sources = discoverSources(sourceRoot, mapping, warnings, isLocalMode(cfg));
+  const sources = discoverSources(sourceRoot, mapping, warnings);
   if (!sources.length) warnings.push("no source items matched — check `sources.dirs` and the `file` pattern");
 
   const fields = mapping.fields;
@@ -751,7 +747,7 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
       written.push(abs);
       try {
         if (testSeams.afterItemCreate) testSeams.afterItemCreate(abs);
-        writeSync(fd, composeFile(it.fm, it.body));
+        writeFileSync(fd, composeFile(it.fm, it.body));
       } finally {
         closeSync(fd);
       }

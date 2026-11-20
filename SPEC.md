@@ -436,8 +436,11 @@ A conforming generator MUST:
    be syntactically valid handles (§7.2) on **every** item — the closed-item
    exemption is from membership, not from being a handle. A malformed `team.json` is
    a validation error regardless.
-2. **Regenerate** `README.md`, the completed/removed indexes (each between its
-   markers), and `backlog.json` deterministically.
+2. **Regenerate** deterministically. In committed mode (the default) that is
+   `README.md` and the completed/removed indexes (each between its markers) and
+   `backlog.json`. With `generatedArtifacts: "local"` (§8.5) it writes only the
+   four files under `.generated/`; `README.md` and the index files are
+   author-owned and are never written.
 3. Support a **`--check`** mode that validates and verifies the artifacts are
    current **without writing**, exiting non-zero on any error or drift. This is
    the CI gate. With `generatedArtifacts: "local"` (§8.5) `--check` validates

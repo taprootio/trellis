@@ -287,10 +287,10 @@ closed item with no date header, or an item whose effort lives under a `Size:` l
 or isn't recorded at all. The importer fills these as faithfully as it can and
 **reports what it inferred**, so nothing passes as authored history:
 
-- **Git is read at import time only.** When a close date has no header, the importer
-  reads the source file's last commit date from the *source* repo's git. This is the
-  one-time importer's privilege; the deterministic generator and `--check` never read
-  git (SPEC §8.4), so the gate stays reproducible.
+- **Git is read here only for the source-date lookup.** When a close date has no
+  header, the importer reads the source file's last commit date from the *source*
+  repo's git. This is the one-time importer's privilege; `--check` is git-free
+  (SPEC §8.3), so the gate stays reproducible.
 - **It degrades, never fails on git alone, for the source-date lookup.** Missing git, a non-repo or shallow
   source, or an uncommitted file all make the lookup return nothing — the chain then
   falls to a `defaults.<field>` floor if configured, and only errors if neither git
