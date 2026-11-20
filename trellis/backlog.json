@@ -6,9 +6,9 @@
     "v1",
     "Future"
   ],
-  "nextId": "TRL0041",
+  "nextId": "TRL0042",
   "counts": {
-    "active": 11,
+    "active": 12,
     "completed": 28,
     "removed": 0
   },
@@ -19,9 +19,8 @@
       "status": "active",
       "milestone": "v1",
       "priority": "High",
-      "effort": 13,
-      "effortLabel": "Shark",
-      "effortEmoji": "🦈",
+      "effort": 8,
+      "effortLabel": "Swordfish",
       "depends_on": [
         "TRL0001",
         "TRL0037",
@@ -29,11 +28,11 @@
       ],
       "owner": "jereme",
       "collaborators": [],
-      "summary": "A local, read-only web board (`trellis serve`) that renders the backlog straight from the item files, overlays every worktree's in-flight task edits and the id ledger's claims, searches titles, summaries and bodies, and live-reloads on change."
+      "summary": "A local, read-only web board (`trellis serve`) that renders the served checkout's backlog straight from the item files, with search, filters, safe Markdown rendering and live reload; the worktree overlay and ledger claims follow in TRL0041."
     },
     {
       "id": "TRL0008",
-      "title": "Viewer — dependency graph and filters",
+      "title": "Viewer — dependency graph and effort filter",
       "status": "active",
       "milestone": "Future",
       "priority": "Medium",
@@ -41,11 +40,12 @@
       "effortLabel": "Tuna",
       "effortImage": "assets/effort/tuna.svg",
       "depends_on": [
-        "TRL0005"
+        "TRL0005",
+        "TRL0041"
       ],
       "owner": null,
       "collaborators": [],
-      "summary": "Add a dependency graph, blocked-versus-ready flags and effort filtering to the local viewer."
+      "summary": "Add a dependency graph, blocked-versus-ready flags and an effort filter and sort to the local viewer, computed from the same resolved task set the board shows."
     },
     {
       "id": "TRL0011",
@@ -121,9 +121,6 @@
       "effortLabel": "Trout",
       "effortEmoji": "🐡",
       "depends_on": [
-        "TRL0031",
-        "TRL0032",
-        "TRL0033",
         "TRL0034",
         "TRL0037",
         "TRL0038",
@@ -132,7 +129,7 @@
       ],
       "owner": null,
       "collaborators": [],
-      "summary": "Once the ledger, local-artifact, legacy-archive and good-agent-aware init changes ship in a published release, onboard ../taproot in place with only the published package and record every friction point."
+      "summary": "Once the ledger, local-artifact, legacy-archive and good-agent-aware init changes ship in 0.3.0, onboard ../taproot in place with only the published package and record every friction point."
     },
     {
       "id": "TRL0037",
@@ -178,7 +175,7 @@
       ],
       "owner": "jereme",
       "collaborators": [],
-      "summary": "Add an optional id cutoff below which completed and removed items may omit the descriptive metadata (summary, milestone, priority, effort), so a long-lived backlog can adopt Trellis without inventing history while new closures stay strict."
+      "summary": "Add an optional legacy cutoff (an inclusive id and an exclusive close date) under which completed and removed items may omit the descriptive metadata (summary, milestone, priority, effort), so a long-lived backlog can adopt Trellis in place without inventing history while new closures stay strict."
     },
     {
       "id": "TRL0040",
@@ -197,6 +194,22 @@
       "owner": "jereme",
       "collaborators": [],
       "summary": "Let `trellis init` skip the parts an established repo already owns (CI workflow, PR template, process playbooks) and write a compact AGENTS.md block that defers the loops to good-agent's skills, refusing to push AGENTS.md past Codex's 32 KiB budget."
+    },
+    {
+      "id": "TRL0041",
+      "title": "Viewer — worktree overlay and open ledger claims",
+      "status": "active",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 8,
+      "effortLabel": "Swordfish",
+      "depends_on": [
+        "TRL0005",
+        "TRL0037"
+      ],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Extend `trellis serve` so the board also shows every other worktree's in-flight task edits, resolved against each lane's merge-base, and the id ledger's claims that have no item file yet, then release it as 0.4.0."
     },
     {
       "id": "TRL0001",
