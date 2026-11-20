@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, renameSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, lstatSync, symlinkSync, realpathSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, renameSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, lstatSync, symlinkSync, realpathSync, chmodSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -619,5 +619,27 @@ test("a non-ASCII tasksDir is refused with the config error and nothing changes"
   const f = fixture({ tasksDir: "planningé" });
   try {
     refusedWith(f.root, /tasksDir.*ASCII/);
+  } finally { f.cleanup(); }
+});
+
+test("a legacy backlog goes through the local migration with blank cells and nulls under .generated/", () => {
+  // `legacy` is in the committed config before the switch, which refuses uncommitted config changes.
+  const f = fixture({ cfg: { legacy: { through: "TAP0004", closedBefore: "2026-11-19" } } });
+  try {
+    cpSync(join(sourceRoot, "test", "fixtures", "legacy-adoption"), join(f.root, f.dir), { recursive: true });
+    f.commit("add legacy items");
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    runCommands(f.root, r.stdout);
+    assert.equal(cli(f.root, [f.root]).status, 0);
+    assert.equal(cli(f.root, [], readmeScript).status, 0);
+    const check = cli(f.root, ["--check"], readmeScript);
+    assert.equal(check.status, 0, check.stderr);
+    assert.match(readFileSync(f.T(".generated", "completed.md"), "utf8"), /\| Old completed item \|  \| 2026-06-01 \|/);
+    assert.match(readFileSync(f.T(".generated", "removed.md"), "utf8"), /\| Old removed item \|  \| 2026-06-01 \|/);
+    const json = JSON.parse(readFileSync(f.T(".generated", "backlog.json"), "utf8"));
+    for (const t of json.tasks.filter((x) => x.status !== "active")) {
+      for (const k of ["summary", "milestone", "priority", "effort"]) assert.equal(t[k], null, `${t.id} ${k}`);
+    }
   } finally { f.cleanup(); }
 });
