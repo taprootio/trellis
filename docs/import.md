@@ -115,6 +115,9 @@ an import.
    pair and keep the authored text outside it, or move the file aside first.
 4. Run `npx @taprootio/trellis check`.
 
+A repo that onboarded with `--skip` flags repeats the same flags on this ordinary
+`init`; a bare `init` would recreate the skipped parts.
+
 Local adopters: see the note after step 2. They run `init --switch-to-local` and the
 removal commands it prints before ordinary `init`.
 
@@ -169,6 +172,9 @@ prints them as a `reconcile` checklist:
   reconcile (1) — pre-Trellis backlog guidance to rewrite by hand (init left these untouched):
     - AI_GUIDELINES.md: has a "AI Backlog" section that looks like pre-Trellis backlog guidance — rewrite it to point at trellis/
 ```
+
+Under `--skip agents`, ordinary init leaves AGENTS.md out of this scan, since it does not
+touch that file.
 
 `init` **only ever reports** here — it appends its own marked block and never edits or
 deletes your prose. The surgical rewrite (point the section at `trellis/`, drop the old
@@ -396,11 +402,26 @@ them. The migration is five steps, in this order:
 3. Run the `git -C '<repo root>' --literal-pathspecs rm -- '<path>'` commands it prints. They delete
    the untouched generated-only index files and the legacy `backlog.json`.
 4. Run `npx @taprootio/trellis init`, without `--force` (init refuses `--force` on a
-   local repo). It creates nothing under the README or index paths.
+   local repo), repeating the `--skip` flags you used when you first ran `init`. It
+   creates nothing under the README or index paths.
 5. Run `npx @taprootio/trellis generate`, then `npx @taprootio/trellis check`.
 
 The switch refuses, changing nothing, when an output path is not ignored, a file it
 would edit or remove is a symlink or has uncommitted changes, a marker is unpaired,
 sits inline, repeats or belongs to another file, anything under `.generated/` is
-tracked, or an untracked `backlog.json` exists. A rerun after a finished switch
-changes nothing.
+tracked, an untracked `backlog.json` exists, or the AGENTS.md edit would take the file
+from at most 32,768 bytes (the limit Codex reads) to more. A file already over the limit
+gets a warning and the switch goes on. A rerun after a finished switch changes nothing.
+
+### Onboarding notes for repos with their own CI or good-agent
+
+- A copy of `trellis/playbooks/pr-draft.md` from an older release lacks the
+  no-template branch. Init keeps existing files, so merge the `## Without a PR
+  template` branch into your copy by hand (no rerun needed). Or move the old file aside
+  and rerun `trellis init --with-playbooks` with your other `--skip` flags, `playbooks`
+  dropped from them; add `--skip pr-template` to stay template-free, since a repo
+  scaffolded before that flag existed would otherwise get the template back. A bare
+  rerun still omits the playbooks when good-agent is detected.
+- A repo that is not detected and skipped `playbooks` has a TRELLIS block that does
+  not point at them. Init does not rewrite an existing block, so add the playbook
+  pointers by hand.

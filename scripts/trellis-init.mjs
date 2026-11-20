@@ -41,8 +41,10 @@ Flags:
   --retire-source <p>   history-preservingly git-rm an imported source tree at <p>
                         (a separate, later step — see below; cannot combine with --import)
   --skip <parts>        leave parts out of the scaffold: ${Object.keys(SKIP_PARTS).join(", ")}
-                        (comma list; repeated flags are united)
-  --with-playbooks      write the process playbooks even when good-agent is detected
+                        (a comma list; repeated --skip flags are united; "agents" leaves AGENTS.md alone)
+  --with-playbooks      write the playbooks and the full AGENTS.md block even when good-agent is
+                        detected; a rerun writes only what it is told to, so repeat your other
+                        --skip flags
   --force               overwrite existing files instead of skipping (refused when the
                         existing config has idAllocation "ledger", generatedArtifacts "local"
                         or a legacy cutoff)
@@ -55,7 +57,21 @@ Flags:
 an ignored <tasksDir>/.generated/ folder, nothing generated committed). It takes only --dry-run
 and the target, never prompts, and never stages, commits, runs git rm or edits .gitignore: add
 the ignore line it prints first, run it, then run the git rm commands it prints, then run
-"trellis init" (no --force), "trellis generate" and "trellis check".
+"trellis init" (no --force, repeating the --skip flags you used before), "trellis generate" and
+"trellis check". It refuses, changing nothing, when its AGENTS.md edit would take the file over ${AGENTS_BYTE_LIMIT} bytes.
+
+good-agent detection: a target with good-agent.config.json or .agents/skills/work-task/SKILL.md
+(each a regular file) is a good-agent repo. Init then skips the playbooks, names the marker it
+found, and writes a compact AGENTS.md block that defers the loops to good-agent's skills.
+--with-playbooks restores the playbooks and the full block; it never rewrites an existing TRELLIS
+block, and prints the full block for you to place instead. If you skip the playbooks in a repo that
+is not detected, ${INIT_TOKENS.blockNotUpdated} the TRELLIS block is not updated; add the playbook
+pointers by hand (init prints \`trellis init --with-playbooks\` as the way to add them later).
+
+Size guard: init never writes an AGENTS.md larger than ${AGENTS_BYTE_LIMIT} bytes, the most Codex reads. It leaves
+the file alone, prints the block with the bytes needed, and exits 0; trim AGENTS.md or place the
+block by hand. The MCP work-task, code-review and pr-draft prompts answer with a short handoff when
+their playbook is absent (good-agent's skills when detected, else trellis init --with-playbooks).
 
 To adopt a backlog whose closed items predate these rules, write a \`legacy\` cutoff into
 trellis/backlog.config.json first, then run "trellis init" without --force: init cannot create

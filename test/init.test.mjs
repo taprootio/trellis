@@ -2120,3 +2120,19 @@ test("both pr-draft.md copies carry the two branches, and no PR template points 
     assert.match(text, /attribution policy \(AGENTS\.md\)/i);
   }
 });
+
+test("init --help lists --skip and --with-playbooks and carries the recovery token", () => {
+  const r = spawnSync(process.execPath, [initScript, "--help"], { encoding: "utf8" });
+  assert.equal(r.status, 0);
+  const flags = r.stdout.slice(r.stdout.indexOf("Flags:"), r.stdout.indexOf("\n\n", r.stdout.indexOf("Flags:")));
+  assert.ok(flags.includes("--skip") && flags.includes("--with-playbooks"));
+  for (const part of SKIP_NAMES) assert.ok(flags.includes(part), part);
+  assert.ok(r.stdout.includes(INIT_TOKENS.blockNotUpdated));
+  assert.ok(r.stdout.includes(String(AGENTS_BYTE_LIMIT)));
+  // The migration paragraph tells the follow-up ordinary init to repeat the skips, and
+  // does not ask for --with-playbooks, which the switch rejects.
+  const start = r.stdout.indexOf("--switch-to-local is a standalone");
+  const paragraph = r.stdout.slice(start, r.stdout.indexOf("\n\n", start));
+  assert.ok(paragraph.includes("--skip"));
+  assert.ok(!paragraph.includes("--with-playbooks"));
+});

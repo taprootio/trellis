@@ -21,6 +21,26 @@ npx @taprootio/trellis init <target> --prefix ABC   # --dry-run to preview
 It does not vendor the generator; the onboarded repo runs Trellis via the
 package (the scaffolded CI calls `npx @taprootio/trellis check`), which ships in TRL0010.
 
+A repo that already owns some of this can leave it out. `--skip <parts>` takes a
+comma list (repeats are united) of `ci`, `pr-template`, `playbooks`,
+`branch-protection` and `agents`; `agents` leaves AGENTS.md alone entirely. Init also
+detects a repo that runs good-agent (a `good-agent.config.json` or
+`.agents/skills/work-task/SKILL.md` file): it then skips the `playbooks` and writes a
+compact AGENTS.md block that defers the loops to good-agent's `write-task`,
+`work-task` and `review-loop` skills. `--with-playbooks` writes the playbooks and the
+full block anyway; on a repo whose AGENTS.md already has a Trellis block it never
+rewrites that block, and prints the full block for you to place, with a reminder to
+carry over your Loop contract values. A rerun that restores the playbooks must repeat
+your other `--skip` flags. If you skip `playbooks` in a repo that is not detected, the
+TRELLIS block is not updated, so add the playbook pointers by hand.
+
+Init never pushes AGENTS.md past the 32,768 bytes Codex reads: when the result would
+be larger, it leaves the file alone, prints the block and says how many bytes it
+needs, so you can trim the file or place the block by hand. The MCP `work-task`,
+`code-review` and `pr-draft` prompts answer with a short handoff when their playbook
+is absent: the good-agent skills in a detected repo, otherwise `trellis init
+--with-playbooks`.
+
 By default the generated index and `backlog.json` are committed. To keep them out
 of git (so parallel branches stop conflicting on them), set
 `"generatedArtifacts": "local"` in `trellis/backlog.config.json`: `trellis generate`
