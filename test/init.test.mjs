@@ -2211,3 +2211,12 @@ test("a detected repo with --skip ci prints the restore command with that skip",
     assert.ok(r.stdout.includes("trellis init --with-playbooks --skip ci"));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("applyScaffold refuses skip playbooks with withPlaybooks and writes nothing", () => {
+  const root = tempRepo();
+  try {
+    const { summary } = applyScaffold(root, { prefix: "DEMO", skip: ["playbooks"], withPlaybooks: true }, {}, sourceRoot);
+    assert.equal(summary.errors.length, 1);
+    assert.deepEqual(readdirSync(root), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

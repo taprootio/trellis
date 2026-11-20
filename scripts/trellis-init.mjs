@@ -14,7 +14,7 @@
 import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
-import { AGENTS_BYTE_LIMIT, DEFAULTS, INIT_TOKENS, SKIP_PARTS, applyScaffold, carryOverWarning, parseSkip, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
+import { AGENTS_BYTE_LIMIT, DEFAULTS, INIT_TOKENS, SKIP_PARTS, applyScaffold, carryOverWarning, optionConflicts, parseSkip, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
 import { applyImport, importFailureLines, assertNotLedgerMode, assertNotLegacyConfig, assertNotLocalMode, assertNoLeftoverMarkers, assertSourceNotLocalOutput, ImportRefused } from "../src/import.mjs";
 import { loadConfig } from "../src/backlog.mjs";
 import { switchToLocal } from "../src/switch-local.mjs";
@@ -71,7 +71,9 @@ pointers by hand (init prints \`trellis init --with-playbooks\` as the way to ad
 Size guard: init never writes an AGENTS.md larger than ${AGENTS_BYTE_LIMIT} bytes, the most Codex reads. It leaves
 the file alone, prints the block with the bytes needed, and exits 0; trim AGENTS.md or place the
 block by hand. The MCP work-task, code-review and pr-draft prompts answer with a short handoff when
-their playbook is absent (good-agent's skills when detected, else a note to copy the playbook from the package templates).
+their playbook is absent (good-agent's skills when detected, else a note naming the playbook and its
+dependency files; copy any missing ones from the package's templates/trellis/playbooks/ into
+trellis/playbooks/ and keep existing copies).
 
 To adopt a backlog whose closed items predate these rules, write a \`legacy\` cutoff into
 trellis/backlog.config.json first, then run "trellis init" without --force: init cannot create
@@ -359,7 +361,7 @@ if (opts.switchToLocal) {
 // `--skip` is checked before any prompt or write. The raw values become the list of part names.
 if (opts.skip) {
   const { parts, errors } = parseSkip(opts.skip);
-  if (opts.withPlaybooks && parts.includes("playbooks")) errors.push("--skip playbooks cannot be combined with --with-playbooks");
+  errors.push(...optionConflicts(parts, opts.withPlaybooks));
   if (errors.length) {
     for (const e of errors) console.error(`error: ${e}`);
     process.exit(2);

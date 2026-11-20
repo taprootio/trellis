@@ -39,9 +39,9 @@ be larger, it leaves the file alone, prints the block and says how many bytes it
 needs, so you can trim the file or place the block by hand. The MCP `work-task`,
 `code-review` and `pr-draft` prompts answer with a short handoff when their playbook
 is absent: the good-agent skills in a detected repo, otherwise a
-note to copy the missing playbook from the installed package's
-`templates/trellis/playbooks/` into `trellis/playbooks/` (the server cannot know your
-earlier skips, so it never suggests `init`).
+note naming the playbook and its dependency files: copy any missing ones from the
+installed package's `templates/trellis/playbooks/` into `trellis/playbooks/` and keep
+existing copies (the server cannot know your earlier skips, so it never suggests `init`).
 
 By default the generated index and `backlog.json` are committed. To keep them out
 of git (so parallel branches stop conflicting on them), set

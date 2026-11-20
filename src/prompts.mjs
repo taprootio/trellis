@@ -84,16 +84,26 @@ function resourceByUri(uri) {
 // this repo. (SPEC.md, for one, is absent in onboarded repos until packaging
 // bundles a canonical copy — TRL0010.)
 export function listResources(repoRoot) {
-  return RESOURCES.map(({ uri, name, title, description, mimeType, rel }) => ({
-    uri, name, title, description, mimeType,
-    available: existsSync(join(repoRoot, rel)),
-  }));
+  return RESOURCES.map((r) => {
+    const { uri, name, title, description, mimeType, rel } = resolveResource(repoRoot, r);
+    return { uri, name, title, description, mimeType, available: existsSync(join(repoRoot, rel)) };
+  });
+}
+
+// The PR template resource serves the one template `findPrTemplate` discovers (any standard
+// place, `.md` or `.txt`). A template folder, or none found, keeps the default path, so the
+// folder case behaves as before.
+function resolveResource(repoRoot, r) {
+  if (r.uri !== "trellis://template/pull-request") return r;
+  const found = findPrTemplate(repoRoot);
+  if (!found || found.endsWith("/")) return r;
+  return { ...r, rel: found, mimeType: found.toLowerCase().endsWith(".txt") ? "text/plain" : r.mimeType };
 }
 
 // read_resource — the file behind a trellis:// uri. Throws `not_found` when the
 // uri is unknown OR the file is absent in this repo, rather than faking content.
 export function readResource(repoRoot, uri) {
-  const r = resourceByUri(uri);
+  const r = resolveResource(repoRoot, resourceByUri(uri));
   const abs = join(repoRoot, r.rel);
   if (!existsSync(abs)) {
     throw new TrellisError(`resource ${uri} is unavailable in this repo (no ${r.rel})`, "not_found");
@@ -216,7 +226,7 @@ function findPrTemplate(repoRoot) {
 // pointed at its skills; any other repo is told which playbook files to copy from the package. It never embeds
 // a playbook body, and the work-task id is validated like the normal prompt's.
 // The playbook files a prompt's playbook reads or points at, besides itself.
-const PLAYBOOK_DEPENDENCIES = {
+export const PLAYBOOK_DEPENDENCIES = {
   "work-task": ["conventions.md", "code-review.md", "pr-draft.md"],
   "code-review": ["conventions.md"],
   "pr-draft": [],

@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
-import { listResources, readResource, buildPrompt, RESOURCES, PROMPTS, PROMPT_TOKENS } from "../src/prompts.mjs";
+import { listResources, readResource, buildPrompt, RESOURCES, PROMPTS, PROMPT_TOKENS, PLAYBOOK_DEPENDENCIES } from "../src/prompts.mjs";
 import { TrellisError } from "../src/mcp.mjs";
 import { loadConfig, readBacklog } from "../src/backlog.mjs";
 import { TOOLS } from "../scripts/trellis-mcp.mjs";
@@ -402,7 +402,7 @@ test("the undetected recovery tells the user to copy the playbook, for all three
     for (const name of NAMES) {
       const text = textOf(root, name);
       assert.ok(text.includes("templates/trellis/playbooks/") && text.includes(`${name}.md`), name);
-      for (const dep of { "work-task": ["conventions.md", "code-review.md", "pr-draft.md"], "code-review": ["conventions.md"], "pr-draft": [] }[name]) assert.ok(text.includes(dep), `${name} needs ${dep}`);
+      for (const dep of PLAYBOOK_DEPENDENCIES[name]) assert.ok(text.includes(dep), `${name} needs ${dep}`);
       assert.ok(text.includes("keep existing copies"));
       assert.ok(!text.includes("trellis init"), "never suggests init");
     }
@@ -480,5 +480,38 @@ test("a .txt template inside a PULL_REQUEST_TEMPLATE folder counts", () => {
     writeFileSync(join(root, "docs", "PULL_REQUEST_TEMPLATE", "feature.txt"), "t\n");
     const text = textOf(root, "pr-draft");
     assert.ok(text.includes("docs/PULL_REQUEST_TEMPLATE/") && !text.includes(PROMPT_TOKENS.noTemplate));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the dependency set equals the playbooks each packaged playbook links or names", () => {
+  for (const name of NAMES) {
+    const text = readFileSync(join(sourceRoot, "templates", "trellis", "playbooks", `${name}.md`), "utf8");
+    const derived = new Set([...text.matchAll(/(?:\]\(|trellis\/playbooks\/)([a-z-]+)\.md/g)].map((m) => m[1]).filter((n) => n !== name));
+    assert.deepEqual([...derived].sort(), PLAYBOOK_DEPENDENCIES[name].map((f) => f.replace(/\.md$/, "")).sort(), name);
+  }
+});
+
+test("the pr-draft prompt on a repo whose only instructions are CONTRIBUTING.md carries the attribution fallback", () => {
+  const root = freshRepo();
+  try {
+    rmSync(join(root, "AGENTS.md"));
+    writeFileSync(join(root, "CONTRIBUTING.md"), "# Contributing\n");
+    const text = textOf(root, "pr-draft");
+    const from = text.indexOf("**Attribution:**");
+    const rule = text.slice(from, text.indexOf("\n\n", from) === -1 ? undefined : text.indexOf("\n\n", from));
+    assert.ok(from > 0);
+    assert.ok(rule.includes("Wherever this playbook names AGENTS.md") && rule.includes("CONTRIBUTING.md"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the PR template resource and the pr-draft handoff agree on a .txt template", () => {
+  const root = bareRepo({ template: false });
+  try {
+    mkdirSync(join(root, "docs"));
+    writeFileSync(join(root, "docs", "pull_request_template.txt"), "template text\n");
+    assert.ok(textOf(root, "pr-draft").includes("docs/pull_request_template.txt"));
+    const res = readResource(root, "trellis://template/pull-request");
+    assert.equal(res.text, "template text\n");
+    assert.equal(listResources(root).find((r) => r.uri === "trellis://template/pull-request").available, true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

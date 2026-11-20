@@ -109,6 +109,11 @@ export const SKIP_PARTS = {
   agents: ["AGENTS.md"],
 };
 
+// Option combinations the CLI and `applyScaffold` both refuse (one owner, TRL0040).
+export function optionConflicts(skipParts, withPlaybooks) {
+  return withPlaybooks && skipParts.includes("playbooks") ? ["--skip playbooks cannot be combined with --with-playbooks"] : [];
+}
+
 // Turns the raw `--skip` values (one per flag; undefined when the value was missing)
 // into a deduplicated list of part names in table order, plus usage errors.
 export function parseSkip(values = []) {
@@ -671,8 +676,9 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false, deferGene
 
   // An unknown part name is refused before anything is planned or written.
   const parsedSkip = parseSkip(opts.skip || []);
-  if (parsedSkip.errors.length) {
-    summary.errors.push(...parsedSkip.errors);
+  const conflicts = optionConflicts(parsedSkip.parts, !!opts.withPlaybooks);
+  if (parsedSkip.errors.length || conflicts.length) {
+    summary.errors.push(...parsedSkip.errors, ...conflicts);
     return { options: resolveOptions(opts), summary };
   }
 
