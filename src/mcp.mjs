@@ -36,7 +36,7 @@ import {
 import { applyImport, ImportRefused } from "./import.mjs";
 import { loadProfile } from "./profiles.mjs";
 import { deriveTaskHistory, deriveAllHistory, HistoryError } from "./history.mjs";
-import { LedgerError, claim, preview, checkLayout } from "./ledger.mjs";
+import { LedgerError, claim, preview, checkLayout, refuseGitDirTargets } from "./ledger.mjs";
 
 // A domain error the transport maps to an MCP tool error (isError result) rather
 // than a protocol failure. `code` is a short slug for programmatic handling.
@@ -309,6 +309,7 @@ export function stageFile(dest, ext, content, mode) {
 // warning: the item and its generated entries are already consistent.
 // Test seams: `hooks.afterArtifactRename(path, n)` and `hooks.removeBackup(path)`.
 function writeArtifactsStaged(repoRoot, files, next, hooks) {
+  ledgerCall(() => refuseGitDirTargets(repoRoot, files.map((f) => f.path)));
   const plan = [];
   for (const f of files) {
     const dest = resolveDestination(f.path);
@@ -481,7 +482,9 @@ export function createTask(repoRoot, args = {}, hooks = {}) {
   // before the claim too.
   if (ledgerMode) {
     const g = paths(repoRoot, cfg);
-    for (const f of [g.readme, g.completedIndex, g.removedIndex, g.backlogJson]) resolveDestination(f);
+    const targets = [g.readme, g.completedIndex, g.removedIndex, g.backlogJson];
+    for (const f of targets) resolveDestination(f);
+    ledgerCall(() => refuseGitDirTargets(repoRoot, targets));
   }
   // Ledger mode claims the id, and never falls back to the scan: a fresh clone
   // would hand out an id another worktree holds. The claim is never undone.

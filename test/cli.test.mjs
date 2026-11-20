@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, realpathSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -200,7 +200,7 @@ test("claim: mode matrix and exit codes", () => {
     const listed = run(c.root, ["claim", "--list"]);
     assert.equal(listed.status, 0);
     const lines = listed.stdout.trim().split("\n");
-    assert.match(lines[0], /^tip [0-9a-f]{40}$/);
+    assert.equal(lines[0], `tip ${refTip(c.root)}`);
     assert.equal(lines[1], "id\tdate\tkind\tbranch\ttitle");
     const kinds = lines.slice(2).map((l) => l.split("\t")[2]);
     assert.deepEqual(kinds, ["claim", "claim", "through", "claim"]);
@@ -342,5 +342,19 @@ test("generate in scan mode still prints Next id", () => {
   try {
     const r = run(c.root, ["generate"]);
     assert.match(r.stdout, /Next id: DEMO0001/);
+  } finally { c.cleanup(); }
+});
+
+test("generate in ledger mode refuses an artifact that links into the git dir", { skip: process.platform === "win32" }, () => {
+  const c = claimRepo();
+  try {
+    assert.equal(run(c.root, ["claim", "--seed"]).status, 0);
+    const before = refTip(c.root);
+    const link = join(c.root, "trellis/backlog.json");
+    rmSync(link, { force: true });
+    symlinkSync(join(c.root, ".git/refs/trellis/ids"), link);
+    const r = run(c.root, ["generate"]);
+    assert.equal(r.status, 2, r.stderr);
+    assert.equal(refTip(c.root), before);
   } finally { c.cleanup(); }
 });

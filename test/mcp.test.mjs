@@ -908,3 +908,15 @@ test("stageFile removes its reserved file when the write fails", () => {
     assert.deepEqual(readdirSync(join(c.root, "trellis")).filter((n) => /\.tmp$/.test(n)), []);
   } finally { c.cleanup(); }
 });
+
+test("create_task refuses a generated artifact that links into the git dir, before claiming", { skip: process.platform === "win32" }, () => {
+  const c = ledgerRepo();
+  try {
+    const before = refTip(c.root);
+    const link = join(c.root, "trellis", "backlog.json");
+    rmSync(link, { force: true });
+    symlinkSync(join(c.root, ".git", "refs", "trellis", "ids"), link);
+    throwsTrellis(() => createTask(c.root, VALID), "invalid_request");
+    assert.equal(refTip(c.root), before);
+  } finally { c.cleanup(); }
+});

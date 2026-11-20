@@ -9,8 +9,8 @@
 // Like src/history.mjs, this is kept out of the core (src/backlog.mjs) so that
 // `check` never depends on git or on local state (SPEC §8.3).
 
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { join, sep } from "node:path";
+import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, PLAIN_PREFIX_RE, parseFrontMatter } from "./backlog.mjs";
 
@@ -62,12 +62,12 @@ function gitEnv(extra = {}) {
 
 const NO_HOOKS = process.platform === "win32" ? "NUL" : "/dev/null";
 
-function runGit(args, { cwd, input, env } = {}) {
+function runGit(args, { cwd, input, env, raw = false } = {}) {
   // No fsmonitor (it would run a configured command on index reads) and no hooks
   // (ledger ref updates must not run reference-transaction hooks).
   const full = ["--literal-pathspecs", "-c", "core.fsmonitor=false", "-c", `core.hooksPath=${NO_HOOKS}`, ...(cwd ? ["-C", cwd] : []), ...args];
   const r = spawnSync("git", full, {
-    encoding: "utf8",
+    encoding: raw ? "buffer" : "utf8",
     input,
     env: gitEnv(env),
     maxBuffer: MAX_LEDGER_BYTES,
@@ -83,8 +83,8 @@ function runGit(args, { cwd, input, env } = {}) {
 const firstLine = (s) => String(s || "").trim().split("\n")[0] || "git error";
 
 // Run git and require one of `ok` exit codes; the error names the command.
-function git(cwd, args, { ok = [0], input, env } = {}) {
-  const r = runGit(args, { cwd, input, env });
+function git(cwd, args, { ok = [0], input, env, raw } = {}) {
+  const r = runGit(args, { cwd, input, env, raw });
   if (!ok.includes(r.status)) {
     throw new LedgerError(`git ${args.join(" ")} failed: ${firstLine(r.stderr)}`);
   }
@@ -169,14 +169,16 @@ function requireLedgerMode(cfg) {
   }
 }
 
-const CONTROL = /[\x00-\x1f\x7f]/;
+// Control characters plus the Unicode line and paragraph separators (U+2028, U+2029).
+const UNSAFE_TEXT = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+const unsafeText = (value) => UNSAFE_TEXT.test(value);
 // Every claim rewrites the whole claims.tsv, so titles are kept short.
 export const MAX_TITLE_LENGTH = 200;
 
 // Titles are one line with no tabs or control characters, so they cannot forge a row.
 export function ledgerTitle(value) {
   if (typeof value !== "string" || !value.trim()) throw refuse("`title` is required", "invalid_request");
-  if (CONTROL.test(value)) throw refuse("`title` must be a single line with no tabs or control characters", "invalid_request");
+  if (unsafeText(value)) throw refuse("`title` must be a single line with no tabs or control characters", "invalid_request");
   const t = value.trim();
   if (t.length > MAX_TITLE_LENGTH) throw refuse(`\`title\` must be at most ${MAX_TITLE_LENGTH} characters`, "invalid_request");
   return t;
@@ -184,7 +186,7 @@ export function ledgerTitle(value) {
 
 // Titles read from item files are cleaned instead of refused.
 function cleanTitle(value) {
-  const t = String(value ?? "").replace(/[\x00-\x1f\x7f]+/g, " ").trim().slice(0, MAX_TITLE_LENGTH).trim();
+  const t = String(value ?? "").replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").trim().slice(0, MAX_TITLE_LENGTH).trim();
   return t || "-";
 }
 
@@ -221,7 +223,7 @@ function parseClaims(text, cfg) {
       return { reason: `${at} has a bad date` };
     }
     if (!KINDS.has(kind)) return { reason: `${at} has an unknown kind` };
-    if (!branch || !title || CONTROL.test(branch) || CONTROL.test(title)) return { reason: `${at} has an empty or unsafe branch or title` };
+    if (!branch || !title || unsafeText(branch) || unsafeText(title)) return { reason: `${at} has an empty or unsafe branch or title` };
     rows.push({ id, date, kind, branch, title });
   }
   return { rows, text };
@@ -276,30 +278,85 @@ function requireLedger(repoRoot, cfg) {
 }
 
 // ------------------------------------------------------------- worktrees
+// Git paths and ref names are bytes. A name that is not valid UTF-8 cannot be
+// carried through a JavaScript string and back to git, so allocation refuses it.
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+function decodeGit(buf, what) {
+  try {
+    return strictUtf8.decode(buf);
+  } catch {
+    throw refuse(`${what} is not valid UTF-8; the id ledger does not support it`, "unsupported_layout");
+  }
+}
+
+const HEADS = "refs/heads/";
+const stripHeads = (ref) => (ref.startsWith(HEADS) ? ref.slice(HEADS.length) : "-");
+
 // Every worktree of the clone that can be read. Prunable and missing ones are
-// skipped so a stale lane cannot block a claim.
+// skipped so a stale lane cannot block a claim; one that cannot be inspected
+// (permissions) refuses, since dropping it could hide a reserved id.
 function listWorktrees(repoRoot) {
-  const out = git(repoRoot, ["worktree", "list", "--porcelain", "-z"]).stdout;
+  const out = git(repoRoot, ["worktree", "list", "--porcelain", "-z"], { raw: true }).stdout;
   const list = [];
   let cur = null;
-  for (const field of out.split("\0")) {
+  let start = 0;
+  const fields = [];
+  for (let i = 0; i <= out.length; i++) {
+    if (i === out.length || out[i] === 0) { fields.push(decodeGit(out.subarray(start, i), "a worktree path or branch name")); start = i + 1; }
+  }
+  for (const field of fields) {
     if (field === "") { cur = null; continue; }
     if (field.startsWith("worktree ")) {
       cur = { path: field.slice("worktree ".length), branch: "-", bare: false, prunable: false };
       list.push(cur);
     } else if (cur) {
-      if (field.startsWith("branch ")) cur.branch = field.slice("branch ".length).replace(/^refs\/heads\//, "");
+      if (field.startsWith("branch ")) cur.branch = stripHeads(field.slice("branch ".length));
       else if (field === "bare") cur.bare = true;
       else if (field === "prunable" || field.startsWith("prunable ")) cur.prunable = true;
     }
   }
-  return list.filter((w) => !w.bare && !w.prunable && existsSync(w.path));
+  const kept = [];
+  for (const w of list) {
+    if (w.bare) continue;
+    // Git also marks a worktree prunable when it cannot reach it, so a prunable one
+    // is skipped only once stat confirms it is gone.
+    let present = true;
+    try {
+      statSync(w.path);
+    } catch (e) {
+      if (e.code !== "ENOENT" && e.code !== "ENOTDIR") throw refuse(`cannot inspect the worktree ${w.path}: ${e.message}`, "unsupported_layout");
+      present = false;
+    }
+    if (present && !w.prunable) kept.push(w);
+  }
+  return kept;
 }
 
+// Every listed checkout must be its own work tree root, and the served root must be
+// one of them. With a separate git dir, git can list the metadata directory as the
+// primary worktree, and then the real checkout would never be scanned.
+function verifyWorktrees(repoRoot, worktrees) {
+  const real = new Set();
+  for (const w of worktrees) {
+    const top = runGit(["rev-parse", "--show-toplevel"], { cwd: w.path });
+    const topPath = top.stdout.replace(/\n$/, "");
+    if (top.status !== 0 || !topPath || realpathSync.native(topPath) !== realpathSync.native(w.path)) {
+      throw refuse(`cannot locate the checkout of the listed worktree ${w.path}; the id ledger does not support this layout (a separate git dir, for one)`, "unsupported_layout");
+    }
+    real.add(realpathSync.native(w.path));
+  }
+  if (!real.has(realpathSync.native(repoRoot))) {
+    throw refuse(`${repoRoot} is not in the worktree list of its clone; the id ledger does not support this layout`, "unsupported_layout");
+  }
+}
+
+// Reads the full symbolic ref and strips refs/heads/ itself: `--short` would print
+// `heads/main` when a tag shares the branch name.
 function branchOf(repoRoot) {
-  const r = runGit(["symbolic-ref", "-q", "--short", "HEAD"], { cwd: repoRoot });
-  const name = r.stdout.replace(/\n$/, "");
-  return r.status === 0 && name && !CONTROL.test(name) ? name : "-";
+  const r = runGit(["symbolic-ref", "-q", "HEAD"], { cwd: repoRoot, raw: true });
+  if (r.status !== 0) return "-";
+  const name = stripHeads(decodeGit(r.stdout, "the branch name").replace(/\n$/, ""));
+  return name && !unsafeText(name) ? name : "-";
 }
 
 // ------------------------------------------------------------------ scan
@@ -368,13 +425,13 @@ function pickIds(paths, cfg) {
 // The commit HEAD resolves to, or null when the branch is unborn. HEAD is resolved
 // exactly: revision lookup by the name HEAD could pick up a tag called HEAD.
 function headCommit(worktree) {
-  const sym = runGit(["symbolic-ref", "-q", "HEAD"], { cwd: worktree });
+  const sym = runGit(["symbolic-ref", "-q", "HEAD"], { cwd: worktree, raw: true });
   let ref = "HEAD";
   if (sym.status === 0) {
-    ref = sym.stdout.replace(/\n$/, "");
+    ref = decodeGit(sym.stdout, "the branch name").replace(/\n$/, "");
     if (git(worktree, ["show-ref", "--exists", ref], { ok: [0, 2] }).status === 2) return null;
   } else if (sym.status !== 1) {
-    throw new LedgerError(`git symbolic-ref -q HEAD failed: ${firstLine(sym.stderr)}`);
+    throw new LedgerError(`git symbolic-ref -q HEAD failed: ${firstLine(String(sym.stderr))}`);
   }
   return git(worktree, ["show-ref", "--verify", "--hash", ref]).stdout.trim();
 }
@@ -430,8 +487,10 @@ function scanClone(repoRoot, cfg) {
   if (!top || realpathSync.native(repoRoot) !== realpathSync.native(top)) {
     throw refuse(`${repoRoot} is not the root of its worktree (${top || "unknown"}); serve the worktree root`, "unsupported_layout");
   }
+  const worktrees = listWorktrees(repoRoot);
+  verifyWorktrees(repoRoot, worktrees);
   const result = [];
-  for (const wt of listWorktrees(repoRoot)) {
+  for (const wt of worktrees) {
     if (sparseCheckoutOn(wt.path)) {
       throw refuse(`the worktree ${wt.path} uses sparse checkout; the id ledger does not support it`, "unsupported_layout");
     }
@@ -459,6 +518,43 @@ function computeNext(cfg, ledgerRows, clone) {
     throw refuse(`id space exhausted: the next id would need more than ${cfg.idWidth} digits`, "exhausted");
   }
   return cfg.idPrefix + String(n).padStart(cfg.idWidth, "0");
+}
+
+// Where a write to `path` would land: symlinks are followed, even dangling ones.
+function landingPath(path) {
+  let cur = path;
+  for (let i = 0; i < 40; i++) {
+    let st;
+    try {
+      st = lstatSync(cur);
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+      return join(realpathSync.native(dirname(cur)), basename(cur));
+    }
+    if (!st.isSymbolicLink()) return join(realpathSync.native(dirname(cur)), basename(cur));
+    try { return realpathSync.native(cur); } catch (e) { if (e.code !== "ENOENT") throw e; }
+    const target = readlinkSync(cur);
+    const raw = isAbsolute(target) ? target : join(realpathSync.native(dirname(cur)), target);
+    cur = join(realpathSync.native(dirname(raw)), basename(raw));
+  }
+  throw refuse(`too many symlinks resolving ${path}`, "unsupported_layout");
+}
+
+// Refuses a generated artifact whose write would land inside the checkout's git dir
+// or the common git dir, where a link could overwrite the ledger ref.
+export function refuseGitDirTargets(repoRoot, paths) {
+  const dirs = [];
+  for (const flag of ["--absolute-git-dir", "--git-common-dir"]) {
+    const r = runGit(["rev-parse", "--path-format=absolute", flag], { cwd: repoRoot });
+    if (r.status !== 0) return; // not a git checkout, so there is no ledger to overwrite
+    dirs.push(realpathSync.native(r.stdout.replace(/\n$/, "")));
+  }
+  for (const path of paths) {
+    const dest = landingPath(path);
+    if (dirs.some((d) => dest === d || dest.startsWith(d + sep))) {
+      throw refuse(`${path} resolves into the git directory (${dest}); refusing to write generated files there`, "unsupported_layout");
+    }
+  }
 }
 
 // Throws the layout refusals without allocating, so a caller can fail before it

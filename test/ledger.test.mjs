@@ -483,6 +483,8 @@ test("a bad row, tree or tip makes the ledger unusable and every write refuses",
     "bad kind": HEADER + "DEMO0001\t2026-11-19\tmystery\tmain\tt\n",
     "empty title": HEADER + "DEMO0001\t2026-11-19\tclaim\tmain\t\n",
     "control in title": HEADER + "DEMO0001\t2026-11-19\tclaim\tmain\tt\x01\n",
+    "line separator in title": HEADER + "DEMO0001\t2026-11-19\tclaim\tmain\tt\u2028u\n",
+    "next-line character in branch": HEADER + "DEMO0001\t2026-11-19\tclaim\tma\u0085in\tt\n",
     "blank line": HEADER + "\n",
   };
   for (const [name, text] of Object.entries(bad)) {
@@ -922,5 +924,73 @@ test("a claims.tsv over the reader limit is unusable, not a failure", () => {
     const r = readLedger(root, cfg);
     assert.match(r.unusable, /too large/);
     assertRefused(() => claim(root, cfg, { title: "x" }), "invalid_ledger");
+  });
+});
+
+// ------------------------------------------------ external review round 3
+
+test("a separate git dir is refused, since git lists the metadata directory as the primary worktree", () => {
+  const dir = tmp("sepgit");
+  try {
+    const root = join(dir, "work");
+    mkdirSync(root);
+    git(root, "init", "-q", "-b", "main", "--separate-git-dir", join(dir, "meta"));
+    git(root, "config", "user.name", "Tester");
+    git(root, "config", "user.email", "tester@example.com");
+    writeFileSync(join(root, "README.md"), "x\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-q", "-m", "init");
+    assertRefused(() => seed(root, BASE_CFG), "unsupported_layout");
+    assert.equal(tipOrNull(root), null);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a worktree behind an inaccessible parent refuses allocation instead of being dropped", { skip: process.platform === "win32" || process.getuid?.() === 0 }, () => {
+  withClone(({ root, cfg, dir }) => {
+    const parent = join(dir, "closed");
+    mkdirSync(parent);
+    const path = join(parent, "lane");
+    git(root, "worktree", "add", "-q", "-b", "lane", path);
+    seed(root, cfg);
+    const before = tip(root);
+    chmodSync(parent, 0o000);
+    try {
+      assertRefused(() => claim(root, cfg, { title: "x" }), "unsupported_layout");
+    } finally { chmodSync(parent, 0o755); }
+    assert.equal(tip(root), before);
+  });
+});
+
+test("a branch name that is not valid UTF-8 refuses allocation", { skip: process.platform === "win32" }, () => {
+  withClone(({ root, cfg }) => {
+    seed(root, cfg);
+    const before = tip(root);
+    const head = join(git(root, "rev-parse", "--absolute-git-dir"), "HEAD");
+    writeFileSync(head, Buffer.concat([Buffer.from("ref: refs/heads/bad"), Buffer.from([0xff, 0xfe]), Buffer.from("\n")]));
+    assertRefused(() => claim(root, cfg, { title: "x" }), "unsupported_layout");
+    assert.equal(tip(root), before);
+  });
+});
+
+test("the branch recorded for a claim ignores a tag with the same name", () => {
+  withClone(({ root, cfg }) => {
+    git(root, "tag", "main");
+    seed(root, cfg);
+    claim(root, cfg, { title: "x" });
+    assert.equal(list(root, cfg).rows[0].branch, "main");
+  });
+});
+
+test("titles reject Unicode line separators, and seed titles are cleaned the same way", () => {
+  withClone(({ root, cfg }) => {
+    mkdirSync(join(root, "trellis", "active"), { recursive: true });
+    for (const bad of ["a\u2028b", "a\u2029b", "a\u0085b", "a\u009fb"]) {
+      assertRefused(() => claim(root, cfg, { title: bad }), "invalid_request");
+    }
+    item(root, "active", "DEMO0005", "one\u0085two");
+    seed(root, cfg);
+    const rows = list(root, cfg).rows;
+    assert.equal(rows[0].title, "one two");
+    assert.equal(claim(root, cfg, { title: "next" }).id, "DEMO0006");
   });
 });
