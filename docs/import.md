@@ -62,6 +62,50 @@ failure**, so a refused import leaves the target exactly as it was.
 - **A real run leaves the backlog `--check`-green**, or rolls back to the
   pre-import state if anything fails.
 
+### Adopt a Trellis-shaped backlog in place (`legacy`)
+
+A backlog that is already Trellis-shaped but older than the closed-item rules (its
+archive omits `summary`, `milestone`, `priority` or `effort`) is adopted in place, not
+imported. Set the optional `legacy` cutoff (SPEC §5.1, §7) so items from before
+adoption may omit those fields, while new closures stay strict. `legacy` covers this
+in-place onboarding only: it does not relax the milestone, priority and effort
+requirement on a source item for any import profile, including `trellis`. A target
+that has `legacy` is read under its rules, so its qualifying blank items do not block
+an import.
+
+1. Write `legacy` into `trellis/backlog.config.json` first: `through` is the highest
+   id that exists today and `closedBefore` is today's date (the adoption date,
+   exclusive). `init` cannot create `legacy` itself. It validates the archive with the
+   config it keeps, so a repo with no config must hand-author the full config
+   (`idPrefix`, `idWidth`, `milestones`, `priorities`, `effort`, `legacy`) before it
+   runs `init`; with no config, init validates against the strict defaults. The
+   `idPrefix` must be a plain prefix (a letter, then letters or digits). When the
+   backlog lives outside `trellis/`, set `tasksDir` in that config too; the config
+   file itself stays at `trellis/backlog.config.json`. Otherwise `init` can succeed
+   against an empty default tree.
+2. Add `depends_on: []` to any item that lacks it: it stays required.
+3. Run `npx @taprootio/trellis init` **without** `--force`. `init --force` is refused
+   (exit 2, nothing written) once the config has `legacy`, because the replacement
+   config would drop it. To restore a missing or stale scaffold file such as an index
+   or README, delete that one file and rerun plain `init`, or edit it by hand.
+   `trellis/backlog.config.json` must stay. In committed mode, a backlog-root
+   `README.md`, `completed/index.md` or `removed/index.md` that has no generated
+   markers still fails ordinary `init` after `legacy` is added: add the correct marker
+   pair and keep the authored text outside it, or move the file aside first.
+4. Run `npx @taprootio/trellis check`.
+
+To adopt in local generated-artifacts mode (SPEC §8.5), follow [Switch a Trellis
+backlog to local generated artifacts](#switch-a-trellis-backlog-to-local-generated-artifacts)
+with `legacy` already in the config. A repo migrating from committed mode sets `legacy`
+and commits that config change before `init --switch-to-local`, which refuses a config
+with uncommitted changes; this applies only to switches that rewrite the config. A new
+config that is already local at the current spec version is kept as it is. First-time
+local adopters write `generatedArtifacts: "local"` and `specVersion: "2.5"` in the
+hand-authored config, so a new untracked config is not rewritten and refused: the
+switch rewrites a committed-mode config or one that declares an older `specVersion`,
+and an already-local config with no `specVersion` is kept as written. Local adopters
+run `init --switch-to-local` and the removal commands it prints before ordinary `init`.
+
 ### Not in ledger mode
 
 Import is unsupported when the target's `idAllocation` is `"ledger"` (SPEC §3.1).

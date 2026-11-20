@@ -208,6 +208,17 @@ config (§8.3), so milestones and scales can evolve without breaking the archive
 has since gone `inactive` (or left the roster) does not invalidate the archive —
 though the stored value must still be a syntactically valid handle (§7.2).
 
+**Closed items from before adoption (optional).** A repo that adopts Trellis in place
+may have an archive older than these rules. When the config sets `legacy` (§7), a
+completed or removed item **qualifies** when its id is at or below `legacy.through`
+and its close date is a real calendar date strictly before `legacy.closedBefore`. A
+qualifying item may omit `summary`, `milestone`, `priority` and `effort`. Everything
+else is still required: `id`, `title`, `status`, `depends_on`, the close date and
+`removed_reason`. In a repo with `legacy`, a blank value (an empty or whitespace-only
+string, quoted or not) counts as missing on every completed and removed item, so a
+non-qualifying item with a blank value fails as if the field were absent. Active
+items are validated as always. A repo without `legacy` is unchanged.
+
 ### 5.2 Body
 
 The body is free-form. Recommended sections are **Scope**, **Notes**, and
@@ -270,7 +281,9 @@ custom **effort scale** for display.
   a label to its number; an unresolvable or ambiguous value is an error.
 - `backlog.json` ALWAYS carries the resolved canonical number plus the resolved
   `effortLabel`, and `effortEmoji`/`effortImage` when present — so consumers
-  render without reading the config.
+  render without reading the config. The one exception is a qualifying closed item
+  under `legacy` (§5.1) that omits `effort`: it has no resolved number, so
+  `backlog.json` carries `null` and no label, emoji or image (§8.2).
 
 ### 6.3 Rendering
 
@@ -280,6 +293,8 @@ custom **effort scale** for display.
 - `label` doubles as the accessible text/alt for any `image`. SVG or emoji are
   preferred; images are optional and live under `<tasksDir>/assets/effort/`
   (default `trellis/assets/effort/`).
+- A qualifying closed item under `legacy` (§5.1) may omit any of `summary`,
+  `milestone`, `priority` and `effort`; its table cell is then empty.
 - The array form `effort: [1, 2, 3, 5, 8, 13, 21]` is shorthand for
   `{ "values": [ … ], "scale": "fibonacci" }` and remains valid.
 
@@ -308,12 +323,25 @@ custom **effort scale** for display.
 | `idAllocation` | optional; `"scan"` (default) or `"ledger"` (§3.1). Ledger mode requires a plain `idPrefix` (`^[A-Za-z][A-Za-z0-9]*$`) and `idWidth` of at most 9 |
 | `idLedgerRef` | optional; the ledger ref, under `refs/trellis/` and valid per `git check-ref-format`; defaults to `refs/trellis/ids` |
 | `generatedArtifacts` | optional; `"committed"` (default) or `"local"` (§8.5). Any other value is a validation error |
+| `legacy` | optional object with exactly two required keys, `through` and `closedBefore` (below). Requires a plain `idPrefix` (`^[A-Za-z][A-Za-z0-9]*$`) |
 | `nextIdFloor` | optional; floors the next organically-assigned id — `nextId` = max(floor, highest+1) — so hand-created tasks begin above a reserved band (must fit `idWidth`) |
 
 `tasksDir` locates the task tree and the generated artifacts; omit it to accept
 the `trellis/` default. The config file itself stays at `trellis/backlog.config.json`
 regardless (§2) — its location is **not** governed by `tasksDir`, so the spec
 example above omits the key.
+
+`legacy` lets a long-lived backlog adopt Trellis in place without inventing history
+for closed items that predate it (§5.1). `through` is a full id in the repo's format
+(for example `AB0388`): the highest id that existed at adoption. `closedBefore` is a
+real calendar date (`YYYY-MM-DD`, so `2026-02-31` is an error), exclusive: the
+adoption date, the day of the commit that adds `legacy`. Any other key, a `null`
+value or a non-object is a config error. Set both once, at adoption: any item closed
+on or after `closedBefore`, including same-day closures before the cutover, must
+carry the full snapshot, and setting `closedBefore` to the next day reopens that
+same-day gap. Raising `through` to silence new errors defeats the rule. The plain
+`idPrefix` requirement keeps the id scan unambiguous: a prefix such as `T.P` or `T+P`
+would be read as pattern syntax.
 
 `nextIdFloor` reserves the low id range: when set, the next organically-assigned id
 is `max(nextIdFloor, highest-existing + 1)`, so newly created tasks begin above a
@@ -421,6 +449,10 @@ Every entry carries the descriptive metadata (`milestone`, `summary`,
 entries add `completed_on`; removed entries add `removed_on` and `removed_reason`.
 Effort label/emoji/image fields appear when a scale is active.
 
+Under `legacy` (§5.1), `milestone`, `summary`, `priority` and `effort` are nullable on
+a qualifying closed entry: a missing or blank value is `null`, `effort` included, and
+the effort label, emoji and image fields are omitted when `effort` is missing.
+
 ### 8.3 Tooling contract
 
 A conforming generator MUST:
@@ -435,7 +467,10 @@ A conforming generator MUST:
    config or roster (a mismatch MAY warn). `owner`/`collaborators` MUST nonetheless
    be syntactically valid handles (§7.2) on **every** item — the closed-item
    exemption is from membership, not from being a handle. A malformed `team.json` is
-   a validation error regardless.
+   a validation error regardless. With `legacy` (§5.1, §7), a qualifying closed item
+   MAY omit the four descriptive fields, a blank value counts as missing on every
+   closed item, and a close date that is well-shaped but not a real calendar date is
+   an error on any completed or removed item.
 2. **Regenerate** deterministically. In committed mode (the default) that is
    `README.md` and the completed/removed indexes (each between its markers) and
    `backlog.json`. With `generatedArtifacts: "local"` (§8.5) it writes only the
@@ -519,6 +554,9 @@ artifact under `<tasksDir>/.generated/` and nothing generated is committed:
   `backlog.json` no longer exist, so a forge file view shows no index, and a
   consumer that read `backlog.json` from the default branch must run `trellis
   generate` first, or use the MCP `list_tasks` tool.
+- **Nulls.** `.generated/backlog.json` carries the same nulls and omissions for
+  qualifying closed items under `legacy` (§8.2), and the generated tables the same
+  empty cells.
 - **Migration.** `trellis init --switch-to-local` moves a committed-mode repo over:
   it strips the generated blocks from `README.md` and the index files, sets the
   config, and prints the `git rm` commands for the legacy generated files. It never
@@ -533,7 +571,9 @@ warns on a major mismatch between `specVersion` and the implemented spec.
 
 **2.5** (additive): the optional `idAllocation` and `idLedgerRef` config keys and
 the local id ledger (§3.1), and the optional `generatedArtifacts` config key with
-local generated artifacts (§8.5). Repos that omit them behave as in 2.4.
+local generated artifacts (§8.5), and the optional `legacy` config key, which lets
+closed items from before adoption omit the descriptive metadata (§5.1). Repos that
+omit them behave as in 2.4.
 
 ## 10. CI and branch protection
 
