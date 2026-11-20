@@ -12,9 +12,10 @@
 // future MCP tool (TRL0004) can share it.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, join, relative, isAbsolute } from "node:path";
+import { dirname, join, relative, isAbsolute, sep } from "node:path";
 import { execFileSync } from "node:child_process";
-import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, ledgerMarkerRe, loadConfig, loadRoster, readBacklog, generateArtifacts, attachEffortScale } from "./backlog.mjs";
+import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, GENERATED_DIR, ledgerMarkerRe, loadConfig, loadRoster, readBacklog, generateArtifacts, attachEffortScale, artifactSet, isLocalMode } from "./backlog.mjs";
+import { OutputRefused, outputPreflight, previewNextId, writeArtifactFiles } from "./local-output.mjs";
 
 // The config home is fixed at `trellis/backlog.config.json` (CONFIG_DIR),
 // independent of `tasksDir`. A fresh scaffold writes a config that omits
@@ -40,7 +41,7 @@ export const DEFAULTS = {
 };
 
 // Marked block appended to (or used to create) AGENTS.md.
-const AGENTS_MARKERS = ["<!-- BEGIN TRELLIS -->", "<!-- END TRELLIS -->"];
+export const AGENTS_MARKERS = ["<!-- BEGIN TRELLIS -->", "<!-- END TRELLIS -->"];
 
 // Process files copied verbatim from the Trellis install (sourceRoot). Their
 // value is the loop, not the exact command names; the AGENTS block below carries
@@ -72,15 +73,22 @@ function copySourcePath(sourceRoot, rel) {
 
 // The marker-based generated indexes (skeleton-then-filled), each paired with the
 // exact begin/end marker the core requires — the single source of truth shared by
-// the skeletons and the preflight check. Derived from the effective backlog root.
-const markerFiles = (root) => [
-  [`${root}/README.md`, MARKERS.milestones],
-  [`${root}/completed/index.md`, MARKERS.completed],
-  [`${root}/removed/index.md`, MARKERS.removed],
-];
+// the skeletons and the preflight check. Committed mode only; the paths come from
+// the one mode-aware artifact set (TRL0038).
+const posix = (rel) => rel.split(sep).join("/");
+const markerFiles = (targetRoot, root) => {
+  const [readme, completed, removed] = artifactSet(targetRoot, { tasksDir: root }).generated;
+  return [
+    [posix(readme.rel), MARKERS.milestones],
+    [posix(completed.rel), MARKERS.completed],
+    [posix(removed.rel), MARKERS.removed],
+  ];
+};
 
-// The four generated artifacts, produced by the core after the skeletons land.
-const generatedFiles = (root) => [...markerFiles(root).map(([rel]) => rel), `${root}/backlog.json`];
+// The generated artifacts, produced by the core after the skeletons land: the four
+// committed files, or the four under `.generated/` in local mode.
+const generatedFiles = (targetRoot, root, local) =>
+  artifactSet(targetRoot, { tasksDir: root, generatedArtifacts: local ? "local" : "committed" }).generated.map((e) => posix(e.rel));
 
 export function resolveOptions(opts = {}) {
   // `=== undefined` throughout, never `||` / `&& .length`: a value that was
@@ -119,7 +127,7 @@ export function validateOptions(o) {
 // (a usage error) must not prompt for scaffold vocabulary it will never use before it
 // reports the missing path. Pure (takes isTTY) so it is unit-testable without a terminal.
 export function shouldPromptVocab(opts, isTTY) {
-  if (opts.dryRun || "retireSource" in opts || !isTTY) return false;
+  if (opts.dryRun || "retireSource" in opts || opts.switchToLocal || !isTTY) return false;
   return !opts.prefix || !opts.milestones;
 }
 
@@ -194,8 +202,9 @@ function preflight(targetRoot, options, force) {
   // we overwrite these files with fresh skeletons, so the check doesn't apply —
   // matching `begin[\s\S]*?end` in fillMarkers, an out-of-order or wrong-section
   // or unterminated pair fails.
-  if (!force) {
-    for (const [rel, [begin, end]] of markerFiles(root)) {
+  // In local mode those files are author-owned and optional: nothing fills them.
+  if (!force && !isLocalMode(cfg)) {
+    for (const [rel, [begin, end]] of markerFiles(targetRoot, root)) {
       const abs = join(targetRoot, rel);
       if (!existsSync(abs)) continue;
       const text = readFileSync(abs, "utf8");
@@ -256,7 +265,7 @@ function readmeSkeleton() {
   );
 }
 
-function completedSkeleton() {
+export function completedSkeleton() {
   return markerSkeleton(
     MARKERS.completed,
     "Completed tasks",
@@ -265,7 +274,7 @@ function completedSkeleton() {
   );
 }
 
-function removedSkeleton() {
+export function removedSkeleton() {
   return markerSkeleton(
     MARKERS.removed,
     "Removed tasks",
@@ -299,7 +308,21 @@ jobs:
 `;
 }
 
-export function agentsBlock(o, root = DEFAULT_TASKS_DIR) {
+// The AGENTS.md bullet that says which files are generated, per mode. One renderer
+// owns both texts: `--switch-to-local` replaces the committed text with the local
+// one only on an exact match, so a hand-edited bullet is never overwritten (TRL0038).
+export function artifactBullet(root, mode = "committed") {
+  if (mode === "local") {
+    return `- The index and \`backlog.json\` are **generated** into the git-ignored
+  \`${root}/${GENERATED_DIR}/\` folder by \`npx @taprootio/trellis generate\`; no committed
+  file under \`${root}/\` is generated, so \`README.md\` and the index files are yours.`;
+  }
+  return `- \`${root}/README.md\`, \`${root}/backlog.json\`, and the
+  \`${root}/completed/index.md\` / \`${root}/removed/index.md\` indexes are
+  **generated** — never hand-edit between the \`BEGIN/END GENERATED\` markers.`;
+}
+
+export function agentsBlock(o, root = DEFAULT_TASKS_DIR, mode = "committed") {
   const [begin, end] = AGENTS_MARKERS;
   // A sample id (number 1, zero-padded to the repo's width) so the branch example
   // matches this repo's actual id format, not a hard-coded 4-digit one.
@@ -311,9 +334,7 @@ This repo uses [Trellis](https://github.com/taprootio/trellis) for a file-based
 backlog. Work items live in \`${root}/{active,completed/tasks,removed}/\` as
 Markdown files with YAML front-matter; ids are \`${o.prefix}\` + ${o.idWidth} digits.
 
-- \`${root}/README.md\`, \`${root}/backlog.json\`, and the
-  \`${root}/completed/index.md\` / \`${root}/removed/index.md\` indexes are
-  **generated** — never hand-edit between the \`BEGIN/END GENERATED\` markers.
+${artifactBullet(root, mode)}
 - Per-repo vocabulary (id prefix, milestones, priorities, effort) lives in
   \`trellis/backlog.config.json\` (the backlog root is \`trellis/\` by default;
   override it with a \`tasksDir\` key).
@@ -349,15 +370,18 @@ ${end}
 
 // Build the template files (everything except the generated artifacts, which the
 // core fills in afterward). Returns [{ rel, content }].
-function templateFiles(o, sourceRoot, root) {
+function templateFiles(o, sourceRoot, root, local = false) {
   const files = [
     { rel: CONFIG_REL, content: configContent(o) },
     { rel: TEAM_REL, content: teamContent() },
     { rel: `${root}/active/.gitkeep`, content: "" },
     { rel: `${root}/completed/tasks/.gitkeep`, content: "" },
-    { rel: `${root}/README.md`, content: readmeSkeleton() },
-    { rel: `${root}/completed/index.md`, content: completedSkeleton() },
-    { rel: `${root}/removed/index.md`, content: removedSkeleton() },
+    // Local mode: the README and index files are author-owned, so init never creates them.
+    ...(local ? [] : [
+      { rel: `${root}/README.md`, content: readmeSkeleton() },
+      { rel: `${root}/completed/index.md`, content: completedSkeleton() },
+      { rel: `${root}/removed/index.md`, content: removedSkeleton() },
+    ]),
     { rel: ".github/workflows/backlog.yml", content: workflowContent() },
   ];
   const warnings = [];
@@ -444,9 +468,12 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   // A kept config governs the backlog root via `tasksDir`; a fresh scaffold omits
   // it and defaults to `trellis/`. Every scaffolded tree path derives from this.
   const root = keepCfg ? tasksRootOf(existing.cfg) : DEFAULT_TASKS_DIR;
+  // Local mode needs an existing local config (a fresh scaffold is always committed).
+  const local = keepCfg && isLocalMode(existing.cfg);
+  const keptCfg = keepCfg ? existing.cfg : null;
 
   const actions = [];
-  const { files, warnings } = templateFiles(o, sourceRoot, root);
+  const { files, warnings } = templateFiles(o, sourceRoot, root, local);
   if (keepCfg && suppliedConflicts(opts, o)) {
     warnings.push(`existing backlog.config.json kept; its vocabulary governs (prefix \`${o.prefix}\`) — supplied flags ignored (use --force to overwrite)`);
   }
@@ -468,7 +495,7 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
 
   // AGENTS.md: create if absent, append the block if present without it, else skip.
   const agentsAbs = join(targetRoot, "AGENTS.md");
-  const block = agentsBlock(o, root);
+  const block = agentsBlock(o, root, local ? "local" : "committed");
   if (!existsSync(agentsAbs)) {
     actions.push({ rel: "AGENTS.md", content: `# AGENTS\n\n${block}`, action: "create" });
   } else {
@@ -486,7 +513,7 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   // from `errors` (it never blocks).
   const reconcile = scanReconcile(targetRoot, { root, importSource: importSourceRel(targetRoot, opts.import) });
 
-  return { options: o, resolved, actions, warnings, root, reconcile };
+  return { options: o, resolved, actions, warnings, root, reconcile, local, cfg: keptCfg };
 }
 
 // ---------------------------------------------------------------- apply
@@ -501,9 +528,9 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false } = {}, so
   // planScaffold only reads, so the target stays untouched through every check
   // below — a rejected run leaves nothing behind. It also resolves the options
   // (no need to resolve again here).
-  const { options, resolved, actions, warnings, root, reconcile } = planScaffold(targetRoot, opts, sourceRoot);
+  const { options, resolved, actions, warnings, root, reconcile, local, cfg: keptCfg } = planScaffold(targetRoot, opts, sourceRoot);
   summary.reconcile = reconcile; // advisory, populated even on a refusal (the CLI only prints it on success)
-  const GENERATED = generatedFiles(root); // artifact rel-paths under the effective backlog root
+  const GENERATED = generatedFiles(targetRoot, root, local); // artifact rel-paths under the effective backlog root
   summary.root = root; // surfaced so the CLI can point at the actual scaffold root
 
   // Reject malformed *supplied* flags before any write — even when a kept config
@@ -520,6 +547,19 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false } = {}, so
   if (preErrors.length) {
     summary.errors.push(...preErrors);
     return { options, summary };
+  }
+
+  // Local mode: the shared writer preflight (leftover marker, sound output paths, every
+  // output ignored and untracked) runs before anything is scaffolded. Init never edits
+  // `.gitignore`; the refusal prints the line to add.
+  if (local) {
+    try {
+      outputPreflight(targetRoot, keptCfg);
+    } catch (e) {
+      if (!(e instanceof OutputRefused)) throw e;
+      summary.errors.push(e.message);
+      return { options, summary };
+    }
   }
 
   summary.warnings.push(...warnings); // non-fatal (e.g. a missing copy source)
@@ -552,12 +592,18 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false } = {}, so
     if (genErrors.length) {
       summary.errors.push(`generate failed: ${genErrors.join("; ")}`);
     } else {
-      const { files, errors } = generateArtifacts(targetRoot, cfg, data);
+      const { files, errors } = generateArtifacts(targetRoot, cfg, data, local ? { nextIdOverride: previewNextId(targetRoot, cfg) } : undefined);
       if (errors.length) {
         summary.errors.push(`generate failed: ${errors.join("; ")}`);
       } else {
-        for (const f of files) writeFileSync(f.path, f.content);
-        summary.generated.push(...GENERATED);
+        try {
+          if (local) writeArtifactFiles(files);
+          else for (const f of files) writeFileSync(f.path, f.content);
+          summary.generated.push(...GENERATED);
+        } catch (e) {
+          if (!local) throw e;
+          summary.errors.push(`generate failed: ${e.message}`);
+        }
       }
     }
   }

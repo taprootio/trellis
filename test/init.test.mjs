@@ -5,12 +5,14 @@
 import { test } from "node:test";
 import { ledgerTest } from "./git-support.mjs";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, chmodSync, lstatSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
-import { applyScaffold, shouldPromptVocab } from "../src/init.mjs";
+import { applyScaffold, shouldPromptVocab, DEFAULTS } from "../src/init.mjs";
+import { testSeams as outputSeams, previewNextId } from "../src/local-output.mjs";
+import { initRefFormat } from "./git-support.mjs";
 import { seed, claim } from "../src/ledger.mjs";
 import { loadConfig, loadRoster, readBacklog, generateArtifacts } from "../src/backlog.mjs";
 
@@ -998,5 +1000,248 @@ test("init --force refuses when the existing config cannot be read", { skip: (pr
     assert.equal(r.status, 2);
     assert.match(r.stderr, /cannot check/);
     assert.match(readFileSync(cfgPath, "utf8"), /"ledger"/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ------------------------------------------------- local-mode init (TRL0038)
+const IGNORE = "trellis/.generated/\n";
+const GENERATED_NAMES = ["index.md", "completed.md", "removed.md", "backlog.json"];
+const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+const localConfig = (extra = {}) => ({ specVersion: "2.5", idPrefix: "TAP", idWidth: DEFAULTS.idWidth, milestones: DEFAULTS.milestones, priorities: DEFAULTS.priorities, effort: DEFAULTS.effort, generatedArtifacts: "local", ...extra });
+
+// A target holding only a local-mode config. `inGit: false` leaves it outside a work
+// tree; `ignore` is the .gitignore text (null writes none).
+function localInit({ inGit = true, ignore = IGNORE, cfg = {} } = {}) {
+  const root = realpathSync(tempRepo());
+  mkdirSync(join(root, "trellis"), { recursive: true });
+  writeFileSync(join(root, "trellis", "backlog.config.json"), JSON.stringify(localConfig(cfg), null, 2) + "\n");
+  if (inGit) git(root, ["init", "-q", ...initRefFormat, "-b", "main"]);
+  if (ignore !== null) writeFileSync(join(root, ".gitignore"), ignore);
+  return root;
+}
+// Every file and folder with its bytes, so "unchanged" compares the whole tree.
+function tree(root) {
+  const out = {};
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.name === ".git") continue;
+      const abs = join(d, e.name);
+      if (e.isDirectory()) { out[relative(root, abs)] = "<dir>"; walk(abs); }
+      else out[relative(root, abs)] = lstatSync(abs).isSymbolicLink() ? "<link>" : readFileSync(abs, "utf8");
+    }
+  };
+  walk(root);
+  return out;
+}
+const T = (root, ...p) => join(root, "trellis", ...p);
+const withShim = (fn) => {
+  const bin = realpathSync(mkdtempSync(join(tmpdir(), "trellis-shim-")));
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  writeFileSync(join(bin, "git"), `#!/bin/sh\nfor a in "$@"; do\n  if [ "$a" = "--show-prefix" ]; then echo "fatal: detected dubious ownership" >&2; exit 128; fi\ndone\nexec "${realGit}" "$@"\n`);
+  chmodSync(join(bin, "git"), 0o755);
+  const old = process.env.PATH;
+  process.env.PATH = `${bin}:${old}`;
+  try { return fn(); } finally { process.env.PATH = old; rmSync(bin, { recursive: true, force: true }); }
+};
+
+test("local init --import from a marker-free config with no .generated/ scaffolds, imports and writes .generated/", () => {
+  const root = localInit();
+  try {
+    const r = runInit(root, ["--import", legacySrc, "--profile", "taproot-ai-backlog"]);
+    assert.equal(r.status, 0, r.stderr);
+    for (const n of GENERATED_NAMES) assert.ok(existsSync(T(root, ".generated", n)), n);
+    assert.ok(readdirSync(T(root, "active")).some((f) => f.endsWith(".md")), "items imported");
+    const chk = spawnSync(process.execPath, [join(sourceRoot, "scripts", "backlog-readme.mjs"), "--check", "--target", root], { encoding: "utf8" });
+    assert.equal(chk.status, 0, chk.stderr);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("local init creates no README or index, and leaves existing ones as they are", () => {
+  const fresh = localInit();
+  const kept = localInit();
+  try {
+    assert.equal(runInit(fresh, []).status, 0);
+    for (const f of ["README.md", "completed/index.md", "removed/index.md", "backlog.json"]) assert.equal(existsSync(T(fresh, f)), false, f);
+    for (const n of GENERATED_NAMES) assert.ok(existsSync(T(fresh, ".generated", n)), n);
+
+    mkdirSync(T(kept, "completed"), { recursive: true });
+    mkdirSync(T(kept, "removed"));
+    writeFileSync(T(kept, "README.md"), "# Mine\n\nNo markers here.\n");
+    writeFileSync(T(kept, "completed", "index.md"), "Authored.\n");
+    writeFileSync(T(kept, "removed", "index.md"), "");
+    const before = ["README.md", "completed/index.md", "removed/index.md"].map((f) => readFileSync(T(kept, f), "utf8"));
+    assert.equal(runInit(kept, []).status, 0);
+    assert.deepEqual(["README.md", "completed/index.md", "removed/index.md"].map((f) => readFileSync(T(kept, f), "utf8")), before);
+  } finally { rmSync(fresh, { recursive: true, force: true }); rmSync(kept, { recursive: true, force: true }); }
+});
+
+test("local init never edits .gitignore, and the ignore line covers planning[old]", () => {
+  const line = "planning\\[old\\]/.generated/\n";
+  const root = localInit({ ignore: line, cfg: { tasksDir: "planning[old]" } });
+  try {
+    const r = runInit(root, []);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(join(root, ".gitignore"), "utf8"), line);
+    for (const n of GENERATED_NAMES) {
+      assert.ok(existsSync(join(root, "planning[old]", ".generated", n)), n);
+      assert.equal(spawnSync("git", ["-C", root, "check-ignore", "-q", "--no-index", "--", `./planning[old]/.generated/${n}`]).status, 0, n);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("local init refuses an unignored output, printing the line to add, and writes nothing", () => {
+  const negation = "trellis/.generated/*\n!trellis/.generated/backlog.json\n";
+  for (const [name, ignore, unignored] of [["no rule", null, /index\.md/], ["a negation exposing a later output", negation, /backlog\.json/]]) {
+    const root = localInit({ ignore });
+    try {
+      const before = tree(root);
+      const r = runInit(root, []);
+      assert.equal(r.status, 1, name);
+      assert.match(r.stderr, unignored, name);
+      assert.match(r.stderr, /^\s+trellis\/\.generated\/$/m, name);
+      assert.deepEqual(tree(root), before, name);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("local init refuses a tracked output and a non-regular output path (the latter also outside git)", { skip: process.platform === "win32" }, () => {
+  const tracked = localInit();
+  try {
+    mkdirSync(T(tracked, ".generated"));
+    writeFileSync(T(tracked, ".generated", "index.md"), "old\n");
+    git(tracked, ["add", "-f", "trellis/.generated/index.md"]);
+    const before = tree(tracked);
+    const r = runInit(tracked, []);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /tracked by git/);
+    assert.deepEqual(tree(tracked), before);
+  } finally { rmSync(tracked, { recursive: true, force: true }); }
+  for (const inGit of [true, false]) {
+    const root = localInit({ inGit });
+    try {
+      mkdirSync(T(root, ".generated", "index.md"), { recursive: true });
+      const before = tree(root);
+      const r = runInit(root, []);
+      assert.equal(r.status, 1, `inGit ${inGit}`);
+      assert.match(r.stderr, /not a regular file/);
+      assert.deepEqual(tree(root), before);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("local init succeeds outside a git work tree", () => {
+  const root = localInit({ inGit: false, ignore: null });
+  try {
+    const r = runInit(root, []);
+    assert.equal(r.status, 0, r.stderr);
+    for (const n of GENERATED_NAMES) assert.ok(existsSync(T(root, ".generated", n)), n);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the local AGENTS block names .generated/ and mentions no markers", () => {
+  const root = localInit();
+  try {
+    assert.equal(runInit(root, []).status, 0);
+    const text = readFileSync(join(root, "AGENTS.md"), "utf8");
+    assert.match(text, /trellis\/\.generated\//);
+    assert.doesNotMatch(text, /marker|BEGIN\/END GENERATED/i);
+    assert.match(text, /`gates`/, "the Loop contract table is still there");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+  // Committed mode keeps its text.
+  const committed = tempRepo();
+  try {
+    applyScaffold(committed, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.match(readFileSync(join(committed, "AGENTS.md"), "utf8"), /never hand-edit between the `BEGIN\/END GENERATED` markers/);
+  } finally { rmSync(committed, { recursive: true, force: true }); }
+});
+
+test("init --force on a local-mode repo is refused before any write", () => {
+  const root = localInit();
+  try {
+    const before = tree(root);
+    const r = runInit(root, ["--force"]);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /generatedArtifacts is "local"/);
+    assert.deepEqual(tree(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("local init refuses a leftover marker and writes nothing", () => {
+  const root = localInit();
+  try {
+    writeFileSync(T(root, "README.md"), "# B\n\n<!-- BEGIN GENERATED:MILESTONES -->\n<!-- END GENERATED:MILESTONES -->\n");
+    const before = tree(root);
+    const r = runInit(root, []);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /GENERATED:MILESTONES/);
+    assert.deepEqual(tree(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("local init writes all four outputs through writeArtifactFiles when .generated/ is absent", () => {
+  const root = localInit();
+  try {
+    let writes = 0;
+    outputSeams.beforeWrite = () => { writes++; };
+    const { summary } = applyScaffold(root, {}, {}, sourceRoot);
+    assert.deepEqual(summary.errors, []);
+    assert.equal(writes, 4);
+    assert.deepEqual(summary.generated, GENERATED_NAMES.map((n) => `trellis/.generated/${n}`));
+  } finally { outputSeams.beforeWrite = null; rmSync(root, { recursive: true, force: true }); }
+});
+
+for (const [mode, extra] of [["scan", {}], ["ledger", { idAllocation: "ledger" }]]) {
+  test(`local init refuses a real .generated/ holding a symlink or directory output, in ${mode} mode, with or without git`, { skip: process.platform === "win32" }, () => {
+    for (const inGit of [true, false]) for (const kind of ["symlink", "directory"]) {
+      const root = localInit({ inGit, cfg: extra });
+      try {
+        mkdirSync(T(root, ".generated"));
+        if (kind === "symlink") { writeFileSync(join(root, "elsewhere.md"), "x\n"); symlinkSync(join(root, "elsewhere.md"), T(root, ".generated", "backlog.json")); }
+        else mkdirSync(T(root, ".generated", "backlog.json"));
+        const before = tree(root);
+        const r = runInit(root, []);
+        assert.notEqual(r.status, 0, `${kind} inGit ${inGit}`);
+        assert.deepEqual(tree(root), before, `${kind} inGit ${inGit}`);
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }
+  });
+}
+
+ledgerTest("local ledger init writes the ledger preview into .generated/backlog.json, and null without the ref", () => {
+  const root = localInit({ cfg: { idAllocation: "ledger" } });
+  try {
+    let r = runInit(root, []);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readJson(T(root, ".generated", "backlog.json")).nextId, null, "no ref yet");
+
+    const { cfg } = loadConfig(root);
+    seed(root, cfg);
+    const expected = previewNextId(root, cfg);
+    assert.match(expected, /^TAP\d+$/);
+    r = runInit(root, []);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readJson(T(root, ".generated", "backlog.json")).nextId, expected);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("local init --dry-run lists the local set and writes nothing", () => {
+  const root = localInit();
+  try {
+    const before = tree(root);
+    const r = runInit(root, ["--dry-run"]);
+    assert.equal(r.status, 0, r.stderr);
+    for (const n of GENERATED_NAMES) assert.match(r.stdout, new RegExp(`trellis/\\.generated/${n.replace(".", "\\.")}`));
+    assert.doesNotMatch(r.stdout, /trellis\/README\.md/);
+    assert.deepEqual(tree(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a forced git discovery error makes local init refuse with the target unchanged", { skip: process.platform === "win32" }, () => {
+  const root = localInit();
+  try {
+    const before = tree(root);
+    const { summary } = withShim(() => applyScaffold(root, {}, {}, sourceRoot));
+    assert.match(summary.errors.join(), /dubious ownership/);
+    assert.deepEqual(tree(root), before);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

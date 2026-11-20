@@ -15,7 +15,7 @@ import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
-import { applyImport, assertNotLedgerMode, assertNoLeftoverMarkers, ImportRefused } from "../src/import.mjs";
+import { applyImport, assertNotLedgerMode, assertNotLocalMode, assertNoLeftoverMarkers, ImportRefused } from "../src/import.mjs";
 import { loadConfig } from "../src/backlog.mjs";
 import { LedgerError, refuseSymlinkedArtifacts, artifactPaths } from "../src/ledger.mjs";
 import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
@@ -39,7 +39,7 @@ Flags:
   --retire-source <p>   history-preservingly git-rm an imported source tree at <p>
                         (a separate, later step — see below; cannot combine with --import)
   --force               overwrite existing files instead of skipping (refused when the
-                        existing config has idAllocation "ledger")
+                        existing config has idAllocation "ledger" or generatedArtifacts "local")
   --dry-run             report what would change without writing
   -h, --help            show this help
 
@@ -274,6 +274,9 @@ if ("retireSource" in opts) {
 // are refused before anything is scaffolded, by reading the existing config first.
 if (opts.force || opts.import) {
   try {
+    // `init --force` would replace a local config with a committed one and overwrite the
+    // author-owned README and index files (TRL0038).
+    if (opts.force) assertNotLocalMode(targetRoot, "init --force", "it would replace the config, fall back to committed mode and overwrite the author-owned README and index files");
     if (opts.import) {
       assertNotLedgerMode(targetRoot, "init --import");
       // A local-mode target with a leftover marker is refused before init scaffolds anything.
