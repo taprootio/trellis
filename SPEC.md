@@ -592,6 +592,7 @@ corrupt bytes, so it may now fail `check` until regenerated, even without `legac
 Upgrading repos rerun `trellis generate`. If an old `$&`, `` $` `` or `$'` expansion
 nested a second generated marker pair inside the block, first restore one clean
 marker pair, keeping the authored text, and then rerun `trellis generate`.
+2.5 ships in package release 0.3.0.
 
 ## 10. CI and branch protection
 
