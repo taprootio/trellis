@@ -1274,3 +1274,13 @@ test("a qualifying item with a retired effort label and an old _effortLabel keep
     for (const k of ["effortLabel", "effortEmoji", "effortImage"]) assert.equal(k in t, false, k);
   } finally { cleanup(root); }
 });
+
+test("summary: 0 still fails on a qualifying item and on a non-qualifying one in a legacy repo", () => {
+  for (const id of ["TAP0002", "TAP0005"]) {
+    const root = legacyRoot(TAP_CFG, { fixture: false });
+    try {
+      putItem(root, "completed", id, closed("completed", "2026-06-01", { ...FULL, summary: 0 }));
+      assert.ok(legacyErrors(root).some((e) => e.includes("missing `summary`")), id);
+    } finally { cleanup(root); }
+  }
+});

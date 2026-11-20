@@ -625,7 +625,11 @@ function makeValidators(cfg, roster, ids) {
   const blank = (v) => typeof v === "string" && !v.trim();
   const missing = (v) => v === undefined || v === "" || (legacy && blank(v));
   const checkHistorical = (it, err, qualifies = false) => {
-    if (qualifies) return;
+    if (qualifies) {
+      // A qualifying item may omit or blank `summary`, but a falsy non-blank value such as 0 still fails.
+      if (it.summary !== undefined && !it.summary && !blank(it.summary)) err("missing `summary`");
+      return;
+    }
     if (!it.summary || (legacy && blank(it.summary))) err("missing `summary`");
     if (missing(it.milestone)) err("missing `milestone`");
     if (missing(it.priority)) err("missing `priority`");
