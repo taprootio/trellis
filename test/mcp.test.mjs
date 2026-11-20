@@ -668,6 +668,71 @@ test("a symlinked artifact keeps its link, and a link with no target yet gets on
   } finally { c.cleanup(); }
 });
 
+test("a symlink target with a symlinked folder and `..` is resolved natively", () => {
+  const c = ledgerRepo();
+  try {
+    // trellis/linkdir -> real/deep, so `linkdir/../shared.json` means real/shared.json.
+    const deep = join(c.root, "real", "deep");
+    mkdirSync(deep, { recursive: true });
+    symlinkSync(deep, join(c.root, "trellis", "linkdir"));
+    const link = join(c.root, "trellis", "backlog.json");
+    rmSync(link);
+    symlinkSync("linkdir/../shared.json", link);
+    createTask(c.root, VALID);
+    assert.ok(lstatSync(link).isSymbolicLink());
+    assert.match(readFileSync(join(c.root, "real", "shared.json"), "utf8"), /DEMO0001/);
+    assert.equal(existsSync(join(c.root, "trellis", "shared.json")), false, "not resolved lexically");
+  } finally { c.cleanup(); }
+});
+
+test("staging never writes through a symlink planted at a staging name", () => {
+  const c = ledgerRepo();
+  try {
+    const victim = join(c.root, "victim.txt");
+    writeFileSync(victim, "keep");
+    // Plant the name the old counter-based scheme would have picked.
+    for (let i = 0; i < 50; i++) {
+      for (const ext of ["tmp", "bak"]) {
+        for (const a of ["README.md", "backlog.json"]) symlinkSync(victim, join(c.root, "trellis", `.${a}.${process.pid}-${i.toString(36)}.${ext}`));
+      }
+    }
+    createTask(c.root, VALID);
+    assert.equal(readFileSync(victim, "utf8"), "keep");
+    assertCheckClean(c.root);
+  } finally { c.cleanup(); }
+});
+
+test("a backup that cannot be restored is kept and named in the error", () => {
+  const c = ledgerRepo();
+  try {
+    const hook = {
+      afterArtifactRename: (p, n) => {
+        if (n !== 0) return;
+        // Block the restore: the live path becomes a non-empty directory.
+        rmSync(p, { force: true });
+        mkdirSync(p);
+        writeFileSync(join(p, "x"), "x");
+        throw new Error("boom");
+      },
+    };
+    let err;
+    try { createTask(c.root, VALID, hook); } catch (e) { err = e; }
+    assert.ok(err, "create_task fails");
+    const m = /backups kept at: (\S+)/.exec(err.message);
+    assert.ok(m, "the error names the backup");
+    assert.ok(readFileSync(m[1], "utf8").length > 0, "the kept backup still holds the original bytes");
+  } finally { c.cleanup(); }
+});
+
+test("create_task in ledger mode checks depends_on ids before claiming", () => {
+  const c = ledgerRepo();
+  try {
+    const t = refTip(c.root);
+    throwsTrellis(() => createTask(c.root, { ...VALID, depends_on: ["DEMO0099"] }), "invalid_request");
+    assert.equal(refTip(c.root), t, "no id was claimed");
+  } finally { c.cleanup(); }
+});
+
 test("a write failure after the item file is opened removes the partial item and keeps the claim", () => {
   const c = ledgerRepo();
   try {

@@ -16,9 +16,10 @@
 
 import {
   readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, openSync, closeSync, renameSync, copyFileSync,
-  lstatSync, statSync, chmodSync, readlinkSync,
+  lstatSync, statSync, readlinkSync, realpathSync, fchmodSync,
 } from "node:fs";
-import { join, relative, dirname, basename, resolve, isAbsolute } from "node:path";
+import { randomBytes } from "node:crypto";
+import { join, relative, dirname, basename, isAbsolute } from "node:path";
 import {
   loadConfig,
   readBacklog,
@@ -245,20 +246,51 @@ function writeArtifacts(repoRoot, cfg, data, hooks = {}) {
 }
 
 // Follows a symlinked artifact to where its bytes live, so the link survives the
-// replace. A dangling link resolves to its (not yet existing) target.
+// replace. Resolution is native (the OS follows each link before applying `..`),
+// because a lexical path.resolve would collapse `..` across a symlinked folder.
+// A dangling link resolves to its not-yet-existing target inside a real folder.
+const native = (p) => realpathSync.native(p);
 function resolveDestination(path) {
   let cur = path;
   for (let i = 0; i < 40; i++) {
     let st;
-    try { st = lstatSync(cur); } catch (e) { if (e.code === "ENOENT") return cur; throw e; }
-    if (!st.isSymbolicLink()) return cur;
-    cur = resolve(dirname(cur), readlinkSync(cur));
+    try { st = lstatSync(cur); } catch (e) {
+      if (e.code === "ENOENT") return join(native(dirname(cur)), basename(cur));
+      throw e;
+    }
+    if (!st.isSymbolicLink()) return join(native(dirname(cur)), basename(cur));
+    try { return native(cur); } catch (e) { if (e.code !== "ENOENT") throw e; }
+    const target = readlinkSync(cur);
+    const raw = isAbsolute(target) ? target : `${native(dirname(cur))}/${target}`;
+    cur = join(native(dirname(raw)), basename(raw));
   }
   throw new TrellisError(`too many symlinks resolving ${path}`, "generate_failed");
 }
 
-let stageSeq = 0;
-const stageName = (dest, ext) => join(dirname(dest), `.${basename(dest)}.${process.pid}-${(stageSeq++).toString(36)}.${ext}`);
+// Creates a staging or backup file that did not exist, so a path an attacker or an
+// earlier run left behind (even a symlink) is never written through.
+function reserveStage(dest, ext, mode) {
+  for (let i = 0; i < 20; i++) {
+    const name = join(dirname(dest), `.${basename(dest)}.${process.pid}-${randomBytes(6).toString("hex")}.${ext}`);
+    try {
+      return { name, fd: openSync(name, "wx", mode) };
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+  }
+  throw new TrellisError(`could not reserve a staging file beside ${dest}`, "generate_failed");
+}
+
+function stageFile(dest, ext, content, mode) {
+  const { name, fd } = reserveStage(dest, ext, 0o600);
+  try {
+    writeFileSync(fd, content);
+    fchmodSync(fd, mode);
+  } finally {
+    closeSync(fd);
+  }
+  return name;
+}
 
 // Ledger-mode artifact write (TRL0037). A claimed id cannot be released, so the
 // write must either land whole or leave every artifact as it was. Each new file is
@@ -278,27 +310,34 @@ function writeArtifactsStaged(repoRoot, files, next, hooks) {
   const installed = [];
   try {
     for (const e of plan) {
-      e.temp = stageName(e.dest, "tmp");
-      writeFileSync(e.temp, e.f.content);
-      if (e.exists) chmodSync(e.temp, statSync(e.dest).mode & 0o7777);
+      const mode = e.exists ? statSync(e.dest).mode & 0o7777 : 0o666 & ~process.umask();
+      e.temp = stageFile(e.dest, "tmp", e.f.content, mode);
     }
     for (const e of plan) {
-      if (e.exists) {
-        e.backup = stageName(e.dest, "bak");
-        copyFileSync(e.dest, e.backup);
-      }
+      if (e.exists) e.backup = stageFile(e.dest, "bak", readFileSync(e.dest), statSync(e.dest).mode & 0o7777);
       renameSync(e.temp, e.dest);
+      e.temp = null;
       installed.push(e);
       if (hooks.afterArtifactRename) hooks.afterArtifactRename(e.dest, installed.length - 1);
     }
   } catch (err) {
+    // A backup that cannot be put back is the only copy of the original, so it is
+    // kept and named in the error instead of being deleted.
+    const kept = [];
     for (const e of installed.reverse()) {
-      try { e.backup ? renameSync(e.backup, e.dest) : rmSync(e.dest, { force: true }); } catch { /* best-effort restore */ }
+      try {
+        if (e.backup) renameSync(e.backup, e.dest); else rmSync(e.dest, { force: true });
+      } catch {
+        if (e.backup) { kept.push(`${e.backup} (original of ${e.dest})`); e.backup = null; }
+      }
     }
     for (const e of plan) {
       for (const leftover of [e.temp, e.backup]) {
         if (leftover) { try { rmSync(leftover, { force: true }); } catch { /* best-effort */ } }
       }
+    }
+    if (kept.length) {
+      throw new TrellisError(`${err.message}; could not restore every artifact, backups kept at: ${kept.join(", ")}`, "generate_failed");
     }
     throw err;
   }
@@ -424,6 +463,9 @@ export function createTask(repoRoot, args = {}, hooks = {}) {
   // A claimed id is never released, so in ledger mode every input the re-read would
   // reject is checked before claiming, not after.
   if (ledgerMode) {
+    for (const d of depends_on) {
+      if (!data.ids.has(d)) throw new TrellisError(`depends_on ${d} is not a known task id`, "invalid_request");
+    }
     if (!cfg.milestones.includes(milestone)) throw new TrellisError(`milestone must be one of ${cfg.milestones.join(", ")}`, "invalid_request");
     if (!cfg.priorities.includes(priority)) throw new TrellisError(`priority must be one of ${cfg.priorities.join(", ")}`, "invalid_request");
   }

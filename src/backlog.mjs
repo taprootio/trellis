@@ -146,10 +146,11 @@ export function loadConfig(repoRoot) {
 // `idAllocation` is "scan" (default) or "ledger" (TRL0037). Ledger mode also
 // limits the prefix and width so ledger rows stay unambiguous and id math exact.
 function validateIdAllocation(cfg, errors) {
-  if (cfg.idAllocation != null && cfg.idAllocation !== "scan" && cfg.idAllocation !== "ledger") {
+  // A present key must be valid, so an explicit null is an error, not a default.
+  if (Object.hasOwn(cfg, "idAllocation") && cfg.idAllocation !== "scan" && cfg.idAllocation !== "ledger") {
     errors.push('config: `idAllocation` must be "scan" or "ledger" when present');
   }
-  if (cfg.idLedgerRef != null) {
+  if (Object.hasOwn(cfg, "idLedgerRef")) {
     const problem = ledgerRefProblem(cfg.idLedgerRef);
     if (problem) errors.push(`config: \`idLedgerRef\` ${problem}`);
   }

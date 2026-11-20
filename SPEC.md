@@ -112,8 +112,8 @@ ref and compatible `idPrefix`, `idWidth` and `tasksDir`. Ledger mode needs a pla
 prefix (letters and digits) and an `idWidth` of at most 9. Sparse checkouts,
 symlinked task folders and a served root that is not the worktree root are refused.
 Import is unsupported in ledger mode: import first, then switch and seed. Ledger
-operations need git 2.44.1 or later with the `files` ref format; `check` never
-runs git.
+operations need git 2.44.1 or later, excluding 2.45.0 (it ignores
+`GIT_NO_LAZY_FETCH`), with the `files` ref format; `check` never runs git.
 
 **Cutover.** Upgrade and restart every CLI and MCP writer first, since an older
 Trellis ignores `idAllocation` and keeps scanning. Pause scan-mode writers until

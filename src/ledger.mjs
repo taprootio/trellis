@@ -29,6 +29,10 @@ const refuse = (message, code) => new LedgerError(message, code, 2);
 
 export const MAX_CLAIM_ATTEMPTS = 10;
 export const MIN_GIT_VERSION = "2.44.1";
+// 2.45.0 ignores GIT_NO_LAZY_FETCH, so it is excluded from the supported range.
+const EXCLUDED_GIT_VERSIONS = ["2.45.0"];
+// The reader buffers a whole git output; a ledger above this could not be read back.
+export const MAX_LEDGER_BYTES = 256 * 1024 * 1024;
 const LEDGER_FILE = "claims.tsv";
 const HEADER = "id\tdate\tkind\tbranch\ttitle";
 const KINDS = new Set(["seed", "claim", "through"]);
@@ -62,7 +66,7 @@ function runGit(args, { cwd, input, env } = {}) {
     encoding: "utf8",
     input,
     env: gitEnv(env),
-    maxBuffer: 256 * 1024 * 1024,
+    maxBuffer: MAX_LEDGER_BYTES,
     stdio: ["pipe", "pipe", "pipe"],
   });
   if (r.error) {
@@ -101,11 +105,12 @@ function parseVersion(text) {
 }
 
 // True when `versionText` (the output of `git --version`) is at least `min`.
-// 2.44.1 is the first release that honors GIT_NO_LAZY_FETCH.
+// 2.44.1 is the first release that honors GIT_NO_LAZY_FETCH, and 2.45.0 regressed it.
 export function gitVersionSupported(versionText, min = MIN_GIT_VERSION) {
   const have = parseVersion(versionText);
   const need = parseVersion(min);
   if (!have) return false;
+  if (EXCLUDED_GIT_VERSIONS.includes(have.join("."))) return false;
   for (let i = 0; i < 3; i++) {
     if (have[i] !== need[i]) return have[i] > need[i];
   }
@@ -117,7 +122,7 @@ export function gitVersionSupported(versionText, min = MIN_GIT_VERSION) {
 export function probeGit(repoRoot) {
   const v = runGit(["--version"]);
   if (v.status !== 0 || !gitVersionSupported(v.stdout)) {
-    throw refuse(`the id ledger needs git ${MIN_GIT_VERSION} or later (found: ${firstLine(v.stdout || v.stderr)})`, "unsupported_git");
+    throw refuse(`the id ledger needs git ${MIN_GIT_VERSION} or later, except 2.45.0 (found: ${firstLine(v.stdout || v.stderr)})`, "unsupported_git");
   }
   const inside = runGit(["rev-parse", "--is-inside-work-tree"], { cwd: repoRoot });
   if (inside.status !== 0 || inside.stdout.trim() !== "true") {
@@ -132,7 +137,8 @@ export function probeGit(repoRoot) {
 // ------------------------------------------------------------- id helpers
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const refOf = (cfg) => cfg.idLedgerRef || DEFAULT_LEDGER_REF;
-const tasksParts = (cfg) => (cfg.tasksDir || DEFAULT_TASKS_DIR).split(/[\\/]/).filter(Boolean);
+// `.` segments are dropped so "./trellis" matches the paths git reports.
+const tasksParts = (cfg) => (cfg.tasksDir || DEFAULT_TASKS_DIR).split(/[\\/]/).filter((p) => p && p !== ".");
 const idNumber = (id, cfg) => Number(id.slice(cfg.idPrefix.length));
 
 // Matches a whole id. The prefix is escaped, so a scan config such as `R+` matches
@@ -187,6 +193,13 @@ function checkThrough(id, cfg) {
 const today = () => new Date().toISOString().slice(0, 10);
 
 // ------------------------------------------------------------ read ledger
+// An out-of-range date such as 2026-13-45 is an Invalid Date, which toISOString rejects.
+function validDate(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const d = new Date(`${date}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === date;
+}
+
 function parseClaims(text, cfg) {
   if (!text.endsWith("\n")) return { reason: "claims.tsv does not end with a newline" };
   const lines = text.slice(0, -1).split("\n");
@@ -199,7 +212,7 @@ function parseClaims(text, cfg) {
     if (f.length !== 5) return { reason: `${at} does not have five fields` };
     const [id, date, kind, branch, title] = f;
     if (!idRe.test(id)) return { reason: `${at} has an id that does not match ${cfg.idPrefix} + ${cfg.idWidth} digits` };
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) {
+    if (!validDate(date)) {
       return { reason: `${at} has a bad date` };
     }
     if (!KINDS.has(kind)) return { reason: `${at} has an unknown kind` };
@@ -221,8 +234,11 @@ export function readLedger(repoRoot, cfg) {
   }
   // Confirm absence before the exact lookup, so a ref published in between reads
   // as present and never as broken.
-  const exists = git(repoRoot, ["show-ref", "--exists", ref], { ok: [0, 2] });
+  const exists = runGit(["show-ref", "--exists", ref], { cwd: repoRoot });
   if (exists.status === 2) return { missing: true };
+  // Exit 1 means git rejects the ref itself (malformed), which is a broken ledger.
+  if (exists.status === 1) return { unusable: `${ref} is not a valid ref: ${firstLine(exists.stderr)}` };
+  if (exists.status !== 0) throw new LedgerError(`git show-ref --exists ${ref} failed: ${firstLine(exists.stderr)}`);
   const sha = runGit(["show-ref", "--verify", "--hash", ref], { cwd: repoRoot });
   const tip = sha.stdout.trim();
   if (sha.status !== 0 || !tip) return { unusable: `${ref} cannot be read` };
@@ -284,6 +300,15 @@ function branchOf(repoRoot) {
 // could then name different files. An absent component is fine (a clean clone has
 // no completed/tasks yet). Returns the status folders that exist as directories.
 function existingStatusDirs(worktree, cfg) {
+  try {
+    return walkStatusDirs(worktree, cfg);
+  } catch (e) {
+    if (e instanceof LedgerError) throw e;
+    throw new LedgerError(`cannot read the task folders of ${worktree}: ${e.message}`, "unsupported_layout", 2);
+  }
+}
+
+function walkStatusDirs(worktree, cfg) {
   const base = realpathSync.native(worktree);
   const dirs = [];
   for (const status of STATUS_FOLDERS) {
@@ -354,7 +379,13 @@ export function scanIds(worktree, cfg) {
   const disk = new Set();
   const fileRe = fileMatcher(cfg);
   for (const { dir } of existingStatusDirs(worktree, cfg)) {
-    for (const name of readdirSync(dir)) {
+    let names;
+    try {
+      names = readdirSync(dir);
+    } catch (e) {
+      throw new LedgerError(`cannot read ${dir}: ${e.message}`, "unsupported_layout", 2);
+    }
+    for (const name of names) {
       const m = name.match(fileRe);
       if (m) disk.add(m[1]);
     }
@@ -387,7 +418,7 @@ function sparseCheckoutOn(worktree) {
 // The refusals for layouts the scan cannot read faithfully. Applied by every
 // operation that allocates, and by preview. Returns each worktree with its scan.
 function scanClone(repoRoot, cfg) {
-  const top = runGit(["rev-parse", "--show-toplevel"], { cwd: repoRoot }).stdout.trim();
+  const top = runGit(["rev-parse", "--show-toplevel"], { cwd: repoRoot }).stdout.replace(/\n$/, "");
   if (!top || realpathSync.native(repoRoot) !== realpathSync.native(top)) {
     throw refuse(`${repoRoot} is not the root of its worktree (${top || "unknown"}); serve the worktree root`, "unsupported_layout");
   }
@@ -454,7 +485,10 @@ export function preview(repoRoot, cfg) {
 
 // ----------------------------------------------------------------- writing
 // Writes claims.tsv as a commit whose parent is `parent` (or none for a seed).
-function commitLedger(repoRoot, text, parent, message) {
+function commitLedger(repoRoot, text, parent, message, maxBytes = MAX_LEDGER_BYTES) {
+  if (Buffer.byteLength(text) >= maxBytes) {
+    throw refuse(`the id ledger would grow past ${maxBytes} bytes, which the reader cannot load; nothing was written`, "ledger_too_large");
+  }
   const blob = git(repoRoot, ["hash-object", "-w", "--stdin"], { input: text }).stdout.trim();
   const tree = git(repoRoot, ["mktree"], { input: `100644 blob ${blob}\t${LEDGER_FILE}\n` }).stdout.trim();
   const args = ["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", message];
@@ -472,13 +506,13 @@ const rowText = (r) => `${r.id}\t${r.date}\t${r.kind}\t${r.branch}\t${r.title}\n
 // Append one row with compare-and-swap and retry. `makeRow(ledger)` runs on every
 // attempt, against the freshly read tip. `beforeUpdate` is a test seam that runs
 // just before the swap, so a test can make a competing writer win.
-function appendRow(repoRoot, cfg, makeRow, { beforeUpdate, message }) {
+function appendRow(repoRoot, cfg, makeRow, { beforeUpdate, message, maxBytes }) {
   const ref = refOf(cfg);
   let lastError = "";
   for (let attempt = 1; attempt <= MAX_CLAIM_ATTEMPTS; attempt++) {
     const ledger = requireLedger(repoRoot, cfg);
     const row = makeRow(ledger);
-    const next = commitLedger(repoRoot, ledger.text + rowText(row), ledger.tip, `${message} ${row.id}`);
+    const next = commitLedger(repoRoot, ledger.text + rowText(row), ledger.tip, `${message} ${row.id}`, maxBytes);
     if (beforeUpdate) beforeUpdate({ attempt, ref });
     const r = moveRef(repoRoot, ref, next, ledger.tip, `${message} ${row.id}`);
     if (r.status === 0) return { row, tip: next, attempts: attempt };
@@ -492,7 +526,7 @@ function appendRow(repoRoot, cfg, makeRow, { beforeUpdate, message }) {
 }
 
 // Claims the next id. Returns `{id, tip, attempts}`.
-export function claim(repoRoot, cfg, { title, beforeUpdate } = {}) {
+export function claim(repoRoot, cfg, { title, beforeUpdate, maxBytes } = {}) {
   requireLedgerMode(cfg);
   requirePlainPrefix(cfg);
   const clean = ledgerTitle(title);
@@ -502,18 +536,18 @@ export function claim(repoRoot, cfg, { title, beforeUpdate } = {}) {
     kind: "claim",
     branch: branchOf(repoRoot),
     title: clean,
-  }), { beforeUpdate, message: "claim" });
+  }), { beforeUpdate, message: "claim", maxBytes });
   return { id: out.row.id, tip: out.tip, attempts: out.attempts };
 }
 
 // Appends a high-water mark: every id up to and including `id` counts as taken.
-export function through(repoRoot, cfg, id, { beforeUpdate } = {}) {
+export function through(repoRoot, cfg, id, { beforeUpdate, maxBytes } = {}) {
   requirePlainPrefix(cfg);
   checkThrough(id, cfg);
   const out = appendRow(repoRoot, cfg, () => {
     scanClone(repoRoot, cfg);
     return { id, date: today(), kind: "through", branch: "-", title: "-" };
-  }, { beforeUpdate, message: "through" });
+  }, { beforeUpdate, message: "through", maxBytes });
   return { id, tip: out.tip, attempts: out.attempts };
 }
 

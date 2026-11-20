@@ -551,6 +551,12 @@ test("idAllocation accepts scan and ledger and rejects anything else", () => {
   assert.ok(configErrors({ ...ARRAY_CFG, idAllocation: "local" }).some((e) => e.includes("idAllocation")));
 });
 
+test("a present idAllocation or idLedgerRef must be valid, so an explicit null is an error", () => {
+  assert.ok(configErrors({ ...ARRAY_CFG, idAllocation: null }).some((e) => e.includes("idAllocation")));
+  assert.ok(configErrors({ ...LEDGER_CFG, idLedgerRef: null }).some((e) => e.includes("idLedgerRef")));
+  assert.deepEqual(configErrors(ARRAY_CFG), [], "an absent key is still the default");
+});
+
 test("idLedgerRef must sit under refs/trellis/ and pass the ref-format rules", () => {
   assert.deepEqual(configErrors({ ...LEDGER_CFG, idLedgerRef: "refs/trellis/my-ids" }), []);
   const bad = [

@@ -258,6 +258,8 @@ test("seed titles are cleaned, and an unreadable or unsafe file gives '-' with t
   withClone(({ root, cfg }) => {
     const odd = item(root, "active", "DEMO0001", "Tab\there and\x01control");
     const hidden = item(root, "active", "DEMO0002");
+    // Root can read a mode-000 file, so only the other three cases hold for it.
+    const asRoot = process.getuid && process.getuid() === 0;
     chmodSync(hidden, 0o000);
     const stagedOnly = item(root, "active", "DEMO0003");
     git(root, "add", stagedOnly);
@@ -270,7 +272,8 @@ test("seed titles are cleaned, and an unreadable or unsafe file gives '-' with t
     const rows = list(root, cfg).rows;
     assert.deepEqual(rows.map((r) => r.id), ["DEMO0001", "DEMO0002", "DEMO0003", "DEMO0004"]);
     assert.equal(rows[0].title, "Tab here and control");
-    assert.deepEqual(rows.slice(1).map((r) => r.title), ["-", "-", "-"]);
+    if (!asRoot) assert.equal(rows[1].title, "-");
+    assert.deepEqual(rows.slice(2).map((r) => r.title), ["-", "-"]);
   });
 });
 
@@ -476,6 +479,7 @@ test("a bad row, tree or tip makes the ledger unusable and every write refuses",
     "bad id": HEADER + "TRL0001\t2026-11-19\tclaim\tmain\tt\n",
     "short id": HEADER + "DEMO001\t2026-11-19\tclaim\tmain\tt\n",
     "bad date": HEADER + "DEMO0001\t2026-02-30\tclaim\tmain\tt\n",
+    "date out of range": HEADER + "DEMO0001\t2026-13-45\tclaim\tmain\tt\n",
     "bad kind": HEADER + "DEMO0001\t2026-11-19\tmystery\tmain\tt\n",
     "empty title": HEADER + "DEMO0001\t2026-11-19\tclaim\tmain\t\n",
     "control in title": HEADER + "DEMO0001\t2026-11-19\tclaim\tmain\tt\x01\n",
@@ -552,6 +556,8 @@ test("the git version floor is 2.44.1", () => {
   assert.equal(gitVersionSupported("git version 2.39.3 (Apple Git-146)"), false);
   assert.equal(gitVersionSupported("git version 3.0.0"), true);
   assert.equal(gitVersionSupported("git version 2.45.1.windows.1"), true);
+  assert.equal(gitVersionSupported("git version 2.45.0"), false, "2.45.0 ignores GIT_NO_LAZY_FETCH");
+  assert.equal(gitVersionSupported("git version 2.45.0.windows.1"), false);
   assert.equal(gitVersionSupported("not git"), false);
 });
 
@@ -762,5 +768,83 @@ test("claim, seed and list leave unrelated refs and the working tree alone", () 
     assert.equal(after.join("\n"), before);
     assert.equal(git(root, "status", "--porcelain"), "");
     assert.ok(existsSync(join(root, "README.md")) && readFileSync(join(root, "README.md"), "utf8") === "x\n");
+  });
+});
+
+// ------------------------------------------------- external review round 1
+
+test("a tasksDir written as ./trellis still sees index-only and HEAD-only ids", () => {
+  withClone(({ root, cfg }) => {
+    const dotCfg = { ...cfg, tasksDir: "./trellis" };
+    const committed = item(root, "active", "DEMO0009");
+    git(root, "add", committed);
+    git(root, "commit", "-q", "-m", "item");
+    git(root, "rm", "-q", committed);
+    const staged = item(root, "active", "DEMO0007");
+    git(root, "add", staged);
+    rmSync(staged);
+    const scan = scanIds(root, dotCfg);
+    assert.deepEqual([...scan.index], ["DEMO0007"]);
+    assert.deepEqual([...scan.head], ["DEMO0009"]);
+    seed(root, dotCfg);
+    assert.equal(claim(root, dotCfg, { title: "next" }).id, "DEMO0010");
+  });
+});
+
+test("a ref file git cannot read makes the ledger unusable with git's message", () => {
+  withClone(({ root, cfg }) => {
+    mkdirSync(join(root, ".git", "refs", "trellis"), { recursive: true });
+    writeFileSync(join(root, ".git", "refs", "trellis", "ids"), "garbage\n");
+    assert.match(readLedger(root, cfg).unusable, /failed to look up reference/);
+    assertRefused(() => claim(root, cfg, { title: "x" }), "invalid_ledger");
+    assertRefused(() => seed(root, cfg), "invalid_ledger");
+    assert.equal(preview(root, cfg).nextId, null);
+    assert.equal(preview(root, cfg).reason, "invalid_ledger");
+  });
+});
+
+test("a served root whose path ends in a space is not refused", () => {
+  const dir = tmp("ledger-space");
+  try {
+    const root = join(dir, "spaced ");
+    mkdirSync(root);
+    git(root, "init", "-q", "-b", "main");
+    git(root, "config", "user.name", "Tester");
+    git(root, "config", "user.email", "tester@example.com");
+    writeFileSync(join(root, "README.md"), "x\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-q", "-m", "init");
+    seed(root, BASE_CFG);
+    assert.equal(claim(root, BASE_CFG, { title: "ok" }).id, "DEMO0001");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a task folder the scan cannot read is a layout refusal, not a crash", (t) => {
+  if (process.getuid && process.getuid() === 0) return t.skip("root can read a mode-000 folder");
+  withClone(({ root, cfg }) => {
+    seed(root, cfg);
+    const file = item(root, "active", "DEMO0001");
+    const dir = dirname(file);
+    chmodSync(dir, 0o000);
+    try {
+      const before = tip(root);
+      assertRefused(() => claim(root, cfg, { title: "x" }), "unsupported_layout");
+      assert.equal(tip(root), before);
+      const p = preview(root, cfg);
+      assert.equal(p.nextId, null);
+      assert.equal(p.reason, "unsupported_layout");
+    } finally { chmodSync(dir, 0o755); }
+  });
+});
+
+test("a claim that would outgrow the reader's buffer is refused before any write", () => {
+  withClone(({ root, cfg }) => {
+    seed(root, cfg);
+    claim(root, cfg, { title: "fits" });
+    const before = tip(root);
+    assertRefused(() => claim(root, cfg, { title: "too big", maxBytes: 50 }), "ledger_too_large");
+    assertRefused(() => through(root, cfg, "DEMO0500", { maxBytes: 50 }), "ledger_too_large");
+    assert.equal(tip(root), before);
+    assert.equal(claim(root, cfg, { title: "still fine" }).id, "DEMO0002");
   });
 });
