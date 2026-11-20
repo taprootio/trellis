@@ -710,3 +710,63 @@ test("--switch-to-local with --with-playbooks is a usage error and changes nothi
     assert.ok(r.stderr.includes("--switch-to-local"));
   } finally { f.cleanup(); }
 });
+
+// ------------------------------------------------- size limit (TRL0040)
+const LIMIT = 32768;
+// Pads AGENTS.md after its block, byte-exactly, and commits it so the switch can edit it.
+function padAgents(f, bytes) {
+  const path = join(f.root, "AGENTS.md");
+  const text = readFileSync(path, "utf8");
+  const pad = bytes - Buffer.byteLength(text);
+  assert.ok(pad > 1);
+  writeFileSync(path, text + "é".repeat((pad - 1) / 2 | 0) + "x".repeat(pad - 2 * ((pad - 1) / 2 | 0)));
+  assert.equal(readFileSync(path).length, bytes);
+  f.commit("pad AGENTS.md");
+}
+// The edit grows a full block by the difference between the two bullets.
+const GROWTH = Buffer.byteLength(artifactBullet("trellis", "local")) - Buffer.byteLength(artifactBullet("trellis", "committed"));
+
+test("an AGENTS.md edit that would cross the limit refuses with nothing changed, even as a dry run", () => {
+  const f = fixture();
+  try {
+    assert.ok(GROWTH > 0);
+    padAgents(f, LIMIT);
+    git(f.root, "--no-optional-locks", "status", "--porcelain");
+    for (const extra of [[], ["--dry-run"]]) {
+      const r = refusedWith(f.root, new RegExp(`${LIMIT + GROWTH} bytes.*${LIMIT}-byte`), extra);
+      assert.equal(commandsOf(r.stdout).length, 0, "no removal commands");
+      assert.match(r.stderr, /Trim AGENTS\.md/);
+    }
+  } finally { f.cleanup(); }
+});
+
+test("an edit that lands exactly on the limit proceeds", () => {
+  const f = fixture();
+  try {
+    padAgents(f, LIMIT - GROWTH);
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(join(f.root, "AGENTS.md")).length, LIMIT);
+  } finally { f.cleanup(); }
+});
+
+test("an AGENTS.md already over the limit warns and the switch proceeds", () => {
+  const f = fixture();
+  try {
+    padAgents(f, LIMIT + 100);
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stderr.includes("AGENTS.md") && r.stderr.includes(String(LIMIT)));
+    assert.ok(r.stderr.includes(String(LIMIT + 100)));
+    assert.ok(readFileSync(join(f.root, "AGENTS.md"), "utf8").includes(artifactBullet("trellis", "local")), "the bullet was still switched");
+  } finally { f.cleanup(); }
+});
+
+test("the closing message says to repeat the --skip flags", () => {
+  const f = fixture({ skip: ["ci"] });
+  try {
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stdout.includes("--skip"));
+  } finally { f.cleanup(); }
+});

@@ -10,7 +10,7 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { DEFAULT_TASKS_DIR, GENERATED_DIR, MARKERS, SPEC_VERSION, artifactSet, loadConfig, paths, validateConfig } from "./backlog.mjs";
-import { AGENTS_MARKERS, artifactBullet, completedSkeleton, removedSkeleton } from "./init.mjs";
+import { AGENTS_BYTE_LIMIT, AGENTS_MARKERS, artifactBullet, completedSkeleton, removedSkeleton } from "./init.mjs";
 import { OutputRefused, checkOutputFiles, discoverGit, foldsCase, gitPrefix, ignoreLineFor, installStaged, pathspec, probe, verifyOutputPaths } from "./local-output.mjs";
 
 // Test seam: runs before each file write (with its path and index) and after the last one.
@@ -270,7 +270,14 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
       const endsItem = at !== -1 && (block.length <= at + committed.length + 1 || (nextLine.trim() === "" ? !/^\s/.test(nextText) : /^[-*] /.test(nextLine)));
       if (at !== -1 && endsItem) {
         requireClean("AGENTS.md", "holds the Trellis block the switch updates");
-        edits.push({ path: agentsPath, rel: "AGENTS.md", before: text, after: text.slice(0, bi) + block.slice(0, at) + local + block.slice(at + committed.length) + text.slice(ei), why: "updated the generated-files bullet" });
+        const after = text.slice(0, bi) + block.slice(0, at) + local + block.slice(at + committed.length) + text.slice(ei);
+        // Codex reads at most AGENTS_BYTE_LIMIT bytes (TRL0040): never push the file across it.
+        const [was, will] = [Buffer.byteLength(text), Buffer.byteLength(after)];
+        if (will > AGENTS_BYTE_LIMIT && was <= AGENTS_BYTE_LIMIT) {
+          refuse(`the edit would make AGENTS.md ${will} bytes, over the ${AGENTS_BYTE_LIMIT}-byte limit Codex reads. Trim AGENTS.md, or edit the generated-files bullet by hand, then run again`);
+        }
+        if (will > AGENTS_BYTE_LIMIT) warnings.push(`AGENTS.md is ${was} bytes, already over the ${AGENTS_BYTE_LIMIT}-byte limit Codex reads. Trim it`);
+        edits.push({ path: agentsPath, rel: "AGENTS.md", before: text, after, why: "updated the generated-files bullet" });
       } else if (at !== -1 || !["full", "compact"].some((v) => findWholeLines(block, artifactBullet(root, "local", v)) !== -1)) {
         warnings.push(`AGENTS.md: the generated-files bullet in the Trellis block differs from Trellis's own text, so it was left alone. Edit it by hand to say the index is generated into ${root}/${GENERATED_DIR}/ and that no committed file is generated`);
       }

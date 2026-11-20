@@ -1935,3 +1935,108 @@ test("an import refused after the scaffold exits 2 without a stack trace", { ski
     assert.doesNotMatch(r.stderr, /\n\s+at /);
   } finally { rmSync(bin, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
+
+// ------------------------------------------------- size guard (TRL0040)
+// A block's AGENTS.md size grows one byte per `idWidth`, so a wide width lands a fresh
+// target's file exactly on the limit.
+const HEADING = "# AGENTS\n\n";
+const freshBytes = (idWidth) => Buffer.byteLength(HEADING + agentsBlock({ ...DEMO, idWidth }));
+function widthForBytes(target) {
+  let w = 1;
+  while (freshBytes(w) < target) w += Math.max(1, Math.floor((target - freshBytes(w)) / 2));
+  assert.equal(freshBytes(w), target, "a width that lands on the byte count");
+  return w;
+}
+// 32,600 bytes of AGENTS.md from multibyte text (fewer characters than bytes).
+const multibyteAgents = (bytes) => "é".repeat((bytes - 2) / 2) + "x\n";
+
+test("an AGENTS.md the block would push over the limit is left alone, the block is printed and the rest is written", () => {
+  const root = tempRepo();
+  try {
+    const cur = multibyteAgents(32600);
+    assert.equal(Buffer.byteLength(cur), 32600);
+    writeFileSync(agentsPath(root), cur);
+    const r = cliRun(root, ["--prefix", "DEMO"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(agentsPath(root), "utf8"), cur, "never written");
+    const block = agentsBlock(DEMO);
+    assert.ok(r.stdout.includes(block));
+    const needed = Buffer.byteLength(cur + "\n" + block);
+    const line = tokenLine(r.stderr, INIT_TOKENS.size);
+    assert.ok(line, "the size warning is on stderr");
+    assert.ok(line.includes(String(needed)) && line.includes(String(AGENTS_BYTE_LIMIT)));
+    assert.ok(tokenLine(r.stderr, INIT_TOKENS.carryOver));
+    assert.ok(!tokenLine(r.stderr, INIT_TOKENS.carryOver).includes(String(needed)), "the size path keeps its count on the size line");
+    assert.ok(existsSync(join(root, "trellis", "backlog.config.json")), "other files are written");
+    assertCheckClean(root);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the size guard counts bytes, not characters", () => {
+  const root = tempRepo();
+  try {
+    const cur = "é".repeat(20000);
+    assert.ok(cur.length < AGENTS_BYTE_LIMIT && Buffer.byteLength(cur) > AGENTS_BYTE_LIMIT);
+    // Already over before the block: the append is still printed, not written.
+    writeFileSync(agentsPath(root), cur);
+    const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.equal(summary.printed.length, 1);
+    assert.equal(summary.printed[0].reason, "size");
+    assert.equal(readFileSync(agentsPath(root), "utf8"), cur);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a result of exactly 32,768 bytes is written and 32,769 is printed, the heading counted on a create", () => {
+  const exact = tempRepo();
+  const over = tempRepo();
+  try {
+    const wExact = widthForBytes(AGENTS_BYTE_LIMIT);
+    const a = applyScaffold(exact, { prefix: "DEMO", idWidth: wExact }, {}, sourceRoot).summary;
+    assert.deepEqual(a.printed, []);
+    assert.equal(statSync(agentsPath(exact)).size, AGENTS_BYTE_LIMIT);
+
+    const b = applyScaffold(over, { prefix: "DEMO", idWidth: widthForBytes(AGENTS_BYTE_LIMIT + 1) }, {}, sourceRoot).summary;
+    assert.equal(b.printed.length, 1);
+    assert.equal(b.printed[0].bytesNeeded, AGENTS_BYTE_LIMIT + 1, "the reported count includes the # AGENTS heading");
+    assert.equal(existsSync(agentsPath(over)), false, "a create is never written either");
+  } finally { rmSync(exact, { recursive: true, force: true }); rmSync(over, { recursive: true, force: true }); }
+});
+
+test("a dry run of the size guard previews the block and leaves the target unchanged", () => {
+  const root = tempRepo();
+  try {
+    writeFileSync(agentsPath(root), multibyteAgents(32600));
+    const before = snapshotAll(root);
+    const r = cliRun(root, ["--prefix", "DEMO", "--dry-run"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(tokenLine(r.stdout, INIT_TOKENS.preview));
+    assert.ok(r.stdout.includes(agentsBlock(DEMO)));
+    assert.ok(tokenLine(r.stderr, INIT_TOKENS.size));
+    assert.deepEqual(snapshotAll(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("--skip agents leaves an oversize AGENTS.md alone and prints and warns nothing for it", () => {
+  const root = tempRepo();
+  try {
+    const cur = multibyteAgents(32600);
+    writeFileSync(agentsPath(root), cur);
+    const r = cliRun(root, ["--prefix", "DEMO", "--skip", "agents"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(agentsPath(root), "utf8"), cur);
+    assert.ok(!r.stdout.includes("<!-- BEGIN TRELLIS -->"));
+    assert.ok(!r.stderr.includes(INIT_TOKENS.size) && !r.stderr.includes(INIT_TOKENS.carryOver));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a size-guard block over 64 KiB reaches a pipe whole", () => {
+  const root = tempRepo();
+  try {
+    const r = cliRun(root, ["--prefix", "DEMO", "--id-width", "70000"]);
+    assert.equal(r.status, 0, r.stderr.slice(0, 500));
+    const block = agentsBlock({ ...DEMO, idWidth: 70000 });
+    assert.ok(block.length > 65536);
+    assert.ok(r.stdout.includes(block));
+    assert.equal(existsSync(agentsPath(root)), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

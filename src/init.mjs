@@ -615,10 +615,16 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   const parts = { ledger: !!keptCfg && keptCfg.idAllocation === "ledger", skip: omitted };
   const mode = local ? "local" : "committed";
   const block = byDetection ? compactBlock(o, root, mode, parts) : agentsBlock(o, root, mode, parts);
+  // A result over Codex's byte budget is printed for the owner instead of written.
+  const planAgents = (content, action) => {
+    const bytesNeeded = Buffer.byteLength(content);
+    if (bytesNeeded > AGENTS_BYTE_LIMIT) actions.push({ rel: "AGENTS.md", content: "", action: "print", reason: "size", block, bytesNeeded });
+    else actions.push({ rel: "AGENTS.md", content, action });
+  };
   if (omit.has("AGENTS.md")) {
     // No action: nothing is created, appended or printed for AGENTS.md.
   } else if (!existsSync(agentsAbs)) {
-    actions.push({ rel: "AGENTS.md", content: `# AGENTS\n\n${block}`, action: "create" });
+    planAgents(`# AGENTS\n\n${block}`, "create");
   } else {
     const cur = readFileSync(agentsAbs, "utf8");
     const [begin, end] = AGENTS_MARKERS;
@@ -633,7 +639,7 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
       actions.push({ rel: "AGENTS.md", content: "", action: "skip" });
     } else {
       const sep = cur.endsWith("\n") ? "\n" : "\n\n";
-      actions.push({ rel: "AGENTS.md", content: cur + sep + block, action: "append" });
+      planAgents(cur + sep + block, "append");
     }
   }
 
