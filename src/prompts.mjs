@@ -17,6 +17,16 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "./backlog.mjs";
 import { TrellisError } from "./mcp.mjs";
+import { ledgerIdMatcher } from "./ledger.mjs";
+import { detectGoodAgent } from "./init.mjs";
+
+// First-line tokens of the answer given when a prompt's playbook is absent (TRL0040).
+// The code emits them and the tests import them, so no test asserts prose.
+export const PROMPT_TOKENS = {
+  handoff: "[trellis:playbook-missing]",
+  noTemplate: "[trellis:no-template]",
+  prFlow: "[trellis:repo-pr-flow]",
+};
 
 // --------------------------------------------------------------- resources
 // The catalog. `rel` is the repo-relative file each `trellis://` uri serves; the
@@ -109,7 +119,7 @@ export const PROMPTS = [
   },
   {
     name: "pr-draft", title: "Draft a PR",
-    description: "Draft a copy-ready PR title and description that conform to the repo's PR template.",
+    description: "Draft a copy-ready PR title and description, following the repo's PR template when one exists.",
     playbook: "trellis/playbooks/pr-draft.md",
     arguments: [],
   },
@@ -140,8 +150,7 @@ function requireId(raw, cfg, cfgErrors) {
   const id = raw.trim();
   if (/[\r\n]/.test(id)) throw new TrellisError("`id` must be a single line", "invalid_request");
   if (!cfgErrors.length) {
-    const re = new RegExp(`^${cfg.idPrefix}\\d{${cfg.idWidth}}$`);
-    if (!re.test(id)) throw new TrellisError(`invalid task id: ${id} (expected ${cfg.idPrefix} + ${cfg.idWidth} digits)`, "invalid_request");
+    if (!ledgerIdMatcher(cfg).test(id)) throw new TrellisError(`invalid task id: ${id} (expected ${cfg.idPrefix} + ${cfg.idWidth} digits)`, "invalid_request");
   }
   return id;
 }
@@ -158,17 +167,38 @@ function instruction(name, args, cfg, cfgErrors) {
   return "Then draft the PR title and description by following the loop below, emitting the single copy-ready Markdown block it specifies.";
 }
 
+// The answer for a prompt whose playbook file is absent. A repo that runs good-agent gets
+// pointed at its skills; any other repo at `trellis init --with-playbooks`. It never embeds
+// a playbook body, and the work-task id is validated like the normal prompt's.
+function missingPlaybook(repoRoot, p, args, cfg, cfgErrors) {
+  const lines = [PROMPT_TOKENS.handoff];
+  const detected = detectGoodAgent(repoRoot);
+  if (p.name === "work-task") lines.push(`Task: **${requireId(args.id, cfg, cfgErrors)}**`);
+  if (!detected) {
+    lines.push(`The ${p.name} playbook (${p.playbook}) is absent from this repo. Run \`trellis init --with-playbooks\` to add it.`);
+  } else if (p.name === "pr-draft") {
+    lines.push(`Good-agent is detected (${detected}). Use its \`review-loop\` skill, and follow this repo's own PR flow (its AGENTS.md or CONTRIBUTING file). ${PROMPT_TOKENS.prFlow}`);
+  } else {
+    lines.push(`Good-agent is detected (${detected}). Use its \`write-task\`, \`work-task\` and \`review-loop\` skills.`);
+  }
+  if (p.name === "pr-draft" && !existsSync(join(repoRoot, ".github/pull_request_template.md"))) {
+    lines.push(`${PROMPT_TOKENS.noTemplate} No PR template exists in this repo; do not fill one.`);
+  }
+  return lines.join("\n");
+}
+
 // build_prompt — assemble one prompt's messages for this repo: a conventions
 // preamble + a per-prompt instruction + the repo's playbook body, embedded
 // verbatim so the prompt is self-contained on clients that don't resolve resource
-// links. Throws `not_found` if the backing playbook is missing in this repo.
+// links. When the backing playbook is missing, the answer is a short handoff instead.
 export function buildPrompt(repoRoot, name, args = {}) {
   const p = promptByName(name);
   const { cfg, errors: cfgErrors } = loadConfig(repoRoot);
 
   const abs = join(repoRoot, p.playbook);
   if (!existsSync(abs)) {
-    throw new TrellisError(`prompt ${name} needs ${p.playbook}, which is missing in this repo`, "not_found");
+    const text = missingPlaybook(repoRoot, p, args, cfg, cfgErrors);
+    return { description: p.description, messages: [{ role: "user", content: { type: "text", text } }] };
   }
   const playbook = readFileSync(abs, "utf8").replace(/\n*$/, "\n");
 

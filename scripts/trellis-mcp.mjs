@@ -185,8 +185,9 @@ function registerResources(server, defaultRoot) {
 // `trellis://…` resources, which resolve to `defaultRoot`; letting a prompt build
 // against a different repo would make those pointers reference the wrong repo's
 // conventions. Per-repo addressing across the whole surface (tools, prompts, AND
-// resources, with root scoping) is TRL0019. A failed build (bad id, missing
-// playbook) throws a TrellisError, which the SDK surfaces as the prompt's get error.
+// resources, with root scoping) is TRL0019. A failed build (bad id)
+// throws a TrellisError, which the SDK surfaces as the prompt's get error; a missing
+// playbook returns a short handoff instead (TRL0040).
 function registerPrompts(server, defaultRoot) {
   for (const p of PROMPTS) {
     const argsSchema = {};

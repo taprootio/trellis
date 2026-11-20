@@ -6,13 +6,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, symlinkSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync, readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
-import { listResources, readResource, buildPrompt, RESOURCES, PROMPTS } from "../src/prompts.mjs";
+import { listResources, readResource, buildPrompt, RESOURCES, PROMPTS, PROMPT_TOKENS } from "../src/prompts.mjs";
 import { TrellisError } from "../src/mcp.mjs";
 import { TOOLS } from "../scripts/trellis-mcp.mjs";
 
@@ -218,4 +218,91 @@ test("each packaged playbook and the branch-protection guide match their source 
       `templates/trellis/${rel} must equal trellis/${rel}`,
     );
   }
+});
+
+// ----------------------------------- playbooks absent (TRL0040)
+const PLAYBOOK_SEPARATOR = "--- playbook ---";
+const NAMES = ["work-task", "code-review", "pr-draft"];
+const argsFor = (name) => (name === "work-task" ? { id: "DEMO0001" } : {});
+// A scaffolded repo with every playbook removed, optionally detected and without a PR template.
+function bareRepo({ detected = false, template = true } = {}) {
+  const root = freshRepo();
+  rmSync(join(root, "trellis", "playbooks"), { recursive: true, force: true });
+  if (!template) rmSync(join(root, ".github", "pull_request_template.md"));
+  if (detected) writeFileSync(join(root, "good-agent.config.json"), "{}\n");
+  return root;
+}
+const textOf = (root, name, args = argsFor(name)) => buildPrompt(root, name, args).messages[0].content.text;
+
+test("a prompt with its playbook absent answers with a handoff, never a playbook body", () => {
+  for (const detected of [true, false]) {
+    for (const name of NAMES) {
+      const root = bareRepo({ detected });
+      try {
+        const text = textOf(root, name);
+        assert.equal(text.split("\n")[0], PROMPT_TOKENS.handoff);
+        assert.ok(!text.includes(PLAYBOOK_SEPARATOR));
+        if (detected) {
+          if (name === "pr-draft") {
+            assert.ok(text.includes("review-loop") && text.includes(PROMPT_TOKENS.prFlow));
+            assert.ok(!text.includes("write-task") && !text.includes("work-task"));
+          } else {
+            for (const skill of ["write-task", "work-task", "review-loop"]) assert.ok(text.includes(skill), skill);
+          }
+        } else {
+          assert.ok(text.includes("--with-playbooks"));
+          assert.ok(!text.includes(PROMPT_TOKENS.prFlow));
+        }
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }
+  }
+});
+
+test("the pr-draft handoff carries the no-template token exactly when the template is absent", () => {
+  for (const detected of [true, false]) {
+    for (const template of [true, false]) {
+      const root = bareRepo({ detected, template });
+      try {
+        assert.equal(textOf(root, "pr-draft").includes(PROMPT_TOKENS.noTemplate), !template);
+        assert.ok(!textOf(root, "code-review").includes(PROMPT_TOKENS.noTemplate));
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }
+  }
+});
+
+test("each prompt falls back on its own: a directory with only code-review.md still hands off work-task", () => {
+  const root = bareRepo({ detected: true });
+  try {
+    mkdirSync(join(root, "trellis", "playbooks"));
+    writeFileSync(join(root, "trellis", "playbooks", "code-review.md"), "# Playbook: code review\n");
+    assert.ok(textOf(root, "code-review").includes(PLAYBOOK_SEPARATOR), "the present playbook is embedded");
+    const text = textOf(root, "work-task");
+    assert.equal(text.split("\n")[0], PROMPT_TOKENS.handoff);
+    assert.ok(text.includes("write-task"));
+    // The id is validated like the normal prompt's, and a valid one is named.
+    assert.throws(() => textOf(root, "work-task", { id: "nope" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+    assert.ok(text.includes("DEMO0001"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the id check matches the prefix literally", () => {
+  const root = mkdtempSync(join(tmpdir(), "trellis-prompts-"));
+  try {
+    applyScaffold(root, { prefix: "R+" }, {}, sourceRoot);
+    assert.ok(textOf(root, "work-task", { id: "R+0001" }).includes("R+0001"));
+    assert.throws(() => textOf(root, "work-task", { id: "RR0001" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+    rmSync(join(root, "trellis", "playbooks"), { recursive: true });
+    assert.throws(() => textOf(root, "work-task", { id: "RR0001" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the pr-draft catalog description is template-neutral, and a present playbook is embedded as before", () => {
+  assert.doesNotMatch(PROMPTS.find((p) => p.name === "pr-draft").description, /conform to/);
+  const root = freshRepo();
+  try {
+    const text = textOf(root, "pr-draft");
+    assert.ok(text.includes(PLAYBOOK_SEPARATOR));
+    assert.ok(!text.includes(PROMPT_TOKENS.handoff));
+    assert.ok(text.includes(readFileSync(join(root, "trellis", "playbooks", "pr-draft.md"), "utf8").trimEnd()));
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
