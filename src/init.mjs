@@ -337,10 +337,19 @@ jobs:
 `;
 }
 
-// The AGENTS.md bullet that says which files are generated, per mode. One renderer
-// owns both texts: `--switch-to-local` replaces the committed text with the local
-// one only on an exact match, so a hand-edited bullet is never overwritten (TRL0038).
-export function artifactBullet(root, mode = "committed") {
+// The AGENTS.md bullet that says which files are generated, per mode and block variant.
+// One renderer owns every text: `--switch-to-local` replaces the committed text with the
+// local one only on an exact match, so a hand-edited bullet is never overwritten (TRL0038).
+// The compact variant belongs to the short block written for good-agent repos (TRL0040).
+export function artifactBullet(root, mode = "committed", variant = "full") {
+  if (variant === "compact") {
+    if (mode === "local") {
+      return `- The index and \`backlog.json\` are generated into the git-ignored \`${root}/${GENERATED_DIR}/\`
+  folder by \`npx @taprootio/trellis generate\`; no committed file is generated.`;
+    }
+    return `- The \`${root}/\` README and index tables are generated between the \`BEGIN/END GENERATED\` markers; never hand-edit them.
+  \`backlog.json\` is generated in full (it has no markers); the \`BEGIN GENERATED\` / \`END GENERATED\` markers apply only to the Markdown files.`;
+  }
   if (mode === "local") {
     return `- The index and \`backlog.json\` are **generated** into the git-ignored
   \`${root}/${GENERATED_DIR}/\` folder by \`npx @taprootio/trellis generate\`; no committed
@@ -351,11 +360,28 @@ export function artifactBullet(root, mode = "committed") {
   **generated** — never hand-edit between the \`BEGIN/END GENERATED\` markers.`;
 }
 
-export function agentsBlock(o, root = DEFAULT_TASKS_DIR, mode = "committed") {
+// The ledger-mode claim line (TRL0037), shared by both blocks. The full block makes it
+// its own bullet; the compact block uses it as a sentence.
+const CLAIM_LINE = 'Claim ids with `npx @taprootio/trellis claim --title "<one line>"`; never pick the next number by hand.';
+
+// `parts` shapes a block: `ledger` adds the claim line, `skip` is the list of `--skip`
+// part names (TRL0040). The defaults reproduce the original text byte for byte.
+export function agentsBlock(o, root = DEFAULT_TASKS_DIR, mode = "committed", { ledger = false, skip = [] } = {}) {
   const [begin, end] = AGENTS_MARKERS;
+  const has = (part) => !skip.includes(part);
   // A sample id (number 1, zero-padded to the repo's width) so the branch example
   // matches this repo's actual id format, not a hard-coded 4-digit one.
   const idExample = `${o.prefix.toLowerCase()}${String(1).padStart(o.idWidth, "0")}`;
+  const regenerate = `- After adding, moving, or editing an item, regenerate with \`npx @taprootio/trellis generate\`${has("ci") ? ";\n  CI runs \`npx @taprootio/trellis check\`." : "."}`;
+  const protectedBranch = (has("ci")
+    ? "- `main` is protected — work on a branch, open a PR, and let the backlog check\n  (the pinned `backlog` job) gate the merge."
+    : "- `main` is protected — work on a branch and open a PR.")
+    + (has("branch-protection") ? " Enable the gate with the recipe in\n  `trellis/branch-protection.md` (GitHub plus GitLab/Bitbucket/Azure DevOps)." : "");
+  const loopLead = has("playbooks")
+    ? `The playbooks in \`trellis/playbooks/\` are universal; they name **seam points** and
+read this repo's values from here. See \`trellis/playbooks/conventions.md\` for the
+contract, then set these to match your tooling:`
+    : "Set these seam points to match your tooling:";
   return `${begin}
 ## Backlog (Trellis)
 
@@ -363,26 +389,21 @@ This repo uses [Trellis](https://github.com/taprootio/trellis) for a file-based
 backlog. Work items live in \`${root}/{active,completed/tasks,removed}/\` as
 Markdown files with YAML front-matter; ids are \`${o.prefix}\` + ${o.idWidth} digits.
 
-${artifactBullet(root, mode)}
+${ledger ? `- ${CLAIM_LINE}\n` : ""}${artifactBullet(root, mode)}
 - Per-repo vocabulary (id prefix, milestones, priorities, effort) lives in
   \`trellis/backlog.config.json\` (the backlog root is \`trellis/\` by default;
   override it with a \`tasksDir\` key).
 - The team roster lives in \`trellis/team.json\` (members with a \`handle\`, \`name\`,
   optional \`email\`, and \`status\`). A task may set an optional \`owner\` (one handle)
   and \`collaborators\` (handles); on active items they must be active roster members.
-- After adding, moving, or editing an item, regenerate with \`npx @taprootio/trellis generate\`;
-  CI runs \`npx @taprootio/trellis check\`.
-- \`main\` is protected — work on a branch, open a PR, and let the backlog check
-  (the pinned \`backlog\` job) gate the merge. Enable the gate with the recipe in
-  \`trellis/branch-protection.md\` (GitHub plus GitLab/Bitbucket/Azure DevOps).
+${regenerate}
+${protectedBranch}
 - Commit messages and PR descriptions carry no AI/co-author attribution — never
   add \`Co-Authored-By:\` trailers or "Generated with …" footers.
 
 ### Loop contract
 
-The playbooks in \`trellis/playbooks/\` are universal; they name **seam points** and
-read this repo's values from here. See \`trellis/playbooks/conventions.md\` for the
-contract, then set these to match your tooling:
+${loopLead}
 
 | seam point | this repo's value |
 | --- | --- |
@@ -391,9 +412,7 @@ contract, then set these to match your tooling:
 | \`branch-naming\` | \`<initials>/<id-lowercase>/<slug>\` (e.g. \`ab/${idExample}/short-slug\`) |
 | \`gates\` | \`npx @taprootio/trellis check\` (plus this repo's tests/lint) |
 | \`attribution\` | none — no \`Co-Authored-By:\` trailers or "Generated with …" footers |
-
-See \`trellis/playbooks/\` for the work-a-task and code-review loops.
-${end}
+${has("playbooks") ? "\nSee `trellis/playbooks/` for the work-a-task and code-review loops.\n" : ""}${end}
 `;
 }
 
@@ -529,7 +548,7 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   // AGENTS.md: create if absent, append the block if present without it, else skip.
   // `--skip agents` leaves it out entirely.
   const agentsAbs = join(targetRoot, "AGENTS.md");
-  const block = agentsBlock(o, root, local ? "local" : "committed");
+  const block = agentsBlock(o, root, local ? "local" : "committed", { ledger: !!keptCfg && keptCfg.idAllocation === "ledger", skip: omitted });
   if (omit.has("AGENTS.md")) {
     // No action: nothing is created, appended or printed for AGENTS.md.
   } else if (!existsSync(agentsAbs)) {

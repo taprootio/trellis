@@ -1626,3 +1626,56 @@ test("--switch-to-local and --retire-source refuse --skip and --with-playbooks, 
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ------------------------------------------------ block variants (TRL0040)
+const CLAIM_RE = /npx @taprootio\/trellis claim --title/;
+// The AGENTS.md block `planScaffold` would append to an existing AGENTS.md without one.
+const plannedBlock = (root, opts = {}) => markedBlock(planScaffold(root, opts, sourceRoot).actions.find((a) => a.rel === "AGENTS.md").content);
+
+test("the claim line is its own bullet in a ledger config, and absent in scan mode", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    rmSync(join(root, "AGENTS.md"));
+    assert.doesNotMatch(plannedBlock(root), CLAIM_RE);
+    ledgerTarget(root);
+    const lines = plannedBlock(root).split("\n");
+    const at = lines.findIndex((l) => CLAIM_RE.test(l));
+    assert.ok(at > 0, "the claim line is present");
+    assert.ok(lines[at].startsWith("- "), "it starts its own bullet");
+    assert.ok(at < lines.findIndex((l) => /BEGIN\/END GENERATED/.test(l)), "it sits before the artifact bullet");
+    assert.equal(lines.filter((l) => CLAIM_RE.test(l)).length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a local config gets the .generated/ wording in the full block", () => {
+  const root = localInit();
+  try {
+    assert.match(plannedBlock(root), /trellis\/\.generated\//);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("--skip playbooks,branch-protection leaves no path to a skipped file in the block", () => {
+  const root = tempRepo();
+  try {
+    const { summary } = applyScaffold(root, { prefix: "DEMO", skip: ["playbooks", "branch-protection"] }, {}, sourceRoot);
+    assert.deepEqual(summary.omitted, ["playbooks", "branch-protection"]);
+    const block = markedBlock(readFileSync(join(root, "AGENTS.md"), "utf8"));
+    assert.doesNotMatch(block, /trellis\/playbooks\//);
+    assert.doesNotMatch(block, /branch-protection\.md/);
+    assert.match(block, /### Loop contract/);
+    assert.match(block, /`gates`/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("--skip ci writes the pinned skip-variant block", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO", idWidth: 5, skip: ["ci"] }, {}, sourceRoot);
+    const block = markedBlock(readFileSync(join(root, "AGENTS.md"), "utf8"));
+    assert.equal(block, readFixture("agents-block-skip-ci.md"));
+    assert.doesNotMatch(block, /CI runs/);
+    assert.match(block, /`main` is protected/);
+    assert.match(block, /\| `check` \| `npx @taprootio\/trellis check` \|/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
