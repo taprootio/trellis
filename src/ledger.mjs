@@ -56,14 +56,17 @@ const RECOVERY_HINT =
 
 // ------------------------------------------------------------ git helper
 // Variables that would point git at a different repo, index, object store,
-// config or pathspec mode than the `-C` directory we pass.
+// config or pathspec mode than the `-C` directory we pass. A ceiling directory
+// could hide the repo from discovery, so it is cleared too (TRL0038).
 const CLEARED_ENV = [
   "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
   "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
-  "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS",
+  "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_ICASE_PATHSPECS", "GIT_LITERAL_PATHSPECS",
+  "GIT_CEILING_DIRECTORIES",
 ];
 
-function gitEnv(extra = {}) {
+// Shared with src/local-output.mjs so every git probe starts from the same environment.
+export function gitEnv(extra = {}) {
   const env = { ...process.env };
   for (const k of Object.keys(env)) {
     if (CLEARED_ENV.includes(k) || /^GIT_CONFIG_(KEY|VALUE)_\d+$/.test(k)) delete env[k];
