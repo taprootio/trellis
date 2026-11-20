@@ -216,8 +216,9 @@ qualifying item may omit `summary`, `milestone`, `priority` and `effort`. Everyt
 else is still required: `id`, `title`, `status`, `depends_on` and the close date, and
 on a removed item `removed_reason` (it is required only on removed items, as the
 table above says). In a repo with `legacy`, a blank value (an empty or whitespace-only
-string, quoted or not) counts as missing on every completed and removed item, so a
-non-qualifying item with a blank value fails as if the field were absent. Active
+string, quoted or not) in `summary`, `milestone`, `priority` or `effort` counts as
+missing on every completed and removed item, so a non-qualifying item with a blank
+value there fails as if the field were absent. `removed_reason` keeps its usual rule. Active
 items are validated as always. A repo without `legacy` is unchanged.
 
 ### 5.2 Body
@@ -469,8 +470,8 @@ A conforming generator MUST:
    be syntactically valid handles (§7.2) on **every** item — the closed-item
    exemption is from membership, not from being a handle. A malformed `team.json` is
    a validation error regardless. With `legacy` (§5.1, §7), a qualifying closed item
-   MAY omit the four descriptive fields, a blank value counts as missing on every
-   closed item, and a close date that is well-shaped but not a real calendar date is
+   MAY omit the four descriptive fields, a blank value in one of those four counts as
+   missing on every closed item, and a close date that is well-shaped but not a real calendar date is
    an error on any completed or removed item.
 2. **Regenerate** deterministically. In committed mode (the default) that is
    `README.md` and the completed/removed indexes (each between its markers) and

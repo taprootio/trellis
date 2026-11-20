@@ -1248,13 +1248,25 @@ test("move_task with an impossible date is rolled back in a repo with legacy", (
     const before = snapshot();
     assert.throws(() => moveTask(root, { id: "DEMO0001", to: "completed", date: "2026-02-31" }));
     assert.deepEqual(snapshot(), before);
-    // A rejected first removal leaves no removed/ directory and the active file as it was.
-    const active = join(root, "trellis", "active", "DEMO0001.md");
-    rmSync(join(root, "trellis", "removed"), { recursive: true, force: true });
-    const mode = lstatSync(active).mode;
-    assert.throws(() => moveTask(root, { id: "DEMO0001", to: "removed", reason: "x", date: "2026-02-31" }), /real calendar date/);
-    assert.equal(existsSync(join(root, "trellis", "removed")), false);
-    assert.equal(lstatSync(active).mode, mode);
-    assert.equal(readFileSync(active, "utf8"), before[0]);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a rejected first removal with legacy leaves no removed/ directory and the active file as it was", () => {
+  const c = localMcpRepo();
+  try {
+    const cfgPath = join(c.root, "trellis", "backlog.config.json");
+    const raw = JSON.parse(readFileSync(cfgPath, "utf8"));
+    writeFileSync(cfgPath, JSON.stringify({ ...raw, legacy: { through: "DEMO0000", closedBefore: "2026-11-19" } }, null, 2) + "\n");
+    createTask(c.root, VALID);
+    const active = join(c.root, "trellis", "active", "DEMO0001.md");
+    rmSync(join(c.root, "trellis", "removed"), { recursive: true, force: true });
+    // A mode other than the default creation mode, so the mode check means something.
+    chmodSync(active, 0o640);
+    const before = snapshotTree(c.root);
+    const mode = lstatSync(active).mode;
+    assert.throws(() => moveTask(c.root, { id: "DEMO0001", to: "removed", reason: "x", date: "2026-02-31" }), /real calendar date/);
+    assert.equal(existsSync(join(c.root, "trellis", "removed")), false);
+    assert.equal(lstatSync(active).mode, mode);
+    assert.deepEqual(snapshotTree(c.root), before);
+  } finally { c.cleanup(); }
 });
