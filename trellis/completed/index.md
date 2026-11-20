@@ -6,6 +6,7 @@ task and run `npm run backlog:readme`.
 <!-- BEGIN GENERATED:COMPLETED -->
 | ID | Title | Summary | Completed |
 | --- | --- | --- | --- |
+| [TRL0037](tasks/TRL0037.md) | Claim task ids from a local git ledger | Add an opt-in id ledger on a local orphan branch that every worktree of a clone shares, so `trellis claim` and the MCP create path hand out each id exactly once even when several sessions write stories at the same time. | 2026-11-20 |
 | [TRL0036](tasks/TRL0036.md) | Adopt good-agent for Trellis's own task work | Install good-agent as an exact-pinned dev dependency, add its skills, config, guard and GOOD-AGENT block, and route Trellis's own story writing and task work through the shipped write-task, work-task and review-loop skills. | 2026-11-19 |
 | [TRL0010](tasks/TRL0010.md) | Packaging, versioned spec, and docs | Publish Trellis to public npm as `@taprootio/trellis` from GitHub CI, renaming off the never-published `ai-trellis` placeholder, then dogfood the packaged onboarding against a real repo. | 2026-07-01 |
 | [TRL0031](tasks/TRL0031.md) | Importer — skip generated indexes; add a general trellis profile | Make import skip the generator's own artifacts (index.md / README.md) so they aren't imported as tasks, and add a general `trellis` profile that imports any Trellis-shaped backlog (YAML front-matter under active/, completed/tasks/, removed/) — so onboarding a Trellis-shaped repo needs no hand-written mapping. | 2026-07-01 |

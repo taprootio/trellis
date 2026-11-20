@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0042",
   "counts": {
-    "active": 12,
-    "completed": 29,
+    "active": 11,
+    "completed": 30,
     "removed": 0
   },
   "tasks": [
@@ -130,20 +130,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Once the ledger, local-artifact, legacy-archive and good-agent-aware init changes ship in 0.3.0, onboard ../taproot in place with only the published package and record every friction point."
-    },
-    {
-      "id": "TRL0037",
-      "title": "Claim task ids from a local git ledger",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "High",
-      "effort": 5,
-      "effortLabel": "Tuna",
-      "effortImage": "assets/effort/tuna.svg",
-      "depends_on": [],
-      "owner": "jereme",
-      "collaborators": [],
-      "summary": "Add an opt-in id ledger on a local orphan branch that every worktree of a clone shares, so `trellis claim` and the MCP create path hand out each id exactly once even when several sessions write stories at the same time."
     },
     {
       "id": "TRL0038",
@@ -701,6 +687,21 @@
       "collaborators": [],
       "summary": "Install good-agent as an exact-pinned dev dependency, add its skills, config, guard and GOOD-AGENT block, and route Trellis's own story writing and task work through the shipped write-task, work-task and review-loop skills.",
       "completed_on": "2026-11-19"
+    },
+    {
+      "id": "TRL0037",
+      "title": "Claim task ids from a local git ledger",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Add an opt-in id ledger on a local orphan branch that every worktree of a clone shares, so `trellis claim` and the MCP create path hand out each id exactly once even when several sessions write stories at the same time.",
+      "completed_on": "2026-11-20"
     }
   ]
 }
