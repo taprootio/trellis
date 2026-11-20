@@ -86,9 +86,11 @@ an import.
 2. Add `depends_on: []` to any item that lacks it: it stays required.
 3. Run `npx @taprootio/trellis init` **without** `--force`. `init --force` is refused
    (exit 2, nothing written) once the config has `legacy`, because the replacement
-   config would drop it. To restore a missing or stale scaffold file such as an index
-   or README, delete that one file and rerun plain `init`, or edit it by hand.
-   `trellis/backlog.config.json` must stay. In committed mode, a backlog-root
+   config would drop it. Plain `init` without `--force`
+   refreshes stale generated sections and creates missing scaffold files in committed
+   mode; do not delete an existing README or index, which can lose authored text. In
+   local mode it writes `.generated/` and does not create the README or index files,
+   which are author-owned. `trellis/backlog.config.json` must stay. In committed mode, a backlog-root
    `README.md`, `completed/index.md` or `removed/index.md` that has no generated
    markers still fails ordinary `init` after `legacy` is added: add the correct marker
    pair and keep the authored text outside it, or move the file aside first.

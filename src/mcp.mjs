@@ -34,6 +34,7 @@ import {
   composeFile,
   activeItemErrors,
   isLocalMode,
+  isRealDate,
   validateLocal,
 } from "./backlog.mjs";
 import { applyImport, ImportRefused } from "./import.mjs";
@@ -535,6 +536,8 @@ export function moveTask(repoRoot, args = {}, hooks = {}) {
   const reason = to === "removed" ? oneLine(args.reason, "reason") : undefined;
 
   const { cfg } = loadClean(repoRoot);
+  // With `legacy` a close date must be real, so refuse before anything is moved or written.
+  if (cfg.legacy && !isRealDate(date)) throw new TrellisError("`date` must be a real calendar date (YYYY-MM-DD)");
   const id = assertId(args.id, cfg); // validate the id format before building any path
   // A bad output is refused before the move touches any file.
   guardOutputs(repoRoot, cfg);

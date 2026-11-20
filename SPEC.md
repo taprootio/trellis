@@ -213,8 +213,9 @@ may have an archive older than these rules. When the config sets `legacy` (§7),
 completed or removed item **qualifies** when its id is at or below `legacy.through`
 and its close date is a real calendar date strictly before `legacy.closedBefore`. A
 qualifying item may omit `summary`, `milestone`, `priority` and `effort`. Everything
-else is still required: `id`, `title`, `status`, `depends_on`, the close date and
-`removed_reason`. In a repo with `legacy`, a blank value (an empty or whitespace-only
+else is still required: `id`, `title`, `status`, `depends_on` and the close date, and
+on a removed item `removed_reason` (it is required only on removed items, as the
+table above says). In a repo with `legacy`, a blank value (an empty or whitespace-only
 string, quoted or not) counts as missing on every completed and removed item, so a
 non-qualifying item with a blank value fails as if the field were absent. Active
 items are validated as always. A repo without `legacy` is unchanged.
