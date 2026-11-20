@@ -8,7 +8,7 @@
 // them all back, so a rerun starts clean and a finished switch is a no-op.
 
 import { existsSync, lstatSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { DEFAULT_TASKS_DIR, GENERATED_DIR, MARKERS, SPEC_VERSION, artifactSet, loadConfig, paths, validateConfig } from "./backlog.mjs";
 import { AGENTS_MARKERS, artifactBullet, completedSkeleton, removedSkeleton } from "./init.mjs";
 import { OutputRefused, checkOutputFiles, discoverGit, foldsCase, gitPrefix, ignoreLineFor, installStaged, pathspec, probe, verifyOutputPaths } from "./local-output.mjs";
@@ -160,7 +160,8 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
   // git matches the folder itself with `:(literal,icase)`, then the names are folded to find `.generated/`.
   const icase = foldsCase(repoRoot);
   const fold = icase ? (p) => p.toLowerCase() : (p) => p;
-  const underGenerated = git(repoRoot, ["ls-files", "-z", "--", pathspec(posix(relative(repoRoot, dirname(set.dir))), icase)], { literal: !icase }).split("\0").filter(Boolean)
+  // Only the `.generated` folder is listed, so a large tasks folder is never enumerated.
+  const underGenerated = git(repoRoot, ["ls-files", "-z", "--", pathspec(dirRel, icase)], { literal: !icase }).split("\0").filter(Boolean)
     .filter((p) => fold(p).startsWith(`${fold(dirRel)}/`));
   if (underGenerated.length) {
     refuse(`${underGenerated.join(", ")} ${underGenerated.length > 1 ? "are" : "is"} tracked by git, but local mode keeps ${dirRel}/ out of git. Untrack ${underGenerated.length > 1 ? "them" : "it"} (git rm --cached), then run again`);
@@ -236,10 +237,14 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
       const committed = artifactBullet(root, "committed");
       const local = artifactBullet(root, "local");
       const at = findWholeLines(block, committed);
-      if (at !== -1) {
+      // The copy must end its list item: a continuation line after it means the user
+      // extended the bullet, so it is not Trellis's own text any more.
+      const nextLine = at === -1 ? "" : block.slice(at + committed.length + 1).split("\n")[0];
+      const endsItem = at !== -1 && (block.length <= at + committed.length + 1 || nextLine.trim() === "" || /^[-*] /.test(nextLine));
+      if (at !== -1 && endsItem) {
         requireClean("AGENTS.md", "holds the Trellis block the switch updates");
         edits.push({ path: agentsPath, rel: "AGENTS.md", before: text, after: text.slice(0, bi) + block.slice(0, at) + local + block.slice(at + committed.length) + text.slice(ei), why: "updated the generated-files bullet" });
-      } else if (findWholeLines(block, local) === -1) {
+      } else if (at !== -1 || findWholeLines(block, local) === -1) {
         warnings.push(`AGENTS.md: the generated-files bullet in the Trellis block differs from Trellis's own text, so it was left alone. Edit it by hand to say the index is generated into ${root}/${GENERATED_DIR}/ and that no committed file is generated`);
       }
     }

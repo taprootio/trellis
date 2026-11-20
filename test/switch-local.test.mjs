@@ -275,6 +275,33 @@ test("an artifact bullet with text appended after its final period warns and lea
   } finally { f.cleanup(); }
 });
 
+test("an artifact bullet followed by a continuation line warns and leaves AGENTS.md alone", () => {
+  const f = fixture();
+  try {
+    const path = join(f.root, "AGENTS.md");
+    writeFileSync(path, readFileSync(path, "utf8").replace("`BEGIN/END GENERATED` markers.\n", "`BEGIN/END GENERATED` markers.\n  Ask the owner first.\n"));
+    f.commit();
+    const before = readFileSync(path, "utf8");
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(path, "utf8"), before);
+    assert.match(r.stderr, /AGENTS\.md: the generated-files bullet/);
+  } finally { f.cleanup(); }
+});
+
+test("many tracked files under the tasks folder do not change the outcome", () => {
+  const f = fixture();
+  try {
+    mkdirSync(f.T("notes"));
+    for (let i = 0; i < 300; i++) writeFileSync(f.T("notes", `n${i}.md`), `note ${i}\n`);
+    f.commit();
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(commandsOf(r.stdout).length, 2);
+    assert.equal(tracked(f.root).filter((p) => p.startsWith("trellis/notes/")).length, 300);
+  } finally { f.cleanup(); }
+});
+
 test("stripping the block keeps every other byte, including an indented code block after it", () => {
   const f = fixture();
   try {
@@ -415,7 +442,7 @@ test("an inherited GIT_INDEX_FILE pointing at an empty index does not hide a tra
 });
 
 // ------------------------------------------------------------ pathspecs
-test("with tasksDir planning*, a tracked planning-old/backlog.json is left alone and no command names it", () => {
+test("with tasksDir planning*, a tracked planning-old/backlog.json is left alone and no command names it", { skip: process.platform === "win32" }, () => {
   const f = fixture({ tasksDir: "planning*" });
   try {
     mkdirSync(join(f.root, "planning-old"));

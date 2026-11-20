@@ -43,6 +43,7 @@ export function probe(repoRoot, args, { literal = false } = {}) {
     encoding: "utf8",
     env: gitEnv({ GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C" }),
     stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 64 * 1024 * 1024,
   });
 }
 

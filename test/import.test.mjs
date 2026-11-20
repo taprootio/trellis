@@ -1176,16 +1176,21 @@ test("a foreign export with id and status but no title imports as an ordinary fi
     mkdirSync(join(src, ".generated"), { recursive: true });
     const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.json" } } };
     const wrap = (tasks, counts) => JSON.stringify({ prefix: "X", milestones: [], nextId: "X0002", counts, tasks });
+    const FULL = { id: "X0001", title: "T", status: "active", milestone: "Alpha", priority: "High", effort: 3, depends_on: [], owner: null, collaborators: [], summary: "S" };
     const foreign = [
       wrap([{ id: "X0001", status: "active" }], { active: 1, completed: 0, removed: 0 }),
-      wrap([{ id: "X0001", title: "T", status: "active" }], { active: 0, completed: 0, removed: 0 }),
-      wrap([{ id: "X0001", title: "T", status: "active" }], { active: 0, completed: 1, removed: 0 }),
+      wrap([FULL], { active: 0, completed: 0, removed: 0 }),
+      wrap([FULL], { active: 0, completed: 1, removed: 0 }),
+      // Matching counts, but only id, title and status (round 8).
+      wrap([{ id: "X0001", title: "T", status: "active" }], { active: 1, completed: 0, removed: 0 }),
+      wrap([{ ...FULL, depends_on: "X0002" }], { active: 1, completed: 0, removed: 0 }),
+      wrap([{ ...FULL, owner: 7 }], { active: 1, completed: 0, removed: 0 }),
     ];
     for (const body of foreign) {
       writeFileSync(join(src, ".generated", "backlog.json"), body);
       assert.equal(planImport(root, src, at, {}).counts.total, 1, `imported: ${body}`);
     }
-    writeFileSync(join(src, ".generated", "backlog.json"), wrap([{ id: "X0001", title: "T", status: "active" }], { active: 1, completed: 0, removed: 0 }));
+    writeFileSync(join(src, ".generated", "backlog.json"), wrap([FULL], { active: 1, completed: 0, removed: 0 }));
     assert.equal(planImport(root, src, at, {}).counts.total, 0, "a matching generated export is skipped");
   } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
@@ -1383,16 +1388,16 @@ test("import and init --import refuse a mapped source file that is a local outpu
     try {
       if (how === "symlink") { mkdirSync(join(root, "linked")); symlinkSync(join(root, "trellis", ".generated", "index.md"), join(root, "linked", "notes.md")); }
       const before = tree(root);
-      assert.throws(() => applyImport(root, root, JSON.parse(mapFile(dirs))), (e) => e instanceof ImportRefused && /generated output/.test(e.message), how);
+      assert.throws(() => applyImport(root, root, JSON.parse(mapFile(dirs))), (e) => e instanceof ImportRefused && /generated (output|folder)/.test(e.message), how);
       assert.deepEqual(tree(root), before);
       const mapPath = join(mapDir, "map.json");
       writeFileSync(mapPath, mapFile(dirs));
       const cli = spawnSync(process.execPath, [importScript, root, "--mapping", mapPath, "--target", root, "--apply"], { encoding: "utf8" });
       assert.equal(cli.status, 2, cli.stderr);
-      assert.match(cli.stderr, /generated output/);
+      assert.match(cli.stderr, /generated (output|folder)/);
       const ini = spawnSync(process.execPath, [initScript, root, "--import", root, "--mapping", mapPath], { encoding: "utf8" });
       assert.equal(ini.status, 2, ini.stderr);
-      assert.match(ini.stderr, /generated output/);
+      assert.match(ini.stderr, /generated (output|folder)/);
       assert.deepEqual(tree(root), before, "init --import scaffolded nothing");
     } finally { rmSync(mapDir, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
   }
@@ -1409,8 +1414,8 @@ test("init --import in local mode generates no output before the import checks r
     const mapPath = join(mapDir, "map.json");
     writeFileSync(mapPath, map);
     const ini = spawnSync(process.execPath, [initScript, root, "--import", root, "--mapping", mapPath], { encoding: "utf8" });
-    // Nothing was read from an output that did not exist: no scaffold-made file was imported.
-    assert.doesNotMatch(ini.stderr, /generated output/);
+    // The mapping overlaps the target's future .generated folder, so it is refused and nothing is imported.
+    assert.match(ini.stderr, /generated folder/);
     assert.deepEqual(readdirSync(join(root, "trellis", "active")).filter((n) => /index|completed|removed/.test(n)), []);
   } finally { rmSync(mapDir, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
@@ -1424,7 +1429,7 @@ test("a mapped file reaching an output through another case spelling is refused 
     if (!existsSync(join(root, "TRELLIS", ".generated", "index.md"))) return; // case-sensitive volume
     const map = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["TRELLIS/.generated"], file: "*.md" } } };
     const before = tree(root);
-    assert.throws(() => applyImport(root, root, map), (e) => e instanceof ImportRefused && /generated output/.test(e.message));
+    assert.throws(() => applyImport(root, root, map), (e) => e instanceof ImportRefused && /generated (output|folder)/.test(e.message));
     assert.deepEqual(tree(root), before);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -1458,7 +1463,7 @@ test("a .generated/backlog.json whose tasks lack an id and status imports as an 
       writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, ...b }));
       assert.equal(planImport(root, src, at, {}).counts.total, 1, `imported: ${JSON.stringify(b)}`);
     }
-    writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, counts: { active: 1, completed: 0, removed: 0 }, tasks: [{ id: "X1", title: "T", status: "active" }] }));
+    writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, counts: { active: 1, completed: 0, removed: 0 }, tasks: [{ ...{ id: "X1", title: "T", status: "active", milestone: "Alpha", priority: "High", effort: 3, depends_on: [], owner: null, collaborators: [], summary: "S" } }] }));
     assert.equal(planImport(root, src, at, {}).counts.total, 0, "the real generated shape is skipped");
   } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
@@ -1486,4 +1491,22 @@ test("init --import reports a mapping loader error before scaffolding anything",
     assert.equal(ini.status, 2, ini.stderr);
     assert.deepEqual(readdirSync(root), [], "nothing was scaffolded");
   } finally { rmSync(mapDir, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+// ------------------------------------------------------- review round 8 (TRL0038)
+test("a mapping aimed at the target's .generated folder is refused before anything is read or written", () => {
+  const root = localTarget();
+  try {
+    const gen = join(root, "trellis", ".generated");
+    mkdirSync(gen);
+    const full = { id: "TAP0001", title: "T", status: "active", milestone: "Alpha", priority: "High", effort: 3, depends_on: [], owner: null, collaborators: [], summary: "S" };
+    writeFileSync(join(gen, "backlog.json"), JSON.stringify({ prefix: "TAP", milestones: [], nextId: null, counts: { active: 1, completed: 0, removed: 0 }, tasks: [full] }));
+    const at = (dirs) => ({ ...loadProfile("trellis").mapping, sources: { active: { dirs, file: "*.md" } } });
+    // The folder itself, a folder holding it and a folder inside it all overlap.
+    for (const [src, dirs] of [[root, ["trellis/.generated"]], [root, ["trellis"]], [gen, ["."]], [join(root, "trellis"), ["."]]]) {
+      const before = tree(root);
+      assert.throws(() => applyImport(root, src, at(dirs)), (e) => e instanceof ImportRefused && /generated folder/.test(e.message), `${src} ${dirs}`);
+      assert.deepEqual(tree(root), before);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

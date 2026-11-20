@@ -327,6 +327,19 @@ const LOCAL_HEADS = new Map(
 // A `.generated/backlog.json` is skipped only when it has the generated shape; any other
 // file at that path is the user's own and imports like an ordinary mapped file.
 const BACKLOG_KEYS = ["prefix", "milestones", "nextId", "counts", "tasks"];
+// SPEC §8.2: every task carries the descriptive metadata keys, `null` where a closed
+// item has none. Effort is a number or a label.
+const orNull = (type) => (v) => v === null || typeof v === type;
+const stringList = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
+const TASK_KEY_TYPES = {
+  id: (v) => typeof v === "string", title: (v) => typeof v === "string", status: (v) => typeof v === "string",
+  milestone: orNull("string"), priority: orNull("string"), summary: orNull("string"), owner: orNull("string"),
+  effort: (v) => v === null || typeof v === "number" || typeof v === "string",
+  depends_on: stringList, collaborators: stringList,
+};
+function hasTaskShape(t) {
+  return !!t && typeof t === "object" && !Array.isArray(t) && Object.entries(TASK_KEY_TYPES).every(([k, ok]) => Object.hasOwn(t, k) && ok(t[k]));
+}
 function hasBacklogShape(abs) {
   try {
     const obj = JSON.parse(readFileSync(abs, "utf8"));
@@ -336,7 +349,7 @@ function hasBacklogShape(abs) {
       && !!counts && typeof counts === "object" && !Array.isArray(counts)
       && ["active", "completed", "removed"].every((k) => Number.isInteger(counts[k]) && counts[k] >= 0)
       && Array.isArray(obj.tasks)
-      && obj.tasks.every((t) => !!t && typeof t === "object" && !Array.isArray(t) && typeof t.id === "string" && typeof t.title === "string" && typeof t.status === "string")
+      && obj.tasks.every(hasTaskShape)
       && obj.tasks.length === ["active", "completed", "removed"].reduce((n, k) => n + counts[k], 0)
       && ["active", "completed", "removed"].every((k) => obj.tasks.filter((t) => t.status === k).length === counts[k]);
   } catch { return false; }
@@ -761,6 +774,9 @@ function resolveFuture(path) {
   }
 }
 
+const identityOf = (path) => { try { const st = statSync(path); return `${st.dev}:${st.ino}`; } catch { return null; } };
+const posixRel = (from, to) => relative(from, to).split(sep).join("/");
+
 // Local mode only: a mapped source file that is one of the target's own outputs would be
 // read while the import rewrites it, so refuse before anything is written (TRL0038).
 // Runs for `import` and, before it scaffolds, for `init --import`. The mapping is
@@ -769,11 +785,24 @@ export function assertSourceNotLocalOutput(targetRoot, sourceRoot, mapping, what
   if (!mapping || validateMapping(mapping).length) return;
   const { cfg, errors } = loadConfig(targetRoot);
   if (errors.length || !isLocalMode(cfg)) return;
-  const outputs = new Map(artifactSet(targetRoot, cfg).generated.map((e) => [resolveFuture(e.path), e.rel]));
+  const set = artifactSet(targetRoot, cfg);
+  // A mapped folder that is, holds or sits inside the target's `.generated` folder would
+  // read the outputs the import rewrites, whatever its glob matches (round 8).
+  const genReal = resolveFuture(set.dir);
+  const genId = identityOf(set.dir);
+  const overlaps = (a, b) => { const r = relative(a, b); return r === "" || (!r.startsWith("..") && !isAbsolute(r)); };
+  for (const d of [".", ...Object.values(mapping.sources).filter(Boolean).flatMap((spec) => spec.dirs)]) {
+    const dir = d === "." ? sourceRoot : join(sourceRoot, d);
+    const real = resolveFuture(dir);
+    if (overlaps(real, genReal) || overlaps(genReal, real) || (genId && genId === identityOf(dir))) {
+      throw new ImportRefused(`${what} refused: the source folder ${d === "." ? "(the source root)" : d} overlaps the target's generated folder ${posixRel(targetRoot, set.dir)}. Map a different source. Nothing was written.`);
+    }
+  }
+  const outputs = new Map(set.generated.map((e) => [resolveFuture(e.path), e.rel]));
   // A path can name an output through another spelling (a case-folding volume), so existing
   // files are also matched by device and inode.
-  const identity = (path) => { try { const st = statSync(path); return `${st.dev}:${st.ino}`; } catch { return null; } };
-  const ids = new Map(artifactSet(targetRoot, cfg).generated.map((e) => [identity(e.path), e.rel]).filter(([id]) => id));
+  const identity = identityOf;
+  const ids = new Map(set.generated.map((e) => [identity(e.path), e.rel]).filter(([id]) => id));
   for (const src of discoverSources(sourceRoot, mapping, [], { includeGenerated: true })) {
     const hit = outputs.get(resolveFuture(src.file)) || ids.get(identity(src.file));
     if (hit) throw new ImportRefused(`${what} refused: the mapped source file ${src.rel} is the target's generated output ${hit.split(sep).join("/")}. Map a different source. Nothing was written.`);
