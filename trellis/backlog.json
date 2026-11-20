@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0042",
   "counts": {
-    "active": 9,
-    "completed": 32,
+    "active": 8,
+    "completed": 33,
     "removed": 0
   },
   "tasks": [
@@ -130,24 +130,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Once the ledger, local-artifact, legacy-archive and good-agent-aware init changes ship in 0.3.0, onboard ../taproot in place with only the published package and record every friction point."
-    },
-    {
-      "id": "TRL0040",
-      "title": "Onboard a repo that already runs good-agent and its own CI",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "High",
-      "effort": 3,
-      "effortLabel": "Trout",
-      "effortEmoji": "🐡",
-      "depends_on": [
-        "TRL0037",
-        "TRL0038",
-        "TRL0039"
-      ],
-      "owner": "jereme",
-      "collaborators": [],
-      "summary": "Let `trellis init` skip the parts an established repo already owns (CI workflow, PR template, process playbooks) and write a compact AGENTS.md block that defers the loops to good-agent's skills, refusing to push AGENTS.md past Codex's 32 KiB budget."
     },
     {
       "id": "TRL0041",
@@ -703,6 +685,25 @@
       "owner": "jereme",
       "collaborators": [],
       "summary": "Add an optional legacy cutoff (an inclusive id and an exclusive close date) under which completed and removed items may omit the descriptive metadata (summary, milestone, priority, effort), so a long-lived backlog can adopt Trellis in place without inventing history while new closures stay strict.",
+      "completed_on": "2026-11-20"
+    },
+    {
+      "id": "TRL0040",
+      "title": "Onboard a repo that already runs good-agent and its own CI",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
+      "depends_on": [
+        "TRL0037",
+        "TRL0038",
+        "TRL0039"
+      ],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Let `trellis init` skip the parts an established repo already owns (CI workflow, PR template, process playbooks) and write a compact AGENTS.md block that defers the loops to good-agent's skills, refusing to push AGENTS.md past Codex's 32 KiB budget.",
       "completed_on": "2026-11-20"
     }
   ]
