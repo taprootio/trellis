@@ -18,8 +18,10 @@ Usage:
 Commands:
   init       scaffold Trellis into a repo
   import     import an existing backlog into a Trellis repo
-  generate   validate and rewrite generated backlog artifacts
-  check      validate and fail if generated artifacts are stale
+  generate   validate and rewrite generated backlog artifacts (committed files, or
+             .generated/ when generatedArtifacts is "local")
+  check      validate and fail if committed generated artifacts are stale; with
+             generatedArtifacts "local", validate and scan for leftover markers only
   claim      claim task ids from the local id ledger
   history    derive per-task history from git
   mcp        serve Trellis operations over MCP stdio

@@ -46,6 +46,21 @@ are derived and must never be hand-edited.
     assets/effort/                 # optional effort-scale images (§6.3)
 ```
 
+That is the default, committed layout. With `generatedArtifacts: "local"` (§7,
+§8.5) nothing generated is committed: `README.md`, `completed/index.md` and
+`removed/index.md` are author-owned, and the generator writes the index and
+`backlog.json` to an ignored folder instead:
+
+```
+<repo>/
+  trellis/
+    .generated/                    # GENERATED, git-ignored (§8.5)
+      index.md                     #   milestone tables
+      completed.md                 #   completed items
+      removed.md                   #   removed items
+      backlog.json                 #   machine index (§8.2)
+```
+
 The **backlog root** defaults to `trellis/` at the repo root and is configurable
 per repo via the `tasksDir` key (§7) — a repo whose static-site generator
 publishes one directory (e.g. Eleventy over `docs/`) can repoint it elsewhere.
@@ -65,7 +80,9 @@ configured width — e.g. with prefix `AB` and width 4, `AB0042`.
   `backlog.json` (§8.2); `nextId` is `max(highest-existing + 1, nextIdFloor)` when a
   `nextIdFloor` is configured (§7). In ledger mode (`idAllocation: "ledger"`, §3.1),
   `trellis claim` and the MCP claim path hand out ids instead; the published
-  `nextId` stays the scan value.
+  `nextId` stays the scan value. With `generatedArtifacts: "local"` (§8.5) the
+  uncommitted `backlog.json` carries the ledger preview in ledger mode, or `null`
+  when the ledger ref is missing or unusable.
 - An id is permanent and globally unique across all three directories. It MUST
   NOT be reused, even after an item is removed.
 
@@ -241,7 +258,9 @@ custom **effort scale** for display.
   identity scale (label = the number, no emoji/image).
 - Each entry: `label` (required, unique within the scale), `emoji` (optional),
   and `image` (optional, a path relative to the backlog root — `tasksDir`, default
-  `trellis/` — so it resolves the same way the artifacts do). The Tuna/Swordfish
+  `trellis/` — so it resolves the same way the artifacts do, and in both
+  `generatedArtifacts` modes: it stays relative to `tasksDir`, never to the
+  folder holding the generated `backlog.json`). The Tuna/Swordfish
   entries above show the image-only and label-only cases.
 
 ### 6.2 Authoring and resolution
@@ -288,6 +307,7 @@ custom **effort scale** for display.
 | `tasksDir` | optional backlog-root path, repo-relative; defaults to `trellis/` |
 | `idAllocation` | optional; `"scan"` (default) or `"ledger"` (§3.1). Ledger mode requires a plain `idPrefix` (`^[A-Za-z][A-Za-z0-9]*$`) and `idWidth` of at most 9 |
 | `idLedgerRef` | optional; the ledger ref, under `refs/trellis/` and valid per `git check-ref-format`; defaults to `refs/trellis/ids` |
+| `generatedArtifacts` | optional; `"committed"` (default) or `"local"` (§8.5). Any other value is a validation error |
 | `nextIdFloor` | optional; floors the next organically-assigned id — `nextId` = max(floor, highest+1) — so hand-created tasks begin above a reserved band (must fit `idWidth`) |
 
 `tasksDir` locates the task tree and the generated artifacts; omit it to accept
@@ -371,6 +391,9 @@ table that includes the item's **summary** — completed: id, title, summary, da
 removed: id, title, summary, date, reason. Closing or removing an item is a file
 move plus a generator run; index rows are never hand-added.
 
+In `generatedArtifacts: "local"` mode none of this applies: these three files are
+author-owned and the generator never writes them (§8.5).
+
 ### 8.2 `backlog.json`
 
 The machine contract consumers build on:
@@ -417,7 +440,9 @@ A conforming generator MUST:
    markers), and `backlog.json` deterministically.
 3. Support a **`--check`** mode that validates and verifies the artifacts are
    current **without writing**, exiting non-zero on any error or drift. This is
-   the CI gate.
+   the CI gate. With `generatedArtifacts: "local"` (§8.5) `--check` validates
+   (item 1), scans for leftover generated markers, and compares no generated file,
+   since none is committed.
 4. **Warn** when `specVersion` is absent or its major version differs from the
    spec version the generator implements (§9).
 
@@ -449,6 +474,51 @@ when present, otherwise the commit subject. An item imported into a repo carries
 history from its import commit forward; a single-commit or empty history is valid,
 not an error.
 
+### 8.5 Local generated artifacts (`generatedArtifacts: "local"`)
+
+By default the generated files are committed, so every branch that adds, edits or
+closes an item rewrites them and parallel branches conflict on them. A repo can opt
+out with `"generatedArtifacts": "local"` (§7). The generator then writes every
+artifact under `<tasksDir>/.generated/` and nothing generated is committed:
+
+| file | content |
+| --- | --- |
+| `.generated/index.md` | the milestone tables (§8.1), as a whole file |
+| `.generated/completed.md` | the completed table |
+| `.generated/removed.md` | the removed table |
+| `.generated/backlog.json` | the machine index (§8.2), unchanged in shape |
+
+- Each Markdown file is wholly generated: it has no markers and no author-owned
+  text, and it is a pure function of the items. Its links resolve from
+  `.generated/` (for example `../active/<ID>.md`).
+- `<tasksDir>/README.md`, `completed/index.md` and `removed/index.md` are
+  **author-owned**. The generator and scaffolder never write them. A leftover
+  generated marker comment (§8.1) on a line of its own in any of them is a
+  validation error, which catches a half-finished switch from committed mode.
+  Prose that merely mentions a marker is fine.
+- **`.generated/` must be ignored by git.** Tooling does not edit `.gitignore`.
+  Every tool that writes the folder checks, inside a git work tree, that each of
+  the four outputs is ignored and untracked, and refuses before writing otherwise,
+  printing the line to add (`<tasksDir>/.generated/`, with gitignore
+  metacharacters escaped). Outside a work tree, or without git, that check is
+  skipped; any other failure to inspect the repo is a refusal. `--check` never
+  runs git.
+- **`--check`** validates config, roster and items (§8.3 item 1), runs the marker
+  scan above, and compares no generated file. It remains the required CI gate
+  (§10), and it passes with no `.generated/` folder present.
+- **`nextId`.** `.generated/backlog.json` is uncommitted and may differ between
+  clones: in ledger mode (§3.1) it holds the ledger preview, and `null` when the
+  ref is missing or unusable. This is the one exception to §8's rule that output
+  depends only on items and config. CI never reads it.
+- **What is given up.** The committed README tables and the committed
+  `backlog.json` no longer exist, so a forge file view shows no index, and a
+  consumer that read `backlog.json` from the default branch must run `trellis
+  generate` first, or use the MCP `list_tasks` tool.
+- **Migration.** `trellis init --switch-to-local` moves a committed-mode repo over:
+  it strips the generated blocks from `README.md` and the index files, sets the
+  config, and prints the `git rm` commands for the legacy generated files. It never
+  stages, commits or edits `.gitignore`.
+
 ## 9. Versioning and compatibility
 
 This spec uses SemVer. A repo declares the version it targets via `specVersion`
@@ -457,7 +527,8 @@ compatible; a major bump may change required fields or artifact shape. Tooling
 warns on a major mismatch between `specVersion` and the implemented spec.
 
 **2.5** (additive): the optional `idAllocation` and `idLedgerRef` config keys and
-the local id ledger (§3.1). Repos that omit them behave as in 2.4.
+the local id ledger (§3.1), and the optional `generatedArtifacts` config key with
+local generated artifacts (§8.5). Repos that omit them behave as in 2.4.
 
 ## 10. CI and branch protection
 
@@ -465,7 +536,8 @@ Conformant repositories MUST gate the default branch so the index cannot drift:
 
 - The default branch is **protected**; changes land via pull/merge request.
 - The generator's **`--check` is a required status check** that must pass before
-  merge.
+  merge. With `generatedArtifacts: "local"` (§8.5) it verifies validity and the
+  marker scan only, since no generated file is committed to drift.
 
 This is forge-agnostic — GitHub branch protection, GitLab merge-request
 pipelines, Bitbucket, or Azure DevOps all satisfy it. Setup specifics are left to
@@ -481,6 +553,7 @@ effective, not an additional conformance requirement.
 ## 11. Conformance
 
 A repository is **Trellis-conformant** at `specVersion` *X* if its items follow
-§3–§6, its `backlog.config.json` follows §7, its generated artifacts follow §8,
-and its default branch is gated per §10. A **tool** is conformant if it
+§3–§6, its `backlog.config.json` follows §7, its generated artifacts follow §8
+(the four committed files in `committed` mode, or the four files under
+`.generated/` of §8.5 in `local` mode), and its default branch is gated per §10. A **tool** is conformant if it
 implements the generator contract (§8.3) for that version.

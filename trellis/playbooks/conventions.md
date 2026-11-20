@@ -20,7 +20,7 @@ the command a different repo should run.
 | seam point | what the loop needs | this repo's value lives in |
 | --- | --- | --- |
 | `regenerate` | the command that revalidates items and rewrites the generated index + `backlog.json` after any item add/move/edit | `AGENTS.md` |
-| `check` | the read-only gate the loop keeps green locally and CI enforces (validate + verify-no-drift, non-zero on failure) | `AGENTS.md` |
+| `check` | the read-only gate the loop keeps green locally and CI enforces (non-zero on failure). Committed generated files: validation plus generated-file freshness. `generatedArtifacts: "local"`: validation and the leftover-marker scan only, and `.generated/` is produced by `regenerate` | `AGENTS.md` |
 | `branch-naming` | the pattern for a task branch, e.g. `<initials>/<id-lowercase>/<slug>` | `AGENTS.md` |
 | `gates` | any other gates a change must keep green before review (tests, lint, build) | `AGENTS.md` |
 | `attribution` | the commit/PR attribution policy (Trellis convention: none) | `AGENTS.md` |

@@ -20,7 +20,9 @@ standard.
 3. **Verify closeout** when the work claims to finish a task: the item moved to
    `completed/tasks/` with `status: completed` + `completed_on`, the generated
    artifacts are current (the repo's `check` command passes — e.g.
-   `npm run backlog:check`; see AGENTS.md), and links hold. Flag any miss as a
+   `npm run backlog:check`; see AGENTS.md; in `generatedArtifacts: "local"` mode
+   `check` verifies validation and the marker scan only, and `.generated/` is not
+   committed), and links hold. Flag any miss as a
    `blocker`.
 4. **Review thoroughly, twice.** First pass for the obvious; second pass for what
    you rationalized away — data and control flow across seams, behavior under

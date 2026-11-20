@@ -272,6 +272,14 @@ the title.
   repo to have a `team.json` (with no roster, every owner drops or carries as
   above); curating the roster can stay a manual post-import step.
 
+### Local generated artifacts
+
+An import into a repo with `generatedArtifacts: "local"` (SPEC §8.5) works in scan
+mode only, like any import. It writes the items and `.generated/`, never the
+committed README or index files, and it refuses, before writing, when one of those
+files still holds a generated marker line. It needs only a loadable config and
+roster, since the index files are optional there.
+
 ### Import-time git and provenance
 
 Some legacy backlogs don't record everything the schema needs — most commonly a
@@ -283,10 +291,15 @@ or isn't recorded at all. The importer fills these as faithfully as it can and
   reads the source file's last commit date from the *source* repo's git. This is the
   one-time importer's privilege; the deterministic generator and `--check` never read
   git (SPEC §8.4), so the gate stays reproducible.
-- **It degrades, never fails on git alone.** Missing git, a non-repo or shallow
+- **It degrades, never fails on git alone, for the source-date lookup.** Missing git, a non-repo or shallow
   source, or an uncommitted file all make the lookup return nothing — the chain then
   falls to a `defaults.<field>` floor if configured, and only errors if neither git
   nor a floor yields a date. The importer never invents a close date out of nothing.
+  This applies only to that lookup. The generator stays git-free for `check`, but in
+  `generatedArtifacts: "local"` mode generation and an applied import inspect the
+  *target* repo with git (to confirm the generated folder is ignored and untracked)
+  and refuse, writing nothing, when that inspection fails for any reason other than
+  git being absent or the target being outside a work tree.
 - **Inferred values are flagged.** A git-derived or floor-defaulted close date, and a
   **closed** item whose effort fell back to `defaults.effort` (no `Effort:`/`Size:`
   signal), each emit a per-item warning and increment a count in the import summary
@@ -306,3 +319,32 @@ or isn't recorded at all. The importer fills these as faithfully as it can and
   live in. A source that keeps everything in one folder with a `Status:` field is
   not directly importable today; split it into per-status directories first, or
   point each status at the directory that holds those items.
+
+## Switch a Trellis backlog to local generated artifacts
+
+A repo that commits its generated index and `backlog.json` can stop doing so
+(`generatedArtifacts: "local"`, SPEC §8.5). The generated files then live in the
+ignored `<tasksDir>/.generated/` folder and parallel branches stop conflicting on
+them. The migration is five steps, in this order:
+
+1. Add the ignore line to `.gitignore` (the switch prints the exact line when it is
+   missing, escaped for the repo's `tasksDir`): `trellis/.generated/` by default.
+2. Run `npx @taprootio/trellis init --switch-to-local` (add `--dry-run` to preview).
+   It sets `generatedArtifacts` to `"local"` and raises `specVersion` to 2.5, strips
+   the generated block and markers from `README.md` and from index files that hold
+   authored text, and updates the AGENTS.md bullet when it is still Trellis's own
+   text. It runs before ordinary init, so its checks see a tracked `.generated/`
+   file before init could overwrite it. It never prompts, stages, commits or edits
+   `.gitignore`. Index files that hold nothing but a generated block are left
+   exactly as they are and reported.
+3. Run the `git --literal-pathspecs rm -- '<path>'` commands it prints. They delete
+   the untouched generated-only index files and the legacy `backlog.json`.
+4. Run `npx @taprootio/trellis init`, without `--force` (init refuses `--force` on a
+   local repo). It creates nothing under the README or index paths.
+5. Run `npx @taprootio/trellis generate`, then `npx @taprootio/trellis check`.
+
+The switch refuses, changing nothing, when an output path is not ignored, a file it
+would edit or remove is a symlink or has uncommitted changes, a marker is unpaired,
+sits inline, repeats or belongs to another file, anything under `.generated/` is
+tracked, or an untracked `backlog.json` exists. A rerun after a finished switch
+changes nothing.

@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, symlinkSync, readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -201,5 +201,21 @@ test("buildPrompt rejects an unknown prompt name", () => {
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The packaged copies under templates/ are what `trellis init` ships to other repos, so
+// they must stay byte-identical to the in-repo sources (TRL0038: both name what `check`
+// verifies in each generated-artifacts mode).
+test("each packaged playbook and the branch-protection guide match their source byte for byte", () => {
+  const pairs = readdirSync(join(sourceRoot, "templates", "trellis", "playbooks"))
+    .map((f) => `playbooks/${f}`)
+    .concat("branch-protection.md");
+  for (const rel of pairs) {
+    assert.equal(
+      readFileSync(join(sourceRoot, "templates", "trellis", rel), "utf8"),
+      readFileSync(join(sourceRoot, "trellis", rel), "utf8"),
+      `templates/trellis/${rel} must equal trellis/${rel}`,
+    );
   }
 });

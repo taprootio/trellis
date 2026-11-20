@@ -110,7 +110,12 @@ map onto every major forge. The "check" is whichever CI job runs `trellis check`
 
 ## Verify the gate
 
-Open a throwaway PR that intentionally drifts the index — e.g. edit a generated
-file between its `BEGIN/END GENERATED` markers, or add an item without
-regenerating — and confirm the `backlog` check fails and the merge button is
-blocked until it passes. Close the PR without merging.
+Open a throwaway PR that makes the check fail, and confirm the `backlog` check fails
+and the merge button is blocked until it passes. Close the PR without merging.
+
+- **Committed generated files** (the default): drift the index — e.g. edit a generated
+  file between its `BEGIN/END GENERATED` markers, or add a valid item without
+  regenerating.
+- **`generatedArtifacts: "local"`**: there is nothing committed to drift, so break
+  validity instead — add an invalid item (a missing required field), or leave a
+  generated marker line in `README.md`.

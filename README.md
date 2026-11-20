@@ -21,6 +21,15 @@ npx @taprootio/trellis init <target> --prefix ABC   # --dry-run to preview
 It does not vendor the generator; the onboarded repo runs Trellis via the
 package (the scaffolded CI calls `npx @taprootio/trellis check`), which ships in TRL0010.
 
+By default the generated index and `backlog.json` are committed. To keep them out
+of git (so parallel branches stop conflicting on them), set
+`"generatedArtifacts": "local"` in `trellis/backlog.config.json`: `trellis generate`
+then writes `trellis/.generated/`, which you add to `.gitignore`, and `trellis
+check` validates the items and scans for leftover markers without comparing any
+generated file. A repo that already commits them migrates with `trellis init
+--switch-to-local`; the steps are in [`docs/import.md`](docs/import.md#switch-a-trellis-backlog-to-local-generated-artifacts)
+and the rules in SPEC §8.5.
+
 ## Import an existing backlog
 
 `trellis import` converts a backlog on a foreign schema into Trellis items in an
