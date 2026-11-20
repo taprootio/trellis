@@ -95,6 +95,7 @@ jobs:
       # Gates — never publish or release a red tree.
       - run: node --test
       - run: node scripts/backlog-readme.mjs --check
+      - run: npm run check:agent
       # No NODE_AUTH_TOKEN: auth is OIDC via id-token + the npm trusted publisher.
       # Values pass through env, never inline `${{ }}`, so they cannot inject shell
       # (matching pr-title.yml's convention).
