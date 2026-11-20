@@ -6,7 +6,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync, symlinkSync, renameSync, lstatSync, writeSync, realpathSync,
+} from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,8 +18,9 @@ import { loadProfile } from "../src/profiles.mjs";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
 import { registerTools } from "../scripts/trellis-mcp.mjs";
 import {
-  listTasks, getTask, nextIdOp, createTask, moveTask, validateOp, regenerateOp, importOp, TrellisError,
+  listTasks, getTask, nextIdOp, claimIdOp, createTask, moveTask, validateOp, regenerateOp, importOp, TrellisError,
 } from "../src/mcp.mjs";
+import { seed, claim, through, list as ledgerList } from "../src/ledger.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtures = join(sourceRoot, "test", "fixtures");
@@ -530,4 +534,258 @@ test("import tool surfaces a refused import as an error and writes nothing", () 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// --------------------------------------------------------------- id ledger
+// A ledger-mode repo: a git work tree with the scaffold and, unless `seeded` is
+// false, a seeded ledger. Nothing is committed (HEAD stays unborn).
+const REF = "refs/trellis/ids";
+function ledgerRepo({ seeded = true, cfg: over = {} } = {}) {
+  const root = realpathSync(freshRepo());
+  execFileSync("git", ["-C", root, "init", "-q", "-b", "main"]);
+  const cfgPath = join(root, "trellis", "backlog.config.json");
+  const cfg = { ...JSON.parse(readFileSync(cfgPath, "utf8")), idAllocation: "ledger", ...over };
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+  if (seeded) seed(root, cfg);
+  return { root, cfg, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+}
+const refTip = (root) => { try { return execFileSync("git", ["-C", root, "rev-parse", "--verify", "-q", REF], { encoding: "utf8" }).trim(); } catch { return null; } };
+const ARTIFACTS = ["README.md", "completed/index.md", "removed/index.md", "backlog.json"];
+const artifactBytes = (root) => Object.fromEntries(ARTIFACTS.map((a) => {
+  const f = join(root, "trellis", a);
+  return [a, existsSync(f) ? readFileSync(f, "utf8") : null];
+}));
+const leftovers = (root) => ARTIFACTS.flatMap((a) => readdirSync(dirname(join(root, "trellis", a))).filter((n) => /\.(tmp|bak)$/.test(n)));
+const throwsTrellis = (fn, code) => assert.throws(fn, (e) => e instanceof TrellisError && (code === undefined || e.code === code), `expected TrellisError ${code ?? ""}`);
+
+test("claim_id claims through the ledger, and create_task uses the claimed id", () => {
+  const c = ledgerRepo();
+  try {
+    assert.equal(claimIdOp(c.root, { title: "Reserved" }).id, "DEMO0001");
+    const out = createTask(c.root, VALID);
+    assert.equal(out.created.id, "DEMO0002");
+    assert.deepEqual(ledgerList(c.root, c.cfg).rows.map((r) => `${r.id} ${r.kind}`), ["DEMO0001 claim", "DEMO0002 claim"]);
+    assertCheckClean(c.root);
+    // The registered tool returns the same structured result.
+    const handlers = {};
+    registerTools({ registerTool: (name, _m, h) => { handlers[name] = h; } }, c.root);
+    const res = handlers.claim_id({ title: "Via tool" });
+    assert.equal(res.structuredContent.id, "DEMO0003");
+  } finally { c.cleanup(); }
+});
+
+test("claim_id refuses in scan mode and with a tab in the title", () => {
+  const c = ledgerRepo({ cfg: { idAllocation: "scan" } });
+  try {
+    throwsTrellis(() => claimIdOp(c.root, { title: "x" }), "invalid_request");
+  } finally { c.cleanup(); }
+  const d = ledgerRepo();
+  try {
+    const t = refTip(d.root);
+    throwsTrellis(() => claimIdOp(d.root, { title: "a\tb" }), "invalid_request");
+    assert.equal(refTip(d.root), t);
+  } finally { d.cleanup(); }
+});
+
+test("create_task in ledger mode fails with the seed message when the ref is absent, and never scans", () => {
+  const c = ledgerRepo({ seeded: false });
+  try {
+    const before = artifactBytes(c.root);
+    assert.throws(() => createTask(c.root, VALID), (e) => e instanceof TrellisError && /claim --seed/.test(e.message));
+    assert.equal(refTip(c.root), null);
+    assert.equal(existsSync(join(c.root, "trellis", "active", "DEMO0001.md")), false);
+    assert.deepEqual(artifactBytes(c.root), before);
+  } finally { c.cleanup(); }
+});
+
+test("a failure after the first artifact replacement restores every artifact and keeps the claim", () => {
+  const c = ledgerRepo();
+  try {
+    const before = artifactBytes(c.root);
+    assert.throws(() => createTask(c.root, VALID, { afterArtifactRename: (_p, n) => { if (n === 0) throw new Error("boom"); } }), /boom/);
+    assert.deepEqual(artifactBytes(c.root), before);
+    assert.equal(existsSync(join(c.root, "trellis", "active", "DEMO0001.md")), false, "the new item is removed");
+    assert.deepEqual(leftovers(c.root), []);
+    assert.deepEqual(ledgerList(c.root, c.cfg).rows.map((r) => r.id), ["DEMO0001"], "the claim stays");
+    // The next create moves on to a fresh id.
+    assert.equal(createTask(c.root, VALID).created.id, "DEMO0002");
+  } finally { c.cleanup(); }
+});
+
+test("a rollback removes an artifact that was newly installed and had no original", () => {
+  const c = ledgerRepo();
+  try {
+    rmSync(join(c.root, "trellis", "backlog.json"));
+    const before = artifactBytes(c.root);
+    assert.throws(() => createTask(c.root, VALID, { afterArtifactRename: (p) => { if (p.endsWith("backlog.json")) throw new Error("boom"); } }), /boom/);
+    assert.equal(existsSync(join(c.root, "trellis", "backlog.json")), false);
+    assert.deepEqual(artifactBytes(c.root), before);
+    assert.deepEqual(leftovers(c.root), []);
+  } finally { c.cleanup(); }
+});
+
+test("a backup cleanup failure after the commit point is a warning, not a failure", () => {
+  const c = ledgerRepo();
+  try {
+    const out = createTask(c.root, VALID, { removeBackup: () => { throw new Error("cannot remove"); } });
+    assert.equal(out.created.id, "DEMO0001");
+    assert.ok(out.warnings.length >= 1);
+    assert.match(out.warnings[0], /cannot remove/);
+    assertCheckClean(c.root);
+  } finally { c.cleanup(); }
+});
+
+test("a symlinked artifact keeps its link, and a link with no target yet gets one that rollback removes", () => {
+  const c = ledgerRepo();
+  try {
+    const real = join(c.root, "real");
+    mkdirSync(real);
+    const link = join(c.root, "trellis", "backlog.json");
+    renameSync(link, join(real, "backlog.json"));
+    symlinkSync(join(real, "backlog.json"), link);
+    createTask(c.root, VALID);
+    assert.ok(lstatSync(link).isSymbolicLink(), "the link survives");
+    assert.match(readFileSync(join(real, "backlog.json"), "utf8"), /DEMO0001/);
+    assertCheckClean(c.root);
+
+    // A dangling link: the target is created, and a failed write removes it again.
+    rmSync(join(real, "backlog.json"));
+    assert.throws(() => createTask(c.root, VALID, { afterArtifactRename: (p) => { if (p.endsWith("backlog.json")) throw new Error("boom"); } }), /boom/);
+    assert.ok(lstatSync(link).isSymbolicLink());
+    assert.equal(existsSync(join(real, "backlog.json")), false);
+    createTask(c.root, VALID);
+    assert.equal(existsSync(join(real, "backlog.json")), true, "a new target is created at the link's destination");
+  } finally { c.cleanup(); }
+});
+
+test("a write failure after the item file is opened removes the partial item and keeps the claim", () => {
+  const c = ledgerRepo();
+  try {
+    const before = artifactBytes(c.root);
+    assert.throws(() => createTask(c.root, VALID, { afterOpen: ({ fd }) => { writeSync(fd, "---\npartial"); throw new Error("disk full"); } }), /disk full/);
+    assert.equal(existsSync(join(c.root, "trellis", "active", "DEMO0001.md")), false);
+    assert.deepEqual(artifactBytes(c.root), before);
+    assert.equal(ledgerList(c.root, c.cfg).rows.length, 1);
+  } finally { c.cleanup(); }
+});
+
+test("an existing item that a case-insensitive filesystem aliases survives a collision byte for byte", (t) => {
+  const c = ledgerRepo();
+  try {
+    const probe = join(c.root, "probe.x");
+    writeFileSync(probe, "x");
+    if (existsSync(join(c.root, "PROBE.X"))) {
+      const other = join(c.root, "trellis", "active", "DEMO0001.MD");
+      writeFileSync(other, "keep me\n");
+      assert.throws(() => createTask(c.root, VALID), (e) => e instanceof TrellisError && e.code === "conflict");
+      assert.equal(readFileSync(other, "utf8"), "keep me\n");
+      assert.equal(ledgerList(c.root, c.cfg).rows.length, 1, "the claim stays");
+    } else {
+      t.skip("case-sensitive filesystem");
+    }
+  } finally { c.cleanup(); }
+});
+
+test("a title holding replacement patterns is inserted as text and check passes", () => {
+  const c = ledgerRepo();
+  try {
+    createTask(c.root, { ...VALID, title: "Fix $& and $1 and $$ now" });
+    assert.match(readFileSync(join(c.root, "trellis", "README.md"), "utf8"), /Fix \$& and \$1 and \$\$ now/);
+    assertCheckClean(c.root);
+    const { cfg } = loadConfig(c.root);
+    const data = readBacklog(c.root, cfg);
+    assert.deepEqual(data.errors, []);
+  } finally { c.cleanup(); }
+});
+
+test("ledger-mode generated bytes match scan mode for an ordinary title", () => {
+  const scan = freshRepo();
+  const c = ledgerRepo();
+  try {
+    createTask(scan, VALID);
+    createTask(c.root, VALID);
+    for (const a of ARTIFACTS) {
+      assert.equal(readFileSync(join(c.root, "trellis", a), "utf8"), readFileSync(join(scan, "trellis", a), "utf8"), a);
+    }
+  } finally { c.cleanup(); rmSync(scan, { recursive: true, force: true }); }
+});
+
+test("the layout guard runs before the task tree is read", () => {
+  const c = ledgerRepo();
+  try {
+    const elsewhere = join(c.root, "elsewhere");
+    mkdirSync(elsewhere);
+    writeFileSync(join(elsewhere, "DEMO0001.md"), "not front-matter\n");
+    rmSync(join(c.root, "trellis", "active"), { recursive: true, force: true });
+    symlinkSync(elsewhere, join(c.root, "trellis", "active"));
+    const t = refTip(c.root);
+    const before = artifactBytes(c.root);
+    throwsTrellis(() => createTask(c.root, VALID), "invalid_request");
+    assert.equal(refTip(c.root), t);
+    assert.deepEqual(artifactBytes(c.root), before);
+    assert.equal(readFileSync(join(elsewhere, "DEMO0001.md"), "utf8"), "not front-matter\n");
+  } finally { c.cleanup(); }
+});
+
+test("next_id in ledger mode is a preview that leaves the ref alone", () => {
+  const c = ledgerRepo();
+  try {
+    const t = refTip(c.root);
+    const out = nextIdOp(c.root);
+    assert.equal(out.nextId, "DEMO0001");
+    assert.equal(out.preview, true);
+    assert.equal(refTip(c.root), t);
+    assert.equal(nextIdOp(c.root).nextId, "DEMO0001", "asking twice does not consume the id");
+  } finally { c.cleanup(); }
+  const gone = ledgerRepo({ seeded: false });
+  try {
+    const out = nextIdOp(gone.root);
+    assert.equal(out.nextId, null);
+    assert.match(out.note, /claim --seed/);
+  } finally { gone.cleanup(); }
+  const full = ledgerRepo({ cfg: { idWidth: 1 } });
+  try {
+    through(full.root, full.cfg, "DEMO9");
+    const out = nextIdOp(full.root);
+    assert.equal(out.nextId, null);
+    assert.match(out.note, /exhausted/);
+  } finally { full.cleanup(); }
+});
+
+test("list_tasks and regenerate return the ledger preview, and the files keep the scan nextId", () => {
+  const c = ledgerRepo();
+  try {
+    claim(c.root, c.cfg, { title: "Open claim" });
+    assert.equal(listTasks(c.root).nextId, "DEMO0002");
+    const out = regenerateOp(c.root);
+    assert.equal(out.nextId, "DEMO0002");
+    const gen = () => spawnSync(process.execPath, [join(sourceRoot, "scripts", "backlog-readme.mjs"), "--target", c.root], { encoding: "utf8" });
+    assert.equal(gen().status, 0);
+    assert.equal(JSON.parse(readFileSync(join(c.root, "trellis", "backlog.json"), "utf8")).nextId, "DEMO0001");
+  } finally { c.cleanup(); }
+  const gone = ledgerRepo({ seeded: false });
+  try {
+    const listed = listTasks(gone.root);
+    assert.equal(listed.nextId, null);
+    assert.match(listed.nextIdNote, /claim --seed/);
+    const out = regenerateOp(gone.root);
+    assert.equal(out.nextId, null);
+    assert.match(out.note, /claim --seed/);
+    const r = spawnSync(process.execPath, [join(sourceRoot, "scripts", "backlog-readme.mjs"), "--target", gone.root], { encoding: "utf8" });
+    assert.equal(r.status, 0);
+    assert.equal(JSON.parse(readFileSync(join(gone.root, "trellis", "backlog.json"), "utf8")).nextId, "DEMO0001");
+  } finally { gone.cleanup(); }
+});
+
+test("committed backlog.json is identical with and without the ledger ref", () => {
+  const c = ledgerRepo({ seeded: false });
+  try {
+    const gen = () => spawnSync(process.execPath, [join(sourceRoot, "scripts", "backlog-readme.mjs"), "--target", c.root], { encoding: "utf8" });
+    gen();
+    const without = readFileSync(join(c.root, "trellis", "backlog.json"), "utf8");
+    seed(c.root, c.cfg);
+    claim(c.root, c.cfg, { title: "x" });
+    gen();
+    assert.equal(readFileSync(join(c.root, "trellis", "backlog.json"), "utf8"), without);
+  } finally { c.cleanup(); }
 });

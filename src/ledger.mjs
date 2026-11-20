@@ -418,6 +418,15 @@ function computeNext(cfg, ledgerRows, clone) {
   return cfg.idPrefix + String(n).padStart(cfg.idWidth, "0");
 }
 
+// Throws the layout refusals without allocating, so a caller can fail before it
+// reads the task tree or writes anything (MCP `create_task`).
+export function checkLayout(repoRoot, cfg) {
+  requireLedgerMode(cfg);
+  requirePlainPrefix(cfg);
+  probeGit(repoRoot);
+  scanClone(repoRoot, cfg);
+}
+
 // A read-only look at the next id, for `next_id`, `list_tasks`, `regenerate` and
 // the `generate` note. Never throws for ledger problems: `nextId` is null and the
 // note says why.

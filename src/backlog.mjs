@@ -626,10 +626,13 @@ export function nextId(ids, cfg) {
 // ------------------------------------------------------------- rendering
 function cell(s) { return String(s ?? "").replace(/\|/g, "\\|"); }
 
-function fillMarkers(text, [begin, end], body, where, errors) {
+// `literal` (ledger mode only, TRL0037) inserts the body through a callback, so a
+// title holding `$&` or `$1` is text. Scan mode keeps its exact bytes.
+function fillMarkers(text, [begin, end], body, where, errors, literal = false) {
   const re = new RegExp(`${begin}[\\s\\S]*?${end}`);
   if (!re.test(text)) { errors.push(`${where}: generated markers not found (${begin} ... ${end})`); return text; }
-  return text.replace(re, `${begin}\n${body}\n${end}`);
+  const filled = `${begin}\n${body}\n${end}`;
+  return text.replace(re, literal ? () => filled : filled);
 }
 
 function activeTable(items, cfg) {
@@ -699,6 +702,7 @@ export function generateArtifacts(repoRoot, cfg, data, { nextIdOverride } = {}) 
   const p = paths(repoRoot, cfg);
   const errors = [];
   const next = nextIdOverride === undefined ? nextId(data.ids, cfg) : nextIdOverride;
+  const literal = cfg.idAllocation === "ledger";
 
   let block = "";
   for (const ms of cfg.milestones) {
@@ -717,9 +721,9 @@ export function generateArtifacts(repoRoot, cfg, data, { nextIdOverride } = {}) 
   };
 
   const files = [
-    { path: p.readme, content: fillMarkers(readText(p.readme), MARKERS.milestones, readmeBody, relative(repoRoot, p.readme), errors) },
-    { path: p.completedIndex, content: fillMarkers(readText(p.completedIndex), MARKERS.completed, completedTable(data.completed), relative(repoRoot, p.completedIndex), errors) },
-    { path: p.removedIndex, content: fillMarkers(readText(p.removedIndex), MARKERS.removed, removedTable(data.removed), relative(repoRoot, p.removedIndex), errors) },
+    { path: p.readme, content: fillMarkers(readText(p.readme), MARKERS.milestones, readmeBody, relative(repoRoot, p.readme), errors, literal) },
+    { path: p.completedIndex, content: fillMarkers(readText(p.completedIndex), MARKERS.completed, completedTable(data.completed), relative(repoRoot, p.completedIndex), errors, literal) },
+    { path: p.removedIndex, content: fillMarkers(readText(p.removedIndex), MARKERS.removed, removedTable(data.removed), relative(repoRoot, p.removedIndex), errors, literal) },
     { path: p.backlogJson, content: buildBacklogJson(cfg, data, { nextIdOverride }) },
   ];
   return { files, nextId: next, errors };

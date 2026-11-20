@@ -64,7 +64,7 @@ const repoRootArg = { repoRoot: z.string().optional().describe("repo root to ope
 // test can assert the served metadata stays repo-agnostic without booting the server.
 export const TOOLS = {
   list_tasks: {
-    description: "List backlog tasks (the backlog.json shape), optionally filtered by status or milestone.",
+    description: "List backlog tasks (the backlog.json shape), optionally filtered by status or milestone. In ledger mode nextId is the ledger preview (null with a nextIdNote when there is no usable ledger), not the published value.",
     inputSchema: {
       ...repoRootArg,
       status: z.enum(["active", "completed", "removed"]).optional().describe("only tasks with this status"),
@@ -76,11 +76,18 @@ export const TOOLS = {
     inputSchema: { ...repoRootArg, id: z.string().describe("task id using this repo's configured id prefix and width") },
   },
   next_id: {
-    description: "The id a newly created task would receive.",
+    description: "The id a newly created task would receive. In ledger mode (idAllocation \"ledger\") the result is a preview only: it never claims, so another writer may take that id first; with no ledger yet it returns nextId null and says to run `trellis claim --seed`.",
     inputSchema: { ...repoRootArg },
   },
+  claim_id: {
+    description: "Claim the next task id from the local id ledger (idAllocation \"ledger\" only) and return it. Each id is handed out once across every worktree of the clone and stays claimed even if no item is written for it. Fails with guidance when the repo is in scan mode or the ledger has not been seeded (`trellis claim --seed`).",
+    inputSchema: {
+      ...repoRootArg,
+      title: z.string().describe("one-line title for the claim: no tabs or control characters"),
+    },
+  },
   create_task: {
-    description: "Create an active task: assigns the next id, writes the item file, then regenerates and validates.",
+    description: "Create an active task: assigns the next id, writes the item file, then regenerates and validates. In ledger mode the id is claimed from the local id ledger (never from a scan, so a missing ledger is an error naming `trellis claim --seed`); if a later write fails the item and generated files roll back but the claimed id stays claimed.",
     inputSchema: {
       ...repoRootArg,
       title: z.string().describe("one-line title"),
@@ -112,7 +119,7 @@ export const TOOLS = {
     inputSchema: { ...repoRootArg },
   },
   regenerate: {
-    description: "Rewrite any stale generated artifact. Returns { changed, nextId, counts }.",
+    description: "Rewrite any stale generated artifact. Returns { changed, nextId, counts }. In ledger mode the files on disk keep the scan nextId, and the returned nextId is the ledger preview (null with a note when there is no usable ledger).",
     inputSchema: { ...repoRootArg },
   },
   import: {
