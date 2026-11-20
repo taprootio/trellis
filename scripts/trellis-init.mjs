@@ -17,6 +17,7 @@ import { createInterface } from "node:readline/promises";
 import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
 import { applyImport, assertNotLedgerMode, assertNotLocalMode, assertNoLeftoverMarkers, ImportRefused } from "../src/import.mjs";
 import { loadConfig } from "../src/backlog.mjs";
+import { switchToLocal } from "../src/switch-local.mjs";
 import { LedgerError, refuseSymlinkedArtifacts, artifactPaths } from "../src/ledger.mjs";
 import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
 
@@ -24,6 +25,7 @@ const HELP = `trellis init — scaffold the Trellis backlog into a repo
 
 Usage:
   trellis init [target] [flags]
+  trellis init [target] --switch-to-local [--dry-run]
 
 Flags:
   --prefix <P>          id prefix (default: ${DEFAULTS.prefix})
@@ -40,8 +42,16 @@ Flags:
                         (a separate, later step — see below; cannot combine with --import)
   --force               overwrite existing files instead of skipping (refused when the
                         existing config has idAllocation "ledger" or generatedArtifacts "local")
+  --switch-to-local     migrate this backlog to generatedArtifacts "local" (see below; only --dry-run
+                        may accompany it)
   --dry-run             report what would change without writing
   -h, --help            show this help
+
+--switch-to-local is a standalone migration to generatedArtifacts "local" (generated files in
+an ignored <tasksDir>/.generated/ folder, nothing generated committed). It takes only --dry-run
+and the target, never prompts, and never stages, commits, runs git rm or edits .gitignore: add
+the ignore line it prints first, run it, then run the git rm commands it prints, then run
+"trellis init" (no --force), "trellis generate" and "trellis check".
 
 With --import, provide exactly one of --profile or --mapping; a relative <path>
 resolves against the target repo. --dry-run previews the scaffold without writing;
@@ -79,6 +89,7 @@ function parseArgs(argv) {
     };
     switch (key) {
       case "-h": case "--help": opts.help = true; break;
+      case "--switch-to-local": opts.switchToLocal = true; break;
       case "--force": opts.force = true; break;
       case "--dry-run": opts.dryRun = true; break;
       case "--import": opts.import = next(); break;
@@ -237,8 +248,44 @@ function reportRetire(summary, dryRun) {
   console.log("Review with `git status`, then commit. Git preserves the history.");
 }
 
+// Prints what the switch did (or would do) and the removal commands for the user to run.
+function runSwitch(targetRoot, dryRun) {
+  let r;
+  try {
+    r = switchToLocal(targetRoot, { dryRun });
+  } catch (e) {
+    console.error(`error: ${e.message}`);
+    process.exit(e instanceof LedgerError ? e.exitCode : 1);
+  }
+  console.log(`${dryRun ? "Would switch" : "Switched"} ${targetRoot} to generatedArtifacts "local"${dryRun ? " (dry run)" : ""}`);
+  if (r.edits.length) {
+    console.log(`  ${dryRun ? "edit" : "edited"} (${r.edits.length}):`);
+    for (const e of r.edits) console.log(`    ${e.rel}: ${e.why}`);
+  } else {
+    console.log("  nothing to edit");
+  }
+  for (const w of r.warnings) console.warn(`  warning: ${w}`);
+  if (r.removals.length) {
+    console.log("Legacy generated files are still tracked. Run these from the repo root to delete them (the switch never runs git rm):");
+    for (const x of r.removals) console.log(`  ${x.command}`);
+  }
+  console.log("Nothing was staged or committed. Next: run any commands above, then `trellis init` (no --force), `trellis generate` and `trellis check`.");
+  process.exit(0);
+}
+
 const { target, opts } = parseArgs(process.argv.slice(2));
 if (opts.help) { process.stdout.write(HELP); process.exit(0); }
+
+// --switch-to-local is dispatched before any prompt or scaffold path: it takes only
+// --dry-run and the target, and any other flag is a usage error before anything is read.
+if (opts.switchToLocal) {
+  const extra = Object.keys(opts).filter((k) => !["switchToLocal", "dryRun"].includes(k));
+  if (extra.length) {
+    console.error(`error: --switch-to-local takes only --dry-run and a target; remove: ${extra.map((k) => "--" + k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())).join(", ")}`);
+    process.exit(2);
+  }
+  runSwitch(resolve(target), !!opts.dryRun);
+}
 
 await promptMissing(opts);
 

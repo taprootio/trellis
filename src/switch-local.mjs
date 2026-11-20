@@ -1,0 +1,225 @@
+// `trellis init --switch-to-local` (TRL0038): moves a repo from committed generated
+// artifacts to local mode. It only edits files. It never runs `git rm`, never stages,
+// never commits and never edits `.gitignore`: the user keeps the ignore rule, and runs
+// the removal commands this prints for the legacy generated files.
+//
+// Every check and every new file is computed in memory first. Then the edited files
+// are written (the config last), and any failure restores them all, so a rerun starts
+// clean and a finished switch is a no-op.
+
+import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { DEFAULT_TASKS_DIR, GENERATED_DIR, MARKERS, SPEC_VERSION, artifactSet, loadConfig, paths } from "./backlog.mjs";
+import { AGENTS_MARKERS, artifactBullet, completedSkeleton, removedSkeleton } from "./init.mjs";
+import { OutputRefused, checkOutputFiles, discoverGit, ignoreLineFor, probe, verifyOutputPaths } from "./local-output.mjs";
+
+// Test seam: runs before each file write (with its path and index) and after the last one.
+export const testSeams = { beforeWrite: null, afterWrites: null };
+
+const posix = (rel) => rel.split(sep).join("/");
+const firstLine = (s) => String(s || "").trim().split("\n")[0] || "git error";
+const ALL_MARKERS = Object.values(MARKERS).flat();
+const trimEnd = (line) => line.replace(/[ \t\r]+$/, "");
+
+function refuse(message) {
+  throw new OutputRefused(`${message}\nNothing was changed.`);
+}
+
+// `git` through the shared probe: the cleaned environment, no fsmonitor command, no
+// optional index refresh, and literal pathspecs (`status` and `ls-files` support them).
+function git(repoRoot, args) {
+  const r = probe(repoRoot, args, { literal: true });
+  if (r.status !== 0) refuse(`git ${args[0]} failed: ${r.error ? r.error.message : firstLine(r.stderr)}`);
+  return r.stdout;
+}
+
+// A path the switch would edit or remove must be a regular file, not a link to
+// somewhere else or a directory. Absent files are fine.
+function requireRegular(path, rel) {
+  let st;
+  try {
+    st = lstatSync(path);
+  } catch (e) {
+    if (e.code === "ENOENT") return;
+    refuse(`cannot inspect ${rel}: ${e.message}`);
+  }
+  if (st.isSymbolicLink()) refuse(`${rel} is a symlink, and the switch does not edit through links. Replace it with a regular file, or edit it by hand, then run again`);
+  if (!st.isFile()) refuse(`${rel} is not a regular file. Fix it, then run again`);
+}
+
+// Removes the first generated block, with its two marker lines, from a file whose
+// markers were already verified. Keeps one blank line where the block was.
+function stripBlock(text, [begin, end]) {
+  const lines = text.split("\n");
+  const at = (m) => lines.findIndex((l) => trimEnd(l) === m);
+  const head = lines.slice(0, at(begin)).join("\n").replace(/\s+$/, "");
+  const tail = lines.slice(at(end) + 1).join("\n").replace(/^\s+/, "");
+  const joined = head && tail.trim() ? `${head}\n\n${tail}` : head || tail;
+  return joined ? joined.replace(/\n*$/, "\n") : "";
+}
+
+// Checks that a file holds either no generated marker or exactly one well-formed pair
+// of its own, each on a line of its own. The committed generator only ever replaced the
+// first pair, so any other layout may hide authored text and is refused.
+function inspectMarkers(rel, text, own) {
+  const found = [];
+  text.split("\n").forEach((line, i) => {
+    const hits = ALL_MARKERS.filter((m) => line.includes(m));
+    if (!hits.length) return;
+    if (hits.length > 1 || trimEnd(line) !== hits[0]) {
+      refuse(`${rel} line ${i + 1}: a generated marker comment shares its line with other text. Move the comment onto its own line, then run again`);
+    }
+    found.push({ line: i, marker: hits[0] });
+  });
+  if (!found.length) return false;
+  const foreign = found.find((f) => !own.includes(f.marker));
+  if (foreign) refuse(`${rel} line ${foreign.line + 1}: ${foreign.marker} belongs to another file. Remove it, then run again`);
+  const begins = found.filter((f) => f.marker === own[0]);
+  const ends = found.filter((f) => f.marker === own[1]);
+  if (begins.length > 1 || ends.length > 1) {
+    refuse(`${rel} holds a generated marker more than once. The committed generator replaced only the first pair, so a later one may be authored text (such as a fenced example). Remove the extra markers, then run again`);
+  }
+  if (begins.length !== 1 || ends.length !== 1 || begins[0].line > ends[0].line) {
+    refuse(`${rel} has an unpaired or out-of-order generated marker. Fix the pair or remove the block, then run again`);
+  }
+  return true;
+}
+
+const lowerThanCurrent = (v) => {
+  if (v == null) return false;
+  const [maj, min] = String(v).split(".").map(Number);
+  const [curMaj, curMin] = SPEC_VERSION.split(".").map(Number);
+  return maj < curMaj || (maj === curMaj && min < curMin);
+};
+
+// Runs the switch. Returns { edits, removals, warnings, dryRun }: the files changed (or
+// that would change) and the legacy files still tracked, each with the plain `git rm`
+// command for the user to run. Throws OutputRefused (exit 2) on a failed check, and a
+// plain Error (exit 1) when a write failed, after restoring every file.
+export function switchToLocal(repoRoot, { dryRun = false } = {}) {
+  if (discoverGit(repoRoot) !== "inside") {
+    refuse(`${repoRoot} is not inside a git work tree, or git is not installed. The switch needs git to check that the generated files are ignored and clean`);
+  }
+  const configPath = paths(repoRoot).config;
+  const rel = (p) => posix(relative(repoRoot, p));
+  requireRegular(configPath, rel(configPath));
+  const loaded = loadConfig(repoRoot);
+  if (loaded.errors.length) refuse(`the config has errors; fix them first: ${loaded.errors.join("; ")}`);
+  const { cfg } = loaded;
+  const localCfg = { ...cfg, generatedArtifacts: "local" };
+  const root = cfg.tasksDir || DEFAULT_TASKS_DIR;
+
+  // 1. The file kinds, before anything is read.
+  const set = artifactSet(repoRoot, localCfg);
+  const [readme, completedIdx, removedIdx] = set.authorOwned;
+  const legacyBacklog = artifactSet(repoRoot, { ...cfg, generatedArtifacts: "committed" }).generated.find((e) => e.key === "backlog");
+  const agentsPath = join(repoRoot, "AGENTS.md");
+  for (const f of [readme, completedIdx, removedIdx, legacyBacklog]) requireRegular(f.path, posix(f.rel));
+  requireRegular(agentsPath, "AGENTS.md");
+
+  // 2. The output paths: sound, ignored, and nothing tracked under `.generated/`.
+  checkOutputFiles(repoRoot, localCfg);
+  const { unignored } = verifyOutputPaths(repoRoot, localCfg);
+  if (unignored.length) {
+    refuse(`${unignored.map(posix).join(", ")} ${unignored.length > 1 ? "are" : "is"} not ignored by git. Add this line to .gitignore, then run again:\n  ${ignoreLineFor(cfg.tasksDir)}`);
+  }
+  const dirRel = rel(set.dir);
+  const underGenerated = git(repoRoot, ["ls-files", "-z", "--", `./${dirRel}`]).split("\0").filter(Boolean);
+  if (underGenerated.length) {
+    refuse(`${underGenerated.join(", ")} ${underGenerated.length > 1 ? "are" : "is"} tracked by git, but local mode keeps ${dirRel}/ out of git. Untrack ${underGenerated.length > 1 ? "them" : "it"} (git rm --cached), then run again`);
+  }
+
+  // 3. What git knows: which candidates are tracked, and which are clean.
+  const candidates = [readme, completedIdx, removedIdx, legacyBacklog].map((f) => posix(f.rel)).concat("AGENTS.md", rel(configPath));
+  const tracked = new Set(git(repoRoot, ["ls-files", "-z", "--", ...candidates.map((c) => `./${c}`)]).split("\0").filter(Boolean).map(posix));
+  const isDirty = (r) => git(repoRoot, ["status", "--porcelain=v1", "--", `./${r}`]).trim() !== "";
+  // A file the switch edits or removes must be tracked and unchanged, so the printed
+  // plain `git rm` works and the user's own edits are never mixed with ours.
+  const requireClean = (r, what) => {
+    if (!tracked.has(r)) refuse(`${r} is untracked and ${what}. Commit it (or move it away), then run again`);
+    if (isDirty(r)) refuse(`${r} has uncommitted changes and ${what}. Commit them, then run again`);
+  };
+
+  const legacyRel = posix(legacyBacklog.rel);
+  const hasLegacy = existsSync(legacyBacklog.path);
+  if (hasLegacy && !tracked.has(legacyRel)) refuse(`${legacyRel} exists but is not tracked by git. Inspect it, then remove or move it, and run again`);
+
+  // 4. The README and index files: strip the generated block, keep authored text.
+  const edits = [];
+  const removals = [];
+  const warnings = [];
+  const pairs = [[readme, MARKERS.milestones, null], [completedIdx, MARKERS.completed, completedSkeleton()], [removedIdx, MARKERS.removed, removedSkeleton()]];
+  for (const [f, own, skeleton] of pairs) {
+    if (!existsSync(f.path)) continue;
+    const text = readFileSync(f.path, "utf8");
+    const r = posix(f.rel);
+    if (!inspectMarkers(r, text, own)) continue;
+    const stripped = stripBlock(text, own);
+    // An index file holding only Trellis's own skeleton around the block is generated only:
+    // it stays byte for byte as it is, and the user removes it with the printed command.
+    if (skeleton !== null && (stripped.trim() === "" || stripped.trim() === stripBlock(skeleton, own).trim())) {
+      requireClean(r, "would be removed");
+      removals.push({ rel: r, why: "generated only" });
+      continue;
+    }
+    requireClean(r, "holds generated markers the switch must strip");
+    edits.push({ path: f.path, rel: r, before: text, after: stripped, why: "removed the generated block and its markers" });
+  }
+  if (hasLegacy) {
+    requireClean(legacyRel, "is the legacy generated file");
+    removals.push({ rel: legacyRel, why: "legacy generated file" });
+  }
+
+  // 5. AGENTS.md: replace the artifact bullet only on an exact match of Trellis's own text.
+  if (existsSync(agentsPath)) {
+    const text = readFileSync(agentsPath, "utf8");
+    const [begin, end] = AGENTS_MARKERS;
+    const bi = text.indexOf(begin);
+    const ei = bi === -1 ? -1 : text.indexOf(end, bi);
+    if (ei !== -1) {
+      const block = text.slice(bi, ei);
+      const committed = artifactBullet(root, "committed");
+      const local = artifactBullet(root, "local");
+      if (block.includes(committed)) {
+        requireClean("AGENTS.md", "holds the Trellis block the switch updates");
+        edits.push({ path: agentsPath, rel: "AGENTS.md", before: text, after: text.slice(0, bi) + block.replace(committed, () => local) + text.slice(ei), why: "updated the generated-files bullet" });
+      } else if (!block.includes(local)) {
+        warnings.push(`AGENTS.md: the generated-files bullet in the Trellis block differs from Trellis's own text, so it was left alone. Edit it by hand to say the index is generated into ${root}/${GENERATED_DIR}/ and that no committed file is generated`);
+      }
+    }
+  }
+
+  // 6. The config, last. It is patched from a fresh parse of its own bytes, never from
+  // the loaded object, which carries derived fields. A config that is already local and
+  // current keeps its bytes, even when it is uncommitted.
+  const configText = readFileSync(configPath, "utf8");
+  const obj = JSON.parse(configText);
+  if (obj.generatedArtifacts !== "local" || lowerThanCurrent(obj.specVersion)) {
+    requireClean(rel(configPath), 'needs `generatedArtifacts` set to "local"');
+    obj.generatedArtifacts = "local";
+    if (lowerThanCurrent(obj.specVersion)) obj.specVersion = SPEC_VERSION;
+    edits.push({ path: configPath, rel: rel(configPath), before: configText, after: JSON.stringify(obj, null, 2) + "\n", why: 'set generatedArtifacts to "local" and raised specVersion when it was lower' });
+  }
+
+  const quote = (s) => `'${s.replace(/'/g, "'\\''")}'`;
+  for (const r of removals) r.command = `git --literal-pathspecs rm -- ${quote(r.rel)}`;
+  const result = { edits: edits.map((e) => ({ rel: e.rel, why: e.why })), removals, warnings, dryRun };
+  if (dryRun || !edits.length) return result;
+
+  // 7. Write the edits (config last); any failure restores every file it touched.
+  const touched = [];
+  try {
+    edits.forEach((e, i) => {
+      if (testSeams.beforeWrite) testSeams.beforeWrite(e.path, i);
+      touched.push(e);
+      writeFileSync(e.path, e.after);
+    });
+    if (testSeams.afterWrites) testSeams.afterWrites();
+  } catch (e) {
+    for (const t of touched.reverse()) {
+      try { writeFileSync(t.path, t.before); } catch { /* best-effort restore */ }
+    }
+    throw new Error(`the switch failed and every edited file was restored: ${e.message}`);
+  }
+  return result;
+}

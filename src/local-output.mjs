@@ -33,7 +33,7 @@ const posix = (rel) => rel.split(sep).join("/");
 // no fsmonitor command, no optional index refresh, and an English locale so the
 // "not a git repository" text can be recognized. Literal pathspecs apply only
 // where git supports them (`ls-files`, `status`); `check-ignore` exits 128 on them.
-function probe(repoRoot, args, { literal = false } = {}) {
+export function probe(repoRoot, args, { literal = false } = {}) {
   const full = [...(literal ? ["--literal-pathspecs"] : []), "-c", "core.fsmonitor=false", "-C", repoRoot, ...args];
   return spawnSync("git", full, {
     encoding: "utf8",
