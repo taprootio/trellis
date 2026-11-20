@@ -56,11 +56,19 @@ export function discoverGit(repoRoot) {
   throw new OutputRefused(`git could not inspect ${repoRoot}: ${firstLine(r.stderr)}`);
 }
 
-// The line a user adds to `.gitignore` so the generated folder is ignored: the
-// backlog root as a normalized literal path, every gitignore metacharacter escaped.
-export function ignoreLineFor(tasksDir) {
+// The target's path from the git root ("" at the root, else "sub/dir/"), so the
+// printed ignore line is right for the root `.gitignore`. "" when git cannot say.
+export function gitPrefix(repoRoot) {
+  const r = probe(repoRoot, ["rev-parse", "--show-prefix"]);
+  return r.status === 0 ? r.stdout.split("\n")[0].trim() : "";
+}
+
+// The line a user adds to the repository root `.gitignore` so the generated folder
+// is ignored: the git-root prefix plus the backlog root as a normalized literal
+// path, every gitignore metacharacter escaped.
+export function ignoreLineFor(tasksDir, prefix = "") {
   const dir = normalize(String(tasksDir || DEFAULT_TASKS_DIR)).split(sep).filter((p) => p && p !== ".").join("/");
-  const escaped = dir.replace(/[*?[\]!#\\]/g, "\\$&").replace(/^ /, "\\ ").replace(/ $/, "\\ ");
+  const escaped = (prefix + dir).replace(/[*?[\]!#\\]/g, "\\$&").replace(/^ /, "\\ ").replace(/ $/, "\\ ");
   return `${escaped}/${GENERATED_DIR}/`;
 }
 
@@ -119,7 +127,7 @@ export function outputPreflight(repoRoot, cfg) {
   checkOutputFiles(repoRoot, cfg);
   const { unignored, tracked } = verifyOutputPaths(repoRoot, cfg);
   if (unignored.length) {
-    throw new OutputRefused(`${unignored.map(posix).join(", ")} ${unignored.length > 1 ? "are" : "is"} not ignored by git. Add this line to .gitignore and run again:\n  ${ignoreLineFor(cfg.tasksDir)}`);
+    throw new OutputRefused(`${unignored.map(posix).join(", ")} ${unignored.length > 1 ? "are" : "is"} not ignored by git. Add this line to the .gitignore at the repository root and run again:\n  ${ignoreLineFor(cfg.tasksDir, gitPrefix(repoRoot))}`);
   }
   if (tracked.length) {
     throw new OutputRefused(`${tracked.join(", ")} ${tracked.length > 1 ? "are" : "is"} tracked by git, but local mode keeps generated files out of git. Untrack ${tracked.length > 1 ? "them" : "it"} (git rm --cached) and run again`);

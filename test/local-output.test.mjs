@@ -11,7 +11,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { loadConfig } from "../src/backlog.mjs";
 import { gitEnv, seed } from "../src/ledger.mjs";
 import {
-  OutputRefused, outputPreflight, previewNextId, writeArtifactFiles, ignoreLineFor, verifyOutputPaths, discoverGit, testSeams,
+  OutputRefused, outputPreflight, previewNextId, writeArtifactFiles, ignoreLineFor, verifyOutputPaths, discoverGit, gitPrefix, testSeams,
 } from "../src/local-output.mjs";
 
 const BASE = { specVersion: "2.5", idPrefix: "DEMO", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1, 2, 3], generatedArtifacts: "local" };
@@ -260,4 +260,24 @@ test("writeArtifactFiles keeps an existing .generated/ and restores changed and 
     assert.equal(existsSync(join(c.dir, "completed.md")), false, "new file removed");
     assert.equal(existsSync(c.dir), true, "the folder was not created by the call, so it stays");
   } finally { testSeams.beforeWrite = null; c.cleanup(); }
+});
+
+test("the printed ignore line carries the git-root prefix and satisfies the preflight at the repo root", () => {
+  const top = realpathSync(mkdtempSync(join(tmpdir(), "trellis-sub-")));
+  try {
+    git(top, "init", "-q", ...initRefFormat, "-b", "main");
+    const root = join(top, "pkg [one]");
+    mkdirSync(join(root, "trellis"), { recursive: true });
+    writeFileSync(join(root, "trellis", "backlog.config.json"), JSON.stringify(BASE, null, 2) + "\n");
+    const loaded = loadConfig(root);
+    assert.deepEqual(loaded.errors, []);
+    assert.equal(gitPrefix(root), "pkg [one]/");
+    let message = "";
+    try { outputPreflight(root, loaded.cfg); } catch (e) { message = e.message; }
+    assert.match(message, /\.gitignore at the repository root/);
+    const line = message.split("\n").pop().trim();
+    assert.equal(line, "pkg \\[one\\]/trellis/.generated/");
+    writeFileSync(join(top, ".gitignore"), line + "\n");
+    outputPreflight(root, loaded.cfg);
+  } finally { rmSync(top, { recursive: true, force: true }); }
 });

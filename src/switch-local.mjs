@@ -11,7 +11,7 @@ import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { DEFAULT_TASKS_DIR, GENERATED_DIR, MARKERS, SPEC_VERSION, artifactSet, loadConfig, paths } from "./backlog.mjs";
 import { AGENTS_MARKERS, artifactBullet, completedSkeleton, removedSkeleton } from "./init.mjs";
-import { OutputRefused, checkOutputFiles, discoverGit, ignoreLineFor, probe, verifyOutputPaths } from "./local-output.mjs";
+import { OutputRefused, checkOutputFiles, discoverGit, gitPrefix, ignoreLineFor, probe, verifyOutputPaths } from "./local-output.mjs";
 
 // Test seam: runs before each file write (with its path and index) and after the last one.
 export const testSeams = { beforeWrite: null, afterWrites: null };
@@ -121,7 +121,7 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
   checkOutputFiles(repoRoot, localCfg);
   const { unignored } = verifyOutputPaths(repoRoot, localCfg);
   if (unignored.length) {
-    refuse(`${unignored.map(posix).join(", ")} ${unignored.length > 1 ? "are" : "is"} not ignored by git. Add this line to .gitignore, then run again:\n  ${ignoreLineFor(cfg.tasksDir)}`);
+    refuse(`${unignored.map(posix).join(", ")} ${unignored.length > 1 ? "are" : "is"} not ignored by git. Add this line to the .gitignore at the repository root, then run again:\n  ${ignoreLineFor(cfg.tasksDir, gitPrefix(repoRoot))}`);
   }
   const dirRel = rel(set.dir);
   const underGenerated = git(repoRoot, ["ls-files", "-z", "--", `./${dirRel}`]).split("\0").filter(Boolean);

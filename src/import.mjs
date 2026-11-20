@@ -301,17 +301,20 @@ function buildBody(raw, newId, title) {
 }
 
 // --------------------------------------------------------------- discovery
-// The source-relative PATHS the Trellis generator owns (SPEC §8): a source that is
-// itself a Trellis backlog carries these alongside its tasks, so never select one as an
-// importable item — a `*.md` glob would otherwise pull them in and fail validation.
-// Matched by PATH, not basename, so a real task that merely happens to be named
-// `active/index.md` still imports.
-const GENERATED_ARTIFACTS = new Set(["README.md", "completed/index.md", "removed/index.md"]);
-// A `.generated/` folder (local mode, TRL0038) holds only generated tables, so nothing
-// under one is an item either.
-const isGeneratedArtifact = (rel) => {
+// The source-relative PATHS the Trellis generator owns in committed mode (SPEC §8): a
+// source that is itself a Trellis backlog carries these alongside its tasks, so never
+// select one as an importable item — a `*.md` glob would otherwise pull them in and
+// fail validation. Derived from `artifactSet` so the names have one owner. Matched by
+// PATH, not basename, so a real task that merely happens to be named `active/index.md`
+// still imports.
+const COMMITTED_ARTIFACTS = new Set(
+  artifactSet(".", { tasksDir: "." }).generated.filter((e) => e.rel.endsWith(".md")).map((e) => e.rel.split(sep).join("/")),
+);
+// A `.generated/` folder (local mode, TRL0038) holds only generated tables, so when the
+// target is in local mode nothing under one is an item either.
+const isGeneratedArtifact = (rel, local) => {
   const parts = rel.split(/[/\\]/);
-  return GENERATED_ARTIFACTS.has(parts.join("/")) || parts.includes(GENERATED_DIR);
+  return COMMITTED_ARTIFACTS.has(parts.join("/")) || (local && parts.includes(GENERATED_DIR));
 };
 
 function listFiles(dir, re) {
@@ -323,7 +326,7 @@ function listFiles(dir, re) {
 
 // Gather every source item across the mapped status dirs, in a deterministic global
 // order (status order, then path) so fresh-sequential ids are reproducible.
-function discoverSources(sourceRoot, mapping, warnings) {
+function discoverSources(sourceRoot, mapping, warnings, local) {
   const out = [];
   for (const status of STATUS_ORDER) {
     const spec = mapping.sources[status];
@@ -336,7 +339,7 @@ function discoverSources(sourceRoot, mapping, warnings) {
       if (files === null) { warnings.push(`source dir not found, skipped: ${d}`); continue; }
       for (const f of files) {
         const rel = relative(sourceRoot, join(dir, f));
-        if (isGeneratedArtifact(rel)) continue; // a Trellis generated artifact at its known path — not a task
+        if (isGeneratedArtifact(rel, local)) continue; // a Trellis generated artifact at its known path — not a task
         hits.push({ status, dir, file: join(dir, f), basename: f.replace(/\.[^.]+$/, ""), rel });
       }
     }
@@ -401,7 +404,7 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   const roster = data.roster; // resolve owners/collaborators against the target roster (SPEC §7.2)
 
   const warnings = [];
-  const sources = discoverSources(sourceRoot, mapping, warnings);
+  const sources = discoverSources(sourceRoot, mapping, warnings, isLocalMode(cfg));
   if (!sources.length) warnings.push("no source items matched — check `sources.dirs` and the `file` pattern");
 
   const fields = mapping.fields;

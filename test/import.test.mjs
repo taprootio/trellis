@@ -1106,6 +1106,21 @@ test("local import writes .generated/ through the shared writer, no committed in
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("a .generated source folder is skipped only when the target is in local mode", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-gensrc-"));
+  mkdirSync(join(src, ".generated"));
+  cpSync(join(trellisSrc, "active", "TR0001.md"), join(src, ".generated", "G1.md"));
+  const dotMapping = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.md" } } };
+  const committed = initTarget();
+  const local = localTarget();
+  try {
+    assert.equal(planImport(committed, src, dotMapping, {}).counts.total, 1, "committed mode imports it");
+    assert.equal(planImport(local, src, dotMapping, {}).counts.total, 0, "local mode skips it");
+  } finally {
+    for (const d of [src, committed, local]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test("a leftover README marker refuses local import, apply and init --import, leaving the target unchanged", () => {
   const root = localTarget();
   writeFileSync(join(root, "trellis", "README.md"), LEFTOVER);
