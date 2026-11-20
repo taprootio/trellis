@@ -157,7 +157,8 @@ function isScannedTaskFile(repoRoot, id, cfg) {
   try {
     if (name !== basename(name) || !new RegExp(`^(${scanIdPattern(cfg)})\\.md$`).test(name)) return false;
     const p = paths(repoRoot, cfg);
-    return [p.active, p.completedTasks, p.removed].some((d) => { try { return statSync(join(d, name)).isFile(); } catch { return false; } });
+    // The exact name must be in the listing, so a case-insensitive filesystem cannot pass `r0001` for `R0001.md`.
+    return [p.active, p.completedTasks, p.removed].some((d) => { try { return readdirSync(d).includes(name) && statSync(join(d, name)).isFile(); } catch { return false; } });
   } catch {
     return false;
   }
@@ -219,9 +220,8 @@ function missingPlaybook(repoRoot, p, args, cfg, cfgErrors) {
   const detected = detectGoodAgent(repoRoot);
   if (p.name === "work-task") lines.push(`Task: **${requireId(repoRoot, args.id, cfg, cfgErrors)}**`);
   if (!detected) {
-    // The server cannot know earlier skips, so the command skips every other part: existing
-    // files are kept anyway, and this restores only the playbooks.
-    lines.push(`The ${p.name} playbook (${p.playbook}) is absent from this repo. From the repo this server serves (path on the next line), run \`trellis init --with-playbooks --skip ci,pr-template,branch-protection,agents\`.`, `run from: ${repoRoot}`);
+    // The server cannot know earlier skips, so it never suggests `init`: a copy restores only the playbook.
+    lines.push(`The ${p.name} playbook (${p.playbook}) is absent from this repo. From the repo this server serves (path on the next line), copy ${basename(p.playbook)} from the installed Trellis package's \`templates/trellis/playbooks/\` into \`trellis/playbooks/\` there. Nothing else needs creating or regenerating.`, `run from: ${repoRoot}`);
   } else if (p.name === "pr-draft") {
     lines.push(`Good-agent is detected (${detected}). Use its \`review-loop\` skill, and follow this repo's own PR instructions. ${PROMPT_TOKENS.prFlow}`);
   } else {

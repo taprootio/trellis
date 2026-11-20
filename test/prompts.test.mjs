@@ -251,7 +251,7 @@ test("a prompt with its playbook absent answers with a handoff, never a playbook
             for (const skill of ["write-task", "work-task", "review-loop"]) assert.ok(text.includes(skill), skill);
           }
         } else {
-          assert.ok(text.includes("--with-playbooks"));
+          assert.ok(text.includes("templates/trellis/playbooks/"));
           assert.ok(!text.includes(PROMPT_TOKENS.prFlow));
         }
       } finally { rmSync(root, { recursive: true, force: true }); }
@@ -302,11 +302,11 @@ test("prompt ids: the literal format, or an existing task file that `check` read
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("the missing-playbook recovery command names the served repo and keeps other skips", () => {
+test("the missing-playbook recovery command names the served repo", () => {
   const root = bareRepo();
   try {
     const text = textOf(root, "code-review");
-    assert.ok(text.includes("--with-playbooks") && text.includes("--skip"));
+    assert.ok(text.includes("templates/trellis/playbooks/"));
     assert.ok(text.split("\n").includes(`run from: ${root}`), "the path is on its own line, not in a shell command");
     assert.ok(!text.includes(`"${root}"`));
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -396,10 +396,14 @@ test("PR template folders count under .github, the root and docs, including syml
   }
 });
 
-test("the undetected recovery command restores only the playbooks, for all three prompts", () => {
+test("the undetected recovery tells the user to copy the playbook, for all three prompts", () => {
   const root = bareRepo({ template: false });
   try {
-    for (const name of NAMES) assert.ok(textOf(root, name).includes("--with-playbooks --skip ci,pr-template,branch-protection,agents"), name);
+    for (const name of NAMES) {
+      const text = textOf(root, name);
+      assert.ok(text.includes("templates/trellis/playbooks/") && text.includes(`${name}.md`), name);
+      assert.ok(!text.includes("trellis init"), "never suggests init");
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -430,8 +434,13 @@ test("the work-task prompt on a repo without AGENTS.md carries the fallback rule
   try {
     rmSync(join(root, "AGENTS.md"));
     const text = textOf(root, "work-task");
-    assert.ok(text.includes("If the repo has no AGENTS.md"), "the playbook carries the fallback");
+    assert.ok(text.includes("Wherever this playbook names AGENTS.md"), "the playbook carries the fallback");
     assert.ok(text.includes("SPEC.md"));
+    for (const f of ["work-task", "code-review", "conventions"]) {
+      for (const base of ["trellis", "templates/trellis"]) {
+        assert.ok(readFileSync(join(sourceRoot, base, "playbooks", `${f}.md`), "utf8").includes("Wherever this playbook names AGENTS.md"), `${base}/${f}`);
+      }
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -445,5 +454,18 @@ test("without an AGENTS.md the prompts do not require the conventions resource",
       assert.ok(!before.includes("trellis://conventions") && !before.includes("AGENTS.md"), name);
       assert.ok(before.includes("SPEC.md"));
     }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a task file must be in the directory listing by its exact name", () => {
+  const root = mkdtempSync(join(tmpdir(), "trellis-prompts-"));
+  try {
+    applyScaffold(root, { prefix: "R+" }, {}, sourceRoot);
+    const dir = join(root, "trellis", "active");
+    writeFileSync(join(dir, "RR0001.md"), "---\nid: RR0001\n---\n");
+    assert.ok(readdirSync(dir).includes("RR0001.md") && !readdirSync(dir).includes("rr0001.md"));
+    assert.ok(textOf(root, "work-task", { id: "RR0001" }).includes("RR0001"));
+    // A name differing only in case never passes, even where the filesystem would open it.
+    assert.throws(() => textOf(root, "work-task", { id: "rr0001" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

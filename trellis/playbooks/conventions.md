@@ -5,7 +5,7 @@ describe the *shape* of the loop (refine → plan → branch → work → review
 and the *output standards*, and nothing about any one repo's stack. Everything
 that is repo-specific — which command regenerates the backlog, how branches are
 named, which gates must stay green — is read at runtime from the repo's own
-`AGENTS.md`. If the repo has no AGENTS.md, use its own canonical instructions or the published spec (https://github.com/taprootio/trellis/blob/main/SPEC.md) instead.
+`AGENTS.md`. Wherever this playbook names AGENTS.md, a repo without one uses its own canonical instructions (such as CONTRIBUTING.md) or the published spec (https://github.com/taprootio/trellis/blob/main/SPEC.md).
 
 This file defines that seam: the **named points** a playbook refers to, and the
 rule for where their values live. The *definition* here is universal and travels

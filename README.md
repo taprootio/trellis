@@ -38,9 +38,10 @@ Init never pushes AGENTS.md past the 32,768 bytes Codex reads: when the result w
 be larger, it leaves the file alone, prints the block and says how many bytes it
 needs, so you can trim the file or place the block by hand. The MCP `work-task`,
 `code-review` and `pr-draft` prompts answer with a short handoff when their playbook
-is absent: the good-agent skills in a detected repo, otherwise `trellis init
---with-playbooks --skip ci,pr-template,branch-protection,agents`, which restores only
-the playbooks (the server cannot know your earlier skips, and existing files are kept).
+is absent: the good-agent skills in a detected repo, otherwise a
+note to copy the missing playbook from the installed package's
+`templates/trellis/playbooks/` into `trellis/playbooks/` (the server cannot know your
+earlier skips, so it never suggests `init`).
 
 By default the generated index and `backlog.json` are committed. To keep them out
 of git (so parallel branches stop conflicting on them), set

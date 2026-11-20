@@ -71,7 +71,7 @@ pointers by hand (init prints \`trellis init --with-playbooks\` as the way to ad
 Size guard: init never writes an AGENTS.md larger than ${AGENTS_BYTE_LIMIT} bytes, the most Codex reads. It leaves
 the file alone, prints the block with the bytes needed, and exits 0; trim AGENTS.md or place the
 block by hand. The MCP work-task, code-review and pr-draft prompts answer with a short handoff when
-their playbook is absent (good-agent's skills when detected, else trellis init --with-playbooks --skip ci,pr-template,branch-protection,agents).
+their playbook is absent (good-agent's skills when detected, else a note to copy the playbook from the package templates).
 
 To adopt a backlog whose closed items predate these rules, write a \`legacy\` cutoff into
 trellis/backlog.config.json first, then run "trellis init" without --force: init cannot create

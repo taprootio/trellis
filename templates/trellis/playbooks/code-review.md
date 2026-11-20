@@ -12,7 +12,7 @@ standard.
 1. **Ground in the repo's conventions first.** Read AGENTS.md (canonical) and any
    SPEC.md / docs the change touches. You cannot judge work against rules you
    have not read. Seam points named in code font (`check`, `gates`) read their
-   value from AGENTS.md — see [`conventions.md`](conventions.md). If the repo has no AGENTS.md, use its own canonical instructions or the published spec (https://github.com/taprootio/trellis/blob/main/SPEC.md) instead.
+   value from AGENTS.md — see [`conventions.md`](conventions.md). Wherever this playbook names AGENTS.md, a repo without one uses its own canonical instructions (such as CONTRIBUTING.md) or the published spec (https://github.com/taprootio/trellis/blob/main/SPEC.md).
 2. **Identify the task.** Determine the backlog id this work belongs to — the
    repo's configured id (branch name, commits, the added/moved file under
    the backlog root, default `trellis/`). Review against its stated intent, not

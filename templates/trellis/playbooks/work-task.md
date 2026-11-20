@@ -19,7 +19,7 @@ so `main` stays clean.
    repo live there; this playbook is only the orchestration. Where a step names a
    seam point in code font (`regenerate`, `check`, `branch-naming`, `gates`,
    `attribution`), it reads that repo's value from AGENTS.md — see
-   [`conventions.md`](conventions.md) for the contract. If the repo has no AGENTS.md, use its own canonical instructions or the published spec (https://github.com/taprootio/trellis/blob/main/SPEC.md) instead.
+   [`conventions.md`](conventions.md) for the contract. Wherever this playbook names AGENTS.md, a repo without one uses its own canonical instructions (such as CONTRIBUTING.md) or the published spec (https://github.com/taprootio/trellis/blob/main/SPEC.md).
 2. **Read the task.** Open `<ID>.md` under the backlog root's `active/` (the
    configured `tasksDir`, default `trellis/`) in full — front-matter (milestone,
    priority, effort, depends_on) and body (Scope, Notes, Risks). If
