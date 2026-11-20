@@ -495,12 +495,14 @@ test("the pr-draft prompt on a repo whose only instructions are CONTRIBUTING.md 
   const root = freshRepo();
   try {
     rmSync(join(root, "AGENTS.md"));
-    writeFileSync(join(root, "CONTRIBUTING.md"), "# Contributing\n");
+    writeFileSync(join(root, "CONTRIBUTING.md"), "# Contributing\n\nAttribution: add a Signed-off-by trailer.\n");
     const text = textOf(root, "pr-draft");
     const from = text.indexOf("**Attribution:**");
     const rule = text.slice(from, text.indexOf("\n\n", from) === -1 ? undefined : text.indexOf("\n\n", from));
     assert.ok(from > 0);
     assert.ok(rule.includes("Wherever this playbook names AGENTS.md") && rule.includes("CONTRIBUTING.md"));
+    const flat = rule.replace(/\s+/g, " ");
+    assert.ok(flat.includes("the repo's `attribution` policy") && flat.indexOf("the repo's `attribution` policy") < flat.indexOf("the default is none"), "the repo's policy comes before Trellis's default");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -512,6 +514,37 @@ test("the PR template resource and the pr-draft handoff agree on a .txt template
     assert.ok(textOf(root, "pr-draft").includes("docs/pull_request_template.txt"));
     const res = readResource(root, "trellis://template/pull-request");
     assert.equal(res.text, "template text\n");
+    assert.equal(res.mimeType, "text/plain");
     assert.equal(listResources(root).find((r) => r.uri === "trellis://template/pull-request").available, true);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the PR template lookup prefers .github/pull_request_template.md, and a lone folder template is the template", () => {
+  const root = bareRepo({ template: false });
+  try {
+    mkdirSync(join(root, "docs"));
+    writeFileSync(join(root, "docs", "pull_request_template.md"), "docs\n");
+    writeFileSync(join(root, "PULL_REQUEST_TEMPLATE.md"), "variant\n");
+    writeFileSync(join(root, ".github", "pull_request_template.txt"), "txt\n");
+    writeFileSync(join(root, ".github", "pull_request_template.md"), "exact\n");
+    assert.ok(textOf(root, "pr-draft").includes(".github/pull_request_template.md"));
+    assert.equal(readResource(root, "trellis://template/pull-request").text, "exact\n");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+
+  const one = bareRepo({ template: false });
+  const many = bareRepo({ template: false });
+  try {
+    mkdirSync(join(one, "docs", "PULL_REQUEST_TEMPLATE"), { recursive: true });
+    writeFileSync(join(one, "docs", "PULL_REQUEST_TEMPLATE", "bug.md"), "bug\n");
+    assert.ok(textOf(one, "pr-draft").includes("docs/PULL_REQUEST_TEMPLATE/bug.md"));
+    assert.equal(readResource(one, "trellis://template/pull-request").text, "bug\n");
+
+    mkdirSync(join(many, "docs", "PULL_REQUEST_TEMPLATE"), { recursive: true });
+    for (const f of ["a.md", "b.txt"]) writeFileSync(join(many, "docs", "PULL_REQUEST_TEMPLATE", f), "t\n");
+    const text = textOf(many, "pr-draft");
+    assert.ok(text.includes("docs/PULL_REQUEST_TEMPLATE/") && text.includes("pick"));
+    assert.ok(!text.includes(PROMPT_TOKENS.noTemplate));
+    assert.equal(listResources(many).find((r) => r.uri === "trellis://template/pull-request").available, false);
+    assert.throws(() => readResource(many, "trellis://template/pull-request"), (e) => e instanceof TrellisError && e.code === "not_found");
+  } finally { rmSync(one, { recursive: true, force: true }); rmSync(many, { recursive: true, force: true }); }
 });

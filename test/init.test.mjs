@@ -2091,6 +2091,7 @@ test("the one universal branch-protection guide names the owner's CI status and 
     assert.ok(guide.includes("Use PUT only to create a new protection rule"));
     assert.ok(guide.includes("if you installed Trellis's workflow"));
     assert.ok(guide.includes("gh api"));
+    assert.ok(guide.includes("edit the rule that covers the default branch"), "owners with a rule edit it");
 
     // `backlog` lives only in the bounded example section.
     const example = /^### Example: if you installed Trellis's workflow\n[\s\S]*?(?=^## )/m.exec(guide);

@@ -162,10 +162,9 @@ export function registerTools(server, defaultRoot) {
 // so the list never offers what this repo can't serve (e.g. SPEC.md is absent in
 // onboarded repos until TRL0010). Returns the count registered.
 function registerResources(server, defaultRoot) {
-  const available = new Set(listResources(defaultRoot).filter((r) => r.available).map((r) => r.uri));
-  const byUri = new Map(RESOURCES.map((r) => [r.uri, r]));
-  for (const uri of available) {
-    const r = byUri.get(uri);
+  // The resolved entries carry the mimeType `resources/read` will return.
+  const available = listResources(defaultRoot).filter((r) => r.available);
+  for (const r of available) {
     server.registerResource(
       r.name,
       r.uri,

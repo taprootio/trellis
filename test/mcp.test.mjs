@@ -1277,3 +1277,27 @@ test("the MCP server reports the package version on initialize", () => {
   const reply = JSON.parse(r.stdout.split("\n").find((l) => l.includes('"serverInfo"')));
   assert.equal(reply.result.serverInfo.version, JSON.parse(readFileSync(join(sourceRoot, "package.json"), "utf8")).version);
 });
+
+test("the MCP wire advertises and returns the PR template's mimeType for .md and .txt", () => {
+  for (const [name, mime] of [["pull_request_template.md", "text/markdown"], ["pull_request_template.txt", "text/plain"]]) {
+    const root = mkdtempSync(join(tmpdir(), "trellis-mcp-wire-"));
+    try {
+      applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+      rmSync(join(root, ".github", "pull_request_template.md"));
+      mkdirSync(join(root, "docs"));
+      writeFileSync(join(root, "docs", name), "template\n");
+      const send = (id, method, params = {}) => JSON.stringify({ jsonrpc: "2.0", id, method, params });
+      const input = [
+        send(1, "initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "t", version: "0" } }),
+        JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+        send(2, "resources/list"),
+        send(3, "resources/read", { uri: "trellis://template/pull-request" }),
+      ].join("\n") + "\n";
+      const r = spawnSync(process.execPath, [join(sourceRoot, "scripts", "trellis-mcp.mjs"), "--repo", root], { input, encoding: "utf8", timeout: 20000 });
+      const replies = Object.fromEntries(r.stdout.split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((m) => m.id).map((m) => [m.id, m.result]));
+      assert.equal(replies[2].resources.find((x) => x.uri === "trellis://template/pull-request").mimeType, mime);
+      assert.equal(replies[3].contents[0].mimeType, mime);
+      assert.equal(replies[3].contents[0].text, "template\n");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});

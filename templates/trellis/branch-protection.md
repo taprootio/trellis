@@ -70,7 +70,9 @@ JSON
 ### In the UI
 
 **Settings → Branches → Add branch ruleset** (or **Add rule** under the classic
-"Branch protection rules"), targeting the default branch:
+"Branch protection rules"), targeting the default branch. If the default branch
+already has a rule, edit the rule that covers the default branch instead of adding a
+second one: add your CI status to its required checks and keep its existing checks.
 
 1. **Require a pull request before merging** (optionally require approvals).
 2. **Require status checks to pass before merging** → search for and select

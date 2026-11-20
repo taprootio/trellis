@@ -202,11 +202,14 @@ function instruction(repoRoot, name, args, cfg, cfgErrors) {
 
 // Where the repo keeps its PR template, in GitHub's standard places (`.github/`, the repo
 // root, `docs/`), matched case-insensitively, or a `PULL_REQUEST_TEMPLATE/` folder holding
-// templates in any of those places. Returns the repo-relative path, or null.
+// templates in any of those places. Returns the repo-relative file, a folder path ending in
+// `/` when the folder holds several templates, or null.
 function findPrTemplate(repoRoot) {
   // A symlink counts when its target is a regular file.
   const isRegularFile = (rel) => { try { return statSync(join(repoRoot, rel)).isFile(); } catch { return false; } };
   const entries = (dir) => { try { return readdirSync(join(repoRoot, dir), { withFileTypes: true }); } catch { return []; } };
+  // The file the resource always served wins, whatever else sits beside it.
+  if (isRegularFile(".github/pull_request_template.md") && entries(".github").some((e) => e.name === "pull_request_template.md")) return ".github/pull_request_template.md";
   for (const dir of [".github", ".", "docs"]) {
     const hit = entries(dir).find((e) => /^pull_request_template\.(md|txt)$/i.test(e.name) && isRegularFile(dir === "." ? e.name : `${dir}/${e.name}`));
     if (hit) return dir === "." ? hit.name : `${dir}/${hit.name}`;
@@ -216,7 +219,11 @@ function findPrTemplate(repoRoot) {
   for (const dir of [".github", ".", "docs"]) {
     for (const e of entries(dir).filter((x) => /^pull_request_template$/i.test(x.name))) {
       const rel = dir === "." ? e.name : `${dir}/${e.name}`;
-      if (isDir(rel) && entries(rel).some((f) => /\.(md|txt)$/i.test(f.name) && isRegularFile(`${rel}/${f.name}`))) return `${rel}/`;
+      if (!isDir(rel)) continue;
+      const eligible = entries(rel).filter((f) => /\.(md|txt)$/i.test(f.name) && isRegularFile(`${rel}/${f.name}`));
+      // One template is the template; several leave the choice to the client (a folder path).
+      if (eligible.length === 1) return `${rel}/${eligible[0].name}`;
+      if (eligible.length > 1) return `${rel}/`;
     }
   }
   return null;
@@ -247,7 +254,7 @@ function missingPlaybook(repoRoot, p, args, cfg, cfgErrors) {
   }
   if (p.name === "pr-draft") {
     const template = findPrTemplate(repoRoot);
-    lines.push(template ? `The repo's PR template is at ${template}; fill it.` : `${PROMPT_TOKENS.noTemplate} No PR template exists in this repo; do not fill one.`);
+    lines.push(template ? (template.endsWith("/") ? `The repo keeps several PR templates in ${template}; pick the file that fits the change and fill it.` : `The repo's PR template is at ${template}; fill it.`) : `${PROMPT_TOKENS.noTemplate} No PR template exists in this repo; do not fill one.`);
   }
   return lines.join("\n");
 }
