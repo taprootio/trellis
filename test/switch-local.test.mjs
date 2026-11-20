@@ -177,10 +177,10 @@ test("a whitespace-only index file is blank, so it is author-owned and kept", ()
   } finally { f.cleanup(); }
 });
 
-test("the printed removal commands come with a note to run them without GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE", () => {
+test("the printed removal commands come with a note to run them without GIT_DIR, GIT_COMMON_DIR, GIT_WORK_TREE or GIT_INDEX_FILE", () => {
   const f = fixture();
   try {
-    assert.match(runSwitch(f.root).stdout, /no GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE set/);
+    assert.match(runSwitch(f.root).stdout, /no GIT_DIR, GIT_COMMON_DIR, GIT_WORK_TREE or GIT_INDEX_FILE set/);
   } finally { f.cleanup(); }
 });
 
@@ -552,4 +552,12 @@ test("a failed original-to-backup rename records no backup, so the restore repor
     assert.throws(() => switchToLocal(f.root), /every edited file was restored: rename refused/);
     assert.deepEqual(tree(f.root), before);
   } finally { outputSeams.rename = null; f.cleanup(); }
+});
+
+// ------------------------------------------------------------ round 5
+test("a non-ASCII tasksDir is refused with the config error and nothing changes", () => {
+  const f = fixture({ tasksDir: "planningé" });
+  try {
+    refusedWith(f.root, /tasksDir.*ASCII/);
+  } finally { f.cleanup(); }
 });

@@ -1148,7 +1148,7 @@ test("a mapped source-root backlog.json is an ordinary file; one under .generate
   try {
     mkdirSync(join(src, ".generated"), { recursive: true });
     writeFileSync(join(src, "backlog.json"), "Plain notes in a file the user mapped.\n");
-    writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ prefix: "X", milestones: [], nextId: "X0001", counts: {}, tasks: [] }) + "\n");
+    writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ prefix: "X", milestones: [], nextId: "X0001", counts: { active: 0, completed: 0, removed: 0 }, tasks: [] }) + "\n");
     const at = (dir) => ({ ...loadProfile("trellis").mapping, sources: { active: { dirs: [dir], file: "*.json" } } });
     const plain = planImport(root, src, at("."), {});
     assert.equal(plain.counts.total, 1, "the source-root backlog.json is not excluded by name (it was before round 3)");
@@ -1363,4 +1363,51 @@ test("import and init --import refuse a mapped source file that is a local outpu
       rmSync(mapPath, { force: true });
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
+});
+
+// ------------------------------------------------------- review round 5 (TRL0038)
+test("init --import in local mode generates no output before the import checks run", { skip: process.platform === "win32" }, () => {
+  const root = localTarget();
+  try {
+    const gen = join(root, "trellis", ".generated");
+    assert.equal(existsSync(gen), false);
+    const map = JSON.stringify({ ...loadProfile("trellis").mapping, sources: { active: { dirs: ["trellis/.generated"], file: "*.md" } } });
+    const mapPath = join(root, "..", "map-deferred.json");
+    writeFileSync(mapPath, map);
+    const ini = spawnSync(process.execPath, [initScript, root, "--import", root, "--mapping", mapPath], { encoding: "utf8" });
+    rmSync(mapPath, { force: true });
+    // Nothing was read from an output that did not exist: no scaffold-made file was imported.
+    assert.doesNotMatch(ini.stderr, /generated output/);
+    assert.deepEqual(readdirSync(join(root, "trellis", "active")).filter((n) => /index|completed|removed/.test(n)), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a mapped file reaching an output through another case spelling is refused by identity", { skip: process.platform === "win32" }, () => {
+  const root = localTarget();
+  try {
+    const gen = join(root, "trellis", ".generated");
+    mkdirSync(gen);
+    writeFileSync(join(gen, "index.md"), `${localHead(LOCAL_TITLES.index)}\nold\n`);
+    if (!existsSync(join(root, "TRELLIS", ".generated", "index.md"))) return; // case-sensitive volume
+    const map = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["TRELLIS/.generated"], file: "*.md" } } };
+    const before = tree(root);
+    assert.throws(() => applyImport(root, root, map), (e) => e instanceof ImportRefused && /generated output/.test(e.message));
+    assert.deepEqual(tree(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a .generated/backlog.json with the five keys but wrong types imports as an ordinary file", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-genjson3-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.json" } } };
+    const base = { prefix: "X", milestones: [], nextId: "X1", counts: { active: 0, completed: 0, removed: 0 }, tasks: [] };
+    for (const bad of [{ prefix: 1 }, { milestones: "x" }, { nextId: 5 }, { counts: [] }, { counts: { active: "0", completed: 0, removed: 0 } }, { tasks: {} }]) {
+      writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, ...bad }));
+      assert.equal(planImport(root, src, at, {}).counts.total, 1, `imported: ${JSON.stringify(bad)}`);
+    }
+    writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, nextId: null }));
+    assert.equal(planImport(root, src, at, {}).counts.total, 0, "the real generated shape is skipped");
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });

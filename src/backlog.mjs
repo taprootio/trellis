@@ -136,7 +136,13 @@ export function loadConfig(repoRoot) {
   } catch (e) {
     return { cfg: null, warnings, errors: [`backlog.config.json is not valid JSON (${e.message})`] };
   }
+  return validateConfig(cfg);
+}
 
+// The config rules, on a parsed object. `loadConfig` reads the file and calls this; the
+// local-mode switch calls it on the config it would write, so both apply one rule set.
+export function validateConfig(cfg) {
+  const warnings = [];
   const errors = [];
   if (typeof cfg.idPrefix !== "string" || !cfg.idPrefix) errors.push("config: `idPrefix` must be a non-empty string");
   if (!Number.isInteger(cfg.idWidth) || cfg.idWidth < 1) errors.push("config: `idWidth` must be a positive integer");

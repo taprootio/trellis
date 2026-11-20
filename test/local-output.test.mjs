@@ -401,6 +401,28 @@ test("a rollback that cannot remove a new file names it in the error", { skip: p
     const files = OUTPUTS.map((n, i) => ({ path: join(c.dir, n), content: `new ${i}\n` }));
     // Locks the folder just before write 1, so removing the new file from write 0 fails.
     testSeams.beforeWrite = (_p, i) => { if (i === 1) { chmodSync(c.dir, 0o555); throw new Error("boom"); } };
-    assert.throws(() => writeArtifactFiles(files), (e) => /^boom; could not restore every file; could not remove .*index\.md: /.test(e.message) && e.failed.length === 1);
+    assert.throws(() => writeArtifactFiles(files), (e) => /^boom; could not restore every file; could not remove .*index\.md: /.test(e.message) && e.failed.length === 4, "the new file and the three staged files");
   } finally { testSeams.beforeWrite = null; chmodSync(c.dir, 0o755); c.cleanup(); }
+});
+
+// ------------------------------------------------------- review round 5 (TRL0038)
+test("a rollback that cannot remove a staging file names it in the error", { skip: process.platform === "win32" || (process.getuid && process.getuid() === 0) }, () => {
+  const c = localRepo();
+  try {
+    mkdirSync(c.dir);
+    const files = OUTPUTS.map((n, i) => ({ path: join(c.dir, n), content: `new ${i}\n` }));
+    // Locks the folder before the first install, so every staged file stays behind.
+    testSeams.beforeWrite = (_p, i) => { if (i === 0) { chmodSync(c.dir, 0o555); throw new Error("boom"); } };
+    assert.throws(() => writeArtifactFiles(files), (e) => /could not remove the staging file .*\.tmp/.test(e.message) && e.failed.length === OUTPUTS.length);
+  } finally { testSeams.beforeWrite = null; chmodSync(c.dir, 0o755); c.cleanup(); }
+});
+
+test("an independent nested checkout at the backlog root refuses the preflight", () => {
+  const c = localRepo({ tasksDir: "planning" });
+  try {
+    mkdirSync(join(c.root, "planning"), { recursive: true });
+    git(join(c.root, "planning"), "init", "-q", ...initRefFormat, "-b", "main");
+    refused(() => outputPreflight(c.root, c.cfg), /separate git work tree/);
+    refused(() => verifyOutputPaths(c.root, c.cfg), /separate git work tree/);
+  } finally { c.cleanup(); }
 });

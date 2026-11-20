@@ -519,7 +519,9 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
 // ---------------------------------------------------------------- apply
 // Execute the plan, then run the TRL0002 core to fill the generated artifacts.
 // Returns a summary { created, skipped, appended, generated, warnings }.
-export function applyScaffold(targetRoot, opts = {}, { dryRun = false } = {}, sourceRoot) {
+// `deferGenerate` (`init --import`, local mode) leaves the `.generated/` outputs to the
+// import phase, so its source-overlap check runs before any output exists (TRL0038).
+export function applyScaffold(targetRoot, opts = {}, { dryRun = false, deferGenerate = false } = {}, sourceRoot) {
   // `errors` is fatal (the run did not produce a --check-green scaffold);
   // `warnings` is benign (e.g. a missing copy source). The CLI keys its exit code
   // and "Refused" banner off `errors`, never off `warnings`.
@@ -585,6 +587,8 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false } = {}, so
   // so it goes to `errors` (preflight should already have caught the usual causes).
   if (dryRun) {
     summary.generated.push(...GENERATED);
+  } else if (local && deferGenerate) {
+    // The import regenerates the outputs once its own checks pass.
   } else {
     const { cfg, errors: cfgErrors } = loadConfig(targetRoot);
     const data = cfgErrors.length ? null : readBacklog(targetRoot, cfg);

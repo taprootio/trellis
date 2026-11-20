@@ -6,7 +6,7 @@
 // writer and the ignore-line formatter. It is kept out of the core
 // (src/backlog.mjs) so that `check` never depends on git (SPEC §8.3).
 
-import { closeSync, existsSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join, normalize, posix as posixPath, relative, sep } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -104,6 +104,23 @@ export function pathspec(rel, icase) {
 export function verifyOutputPaths(repoRoot, cfg) {
   if (discoverGit(repoRoot) !== "inside") return { inside: false, unignored: [], tracked: [] };
   const outputs = artifactSet(repoRoot, cfg).generated;
+  // A nested checkout between the target and an output would answer the ignore and
+  // tracked questions for its own repository, not the target's.
+  const topOf = (dir) => {
+    const t = probe(dir, ["rev-parse", "--show-toplevel"]);
+    if (t.status === 0) return realpathSync(t.stdout.replace(/\n$/, ""));
+    if (t.status === 128 && t.stderr.replace(/\n$/, "") === OUTSIDE_REPO) return null;
+    throw new OutputRefused(`git could not inspect ${dir}: ${t.error ? t.error.message : firstLine(t.stderr)}`);
+  };
+  const targetTop = topOf(repoRoot);
+  for (const e of outputs) {
+    let dir = dirname(e.path);
+    while (!existsSync(dir)) dir = dirname(dir);
+    const top = topOf(dir);
+    if (top !== null && top !== targetTop) {
+      throw new OutputRefused(`${posix(relative(repoRoot, dir)) || "."} belongs to a separate git work tree (${top}), so git cannot say whether ${posix(e.rel)} is ignored here. Remove the nested checkout or move the backlog root out of it`);
+    }
+  }
   const unignored = [];
   for (const e of outputs) {
     const r = probe(repoRoot, ["check-ignore", "-q", "--no-index", "--", `./${posix(e.rel)}`]);
@@ -279,7 +296,9 @@ export function installStaged(entries, hooks = {}, failureText = "could not rest
       }
     }
     for (const p of plan) {
-      if (p.temp) { try { rmSync(p.temp, { force: true }); } catch { /* best-effort cleanup */ } }
+      if (p.temp) {
+        try { rmSync(p.temp, { force: true }); } catch (re) { failed.push(`could not remove the staging file ${p.temp}: ${re.message}`); }
+      }
     }
     if (kept.length || failed.length) {
       const parts = [e.message, failureText];

@@ -9,7 +9,7 @@
 
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { DEFAULT_TASKS_DIR, GENERATED_DIR, MARKERS, SPEC_VERSION, artifactSet, loadConfig, paths } from "./backlog.mjs";
+import { DEFAULT_TASKS_DIR, GENERATED_DIR, MARKERS, SPEC_VERSION, artifactSet, loadConfig, paths, validateConfig } from "./backlog.mjs";
 import { AGENTS_MARKERS, artifactBullet, completedSkeleton, removedSkeleton } from "./init.mjs";
 import { OutputRefused, checkOutputFiles, discoverGit, foldsCase, gitPrefix, ignoreLineFor, installStaged, pathspec, probe, verifyOutputPaths } from "./local-output.mjs";
 
@@ -133,6 +133,11 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
   const loaded = loadConfig(repoRoot);
   if (loaded.errors.length) refuse(`the config has errors; fix them first: ${loaded.errors.join("; ")}`);
   const { cfg } = loaded;
+  // The config the switch would write must pass the same rules, local-mode ones included.
+  const wouldWrite = { ...JSON.parse(readText(configPath, rel(configPath))), generatedArtifacts: "local" };
+  if (lowerThanCurrent(wouldWrite.specVersion)) wouldWrite.specVersion = SPEC_VERSION;
+  const wouldErrors = validateConfig(wouldWrite).errors;
+  if (wouldErrors.length) refuse(`the config would be invalid in local mode; fix it first: ${wouldErrors.join("; ")}`);
   const localCfg = { ...cfg, generatedArtifacts: "local" };
   const root = cfg.tasksDir || DEFAULT_TASKS_DIR;
 

@@ -330,7 +330,12 @@ const BACKLOG_KEYS = ["prefix", "milestones", "nextId", "counts", "tasks"];
 function hasBacklogShape(abs) {
   try {
     const obj = JSON.parse(readFileSync(abs, "utf8"));
-    return !!obj && typeof obj === "object" && !Array.isArray(obj) && BACKLOG_KEYS.every((k) => Object.hasOwn(obj, k));
+    if (!obj || typeof obj !== "object" || Array.isArray(obj) || !BACKLOG_KEYS.every((k) => Object.hasOwn(obj, k))) return false;
+    const counts = obj.counts;
+    return typeof obj.prefix === "string" && Array.isArray(obj.milestones) && (obj.nextId === null || typeof obj.nextId === "string")
+      && !!counts && typeof counts === "object" && !Array.isArray(counts)
+      && ["active", "completed", "removed"].every((k) => typeof counts[k] === "number")
+      && Array.isArray(obj.tasks);
   } catch { return false; }
 }
 function isGeneratedArtifact(rel, abs) {
@@ -754,8 +759,12 @@ export function assertSourceNotLocalOutput(targetRoot, sourceRoot, mapping, what
   const { cfg, errors } = loadConfig(targetRoot);
   if (errors.length || !isLocalMode(cfg)) return;
   const outputs = new Map(artifactSet(targetRoot, cfg).generated.map((e) => [resolveFuture(e.path), e.rel]));
+  // A path can name an output through another spelling (a case-folding volume), so existing
+  // files are also matched by device and inode.
+  const identity = (path) => { try { const st = statSync(path); return `${st.dev}:${st.ino}`; } catch { return null; } };
+  const ids = new Map(artifactSet(targetRoot, cfg).generated.map((e) => [identity(e.path), e.rel]).filter(([id]) => id));
   for (const src of discoverSources(sourceRoot, mapping, [], { includeGenerated: true })) {
-    const hit = outputs.get(resolveFuture(src.file));
+    const hit = outputs.get(resolveFuture(src.file)) || ids.get(identity(src.file));
     if (hit) throw new ImportRefused(`${what} refused: the mapped source file ${src.rel} is the target's generated output ${hit.split(sep).join("/")}. Map a different source. Nothing was written.`);
   }
 }
