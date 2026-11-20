@@ -1233,3 +1233,20 @@ ledgerTest("local ledger regenerate reads the ledger preview once, so the file a
     assert.equal(JSON.parse(readFileSync(join(c.gen, "backlog.json"), "utf8")).nextId, out.nextId);
   } finally { process.env.PATH = old; rmSync(bin, { recursive: true, force: true }); c.cleanup(); }
 });
+
+test("move_task with an impossible date is rolled back in a repo with legacy", () => {
+  const root = freshRepo();
+  try {
+    const cfgPath = join(root, "trellis", "backlog.config.json");
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    writeFileSync(cfgPath, JSON.stringify({ ...cfg, legacy: { through: "DEMO0000", closedBefore: "2026-11-19" } }, null, 2) + "\n");
+    createTask(root, VALID);
+    const snapshot = () => {
+      const files = ["active/DEMO0001.md", "README.md", "backlog.json", "completed/index.md"];
+      return files.map((f) => readFileSync(join(root, "trellis", f), "utf8")).concat(existsSync(join(root, "trellis", "completed", "tasks", "DEMO0001.md")));
+    };
+    const before = snapshot();
+    assert.throws(() => moveTask(root, { id: "DEMO0001", to: "completed", date: "2026-02-31" }));
+    assert.deepEqual(snapshot(), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

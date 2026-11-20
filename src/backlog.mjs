@@ -618,11 +618,44 @@ function makeValidators(cfg, roster, ids) {
   // is NOT re-validated against the current config (§8.3) — a value that has since
   // left the config still validates. Call before attachEffort, so a present-but-
   // unresolvable historical effort (e.g. a retired scale label) counts as present.
-  const checkHistorical = (it, err) => {
-    if (!it.summary) err("missing `summary`");
-    if (it.milestone === undefined || it.milestone === "") err("missing `milestone`");
-    if (it.priority === undefined || it.priority === "") err("missing `priority`");
-    if (it.effort === undefined || it.effort === "") err("missing `effort`");
+  //
+  // With `legacy` (TRL0039): a blank string counts as missing on every closed item, and
+  // an item that `qualifies` (below) may omit all four.
+  const legacy = cfg.legacy;
+  const blank = (v) => typeof v === "string" && !v.trim();
+  const missing = (v) => v === undefined || v === "" || (legacy && blank(v));
+  const checkHistorical = (it, err, qualifies = false) => {
+    if (qualifies) return;
+    if (!it.summary || (legacy && blank(it.summary))) err("missing `summary`");
+    if (missing(it.milestone)) err("missing `milestone`");
+    if (missing(it.priority)) err("missing `priority`");
+    if (missing(it.effort)) err("missing `effort`");
+  };
+
+  // A closed item from before adoption: its id is at or below `legacy.through` and its
+  // close date is a real date before `legacy.closedBefore`. The id comes from the
+  // filename (it.id can be absent); the plain prefix makes the digit suffixes
+  // fixed-width, so a lexical compare is exact. Never `Number`: wide ids pass 2^53.
+  const qualifiesAsLegacy = (it, dateField) => {
+    if (!legacy) return false;
+    const suffix = (id) => id.slice(cfg.idPrefix.length);
+    if (suffix(it._file.replace(/\.md$/, "")) > suffix(legacy.through)) return false;
+    return isRealDate(it[dateField]) && it[dateField] < legacy.closedBefore;
+  };
+
+  // The close date: the `YYYY-MM-DD` shape today; with `legacy` it must also be real,
+  // because qualifying depends on it.
+  const closeDateProblem = (value, field) => {
+    if (!isoDate(value)) return `\`${field}\` must be an ISO date (YYYY-MM-DD)`;
+    if (legacy && !isRealDate(value)) return `\`${field}\` must be a real calendar date`;
+    return null;
+  };
+
+  // Make a qualifying item's blank descriptive fields missing, so every renderer sees
+  // the same item. Archived effort display keys would otherwise survive the read.
+  const clearLegacyBlanks = (it) => {
+    for (const k of ["summary", "milestone", "priority", "effort"]) if (blank(it[k]) || it[k] === "") delete it[k];
+    if (it.effort === undefined) for (const k of ["_effortLabel", "_effortEmoji", "_effortImage"]) delete it[k];
   };
 
   // Owner/collaborator validation (SPEC §5.1, §7.2, §8.3). On **every** item the
@@ -654,7 +687,7 @@ function makeValidators(cfg, roster, ids) {
     if (!cfg.milestones.includes(it.milestone)) err(`milestone must be one of ${cfg.milestones.join(", ")}`);
     validateAssignees(it, err, true);
   };
-  return { checkActive, checkCommon, checkHistorical, attachEffort, validateAssignees, isoDate };
+  return { checkActive, checkCommon, checkHistorical, attachEffort, validateAssignees, qualifiesAsLegacy, closeDateProblem, clearLegacyBlanks };
 }
 
 // Problems an active item would have on re-read; used before a ledger id is claimed.
@@ -707,23 +740,29 @@ export function readBacklog(repoRoot, cfg) {
   // required depends_on with referential checks); their historical enum values
   // (milestone/priority/effort) are NOT re-validated against the current config
   // (SPEC.md §5.1, §8.3).
-  const { checkActive, checkCommon, checkHistorical, attachEffort, validateAssignees, isoDate } = makeValidators(cfg, roster, ids);
+  const { checkActive, checkCommon, checkHistorical, attachEffort, validateAssignees, qualifiesAsLegacy, closeDateProblem, clearLegacyBlanks } = makeValidators(cfg, roster, ids);
 
   for (const it of active) checkActive(it, (m) => errors.push(`active/${it._file}: ${m}`));
   for (const it of completed) {
     const err = (m) => errors.push(`completed/${it._file}: ${m}`);
     checkCommon(it, "completed", err);
-    checkHistorical(it, err);
+    const qualifies = qualifiesAsLegacy(it, "completed_on");
+    checkHistorical(it, err, qualifies);
+    if (qualifies) clearLegacyBlanks(it);
     attachEffort(it, null);
-    if (!isoDate(it.completed_on)) err("`completed_on` must be an ISO date (YYYY-MM-DD)");
+    const dateProblem = closeDateProblem(it.completed_on, "completed_on");
+    if (dateProblem) err(dateProblem);
     validateAssignees(it, err, false);
   }
   for (const it of removed) {
     const err = (m) => errors.push(`removed/${it._file}: ${m}`);
     checkCommon(it, "removed", err);
-    checkHistorical(it, err);
+    const qualifies = qualifiesAsLegacy(it, "removed_on");
+    checkHistorical(it, err, qualifies);
+    if (qualifies) clearLegacyBlanks(it);
     attachEffort(it, null);
-    if (!isoDate(it.removed_on)) err("`removed_on` must be an ISO date (YYYY-MM-DD)");
+    const dateProblem = closeDateProblem(it.removed_on, "removed_on");
+    if (dateProblem) err(dateProblem);
     if (!it.removed_reason) err("missing `removed_reason`");
     validateAssignees(it, err, false);
   }
