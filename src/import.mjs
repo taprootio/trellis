@@ -124,6 +124,22 @@ export function assertNotLocalMode(targetRoot, what, why) {
   }
 }
 
+// `init --force` would replace the config with one that has no `legacy`, so an existing
+// `legacy` key is refused whatever its value or `tasksDir` (TRL0039). A read or parse
+// failure passes through to the guards and preflight that already handle it.
+export function assertNotLegacyConfig(targetRoot, what, why) {
+  let cfg;
+  try {
+    cfg = readRawConfig(targetRoot, what);
+  } catch (e) {
+    if (e instanceof ImportRefused) return;
+    throw e;
+  }
+  if (cfg && typeof cfg === "object" && !Array.isArray(cfg) && Object.hasOwn(cfg, "legacy")) {
+    throw new ImportRefused(`${what} is not supported when the config has \`legacy\`: ${why}. Nothing was written.`);
+  }
+}
+
 // Refuses a local-mode target that still holds a generated marker line in an
 // author-owned file, so an import or scaffold cannot report success while `check`
 // fails. Reads files only. A target without a usable local config passes.

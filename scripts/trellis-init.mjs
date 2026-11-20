@@ -15,7 +15,7 @@ import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
-import { applyImport, importFailureLines, assertNotLedgerMode, assertNotLocalMode, assertNoLeftoverMarkers, assertSourceNotLocalOutput, ImportRefused } from "../src/import.mjs";
+import { applyImport, importFailureLines, assertNotLedgerMode, assertNotLegacyConfig, assertNotLocalMode, assertNoLeftoverMarkers, assertSourceNotLocalOutput, ImportRefused } from "../src/import.mjs";
 import { loadConfig } from "../src/backlog.mjs";
 import { switchToLocal } from "../src/switch-local.mjs";
 import { LedgerError, refuseSymlinkedArtifacts, artifactPaths } from "../src/ledger.mjs";
@@ -41,7 +41,8 @@ Flags:
   --retire-source <p>   history-preservingly git-rm an imported source tree at <p>
                         (a separate, later step — see below; cannot combine with --import)
   --force               overwrite existing files instead of skipping (refused when the
-                        existing config has idAllocation "ledger" or generatedArtifacts "local")
+                        existing config has idAllocation "ledger", generatedArtifacts "local"
+                        or a legacy cutoff)
   --switch-to-local     migrate this backlog to generatedArtifacts "local" (see below; only --dry-run
                         may accompany it)
   --dry-run             report what would change without writing
@@ -52,6 +53,14 @@ an ignored <tasksDir>/.generated/ folder, nothing generated committed). It takes
 and the target, never prompts, and never stages, commits, runs git rm or edits .gitignore: add
 the ignore line it prints first, run it, then run the git rm commands it prints, then run
 "trellis init" (no --force), "trellis generate" and "trellis check".
+
+To adopt a backlog whose closed items predate these rules, write a \`legacy\` cutoff into
+trellis/backlog.config.json first, then run "trellis init" without --force: init cannot create
+\`legacy\` itself, and --force is refused once it is set, because the replacement config would
+drop it. With no config yet, hand-author the full config (idPrefix, idWidth, milestones,
+priorities, effort, legacy), since init would otherwise validate against the strict defaults.
+When the backlog lives outside trellis/, set tasksDir in that config (the config file itself
+stays at trellis/backlog.config.json), or init can succeed against an empty default tree.
 
 With --import, provide exactly one of --profile or --mapping; a relative <path>
 resolves against the target repo. --dry-run previews the scaffold without writing;
@@ -305,6 +314,18 @@ if (flagErrors.length) {
 
 const targetRoot = resolve(target);
 const dryRun = !!opts.dryRun;
+
+// `init --force` would drop a `legacy` cutoff from the config, so it is refused before any
+// write, including on the --retire-source path (TRL0039).
+if (opts.force) {
+  try {
+    assertNotLegacyConfig(targetRoot, "init --force", "the replacement config would drop it. Delete the one scaffold file you need restored and run plain init, or edit it by hand; trellis/backlog.config.json must stay");
+  } catch (e) {
+    if (!(e instanceof ImportRefused)) throw e;
+    console.error(`error: ${e.message}`);
+    process.exit(2);
+  }
+}
 
 // --retire-source: a deliberate, standalone step run after the import is committed. It
 // does not scaffold or import — it stages a history-preserving `git rm` of the source.

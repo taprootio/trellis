@@ -475,7 +475,7 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   const actions = [];
   const { files, warnings } = templateFiles(o, sourceRoot, root, local);
   if (keepCfg && suppliedConflicts(opts, o)) {
-    warnings.push(`existing backlog.config.json kept; its vocabulary governs (prefix \`${o.prefix}\`) — supplied flags ignored (use --force to overwrite)`);
+    warnings.push(`existing backlog.config.json kept; its vocabulary governs (prefix \`${o.prefix}\`) — supplied flags ignored${Object.hasOwn(keptCfg, "legacy") ? "" : " (use --force to overwrite)"}`);
   }
 
   for (const f of files) {

@@ -1611,3 +1611,61 @@ test("the import failure banner says the import did not complete and lists the r
   assert.match(lines[0], /did not complete/);
   assert.ok(lines.some((l) => l.includes("trellis/active/TAP0001.md")));
 });
+
+// ---------------------------------------------------- legacy cutoff (TRL0039)
+const LEGACY_ITEMS = join(fixtures, "legacy-adoption");
+
+// An initialized TAP target holding the legacy-adoption items, with or without the
+// `legacy` config. The generated files are rewritten so the target is --check-green
+// whenever its items validate.
+function legacyImportTarget({ legacy }) {
+  const root = initTarget();
+  const cfgPath = join(root, "trellis", "backlog.config.json");
+  const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  if (legacy) cfg.legacy = { through: "TAP0004", closedBefore: "2026-11-19" };
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+  cpSync(LEGACY_ITEMS, join(root, "trellis"), { recursive: true });
+  const loaded = loadConfig(root).cfg;
+  for (const f of generateArtifacts(root, loaded, readBacklog(root, loaded)).files) writeFileSync(f.path, f.content);
+  return root;
+}
+
+test("a target with legacy imports a populated source and leaves its blank items alone", () => {
+  const root = legacyImportTarget({ legacy: true });
+  try {
+    const before = snapshot(join(root, "trellis", "completed", "tasks"));
+    const { summary } = applyImport(root, trellisSrc, loadProfile("trellis").mapping, { dryRun: false });
+    assert.deepEqual(summary.errors, []);
+    for (const [rel, text] of Object.entries(before)) {
+      assert.equal(readFileSync(join(root, "trellis", "completed", "tasks", rel), "utf8"), text, `${rel} untouched`);
+    }
+    assertCheckClean(root);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the same target without legacy is refused with the missing-field errors", () => {
+  const root = legacyImportTarget({ legacy: false });
+  try {
+    const plan = planImport(root, trellisSrc, loadProfile("trellis").mapping);
+    assert.match(plan.errors.join("\n"), /missing `summary`/);
+    assert.match(plan.errors.join("\n"), /missing `milestone`/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("legacy does not relax a source item's milestone requirement, even at a preserved id below through", () => {
+  const root = legacyImportTarget({ legacy: true });
+  const src = mkdtempSync(join(tmpdir(), "trellis-import-src-"));
+  try {
+    mkdirSync(join(src, "completed", "tasks"), { recursive: true });
+    writeFileSync(
+      join(src, "completed", "tasks", "TAP0001.md"),
+      "---\nid: TAP0001\ntitle: Old source item\nstatus: completed\npriority: Medium\neffort: 2\ncompleted_on: 2026-06-01\ndepends_on: []\nsummary: A closed source item.\n---\n\nBody.\n",
+    );
+    const plan = planImport(root, src, loadProfile("trellis").mapping, { preserveIds: true });
+    assert.ok(plan.idMap.some((m) => m.sourceId === "TAP0001" && m.newId === "TAP0001"), "the id is preserved");
+    assert.match(plan.errors.join("\n"), /missing `milestone`/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
+  }
+});

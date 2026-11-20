@@ -5,12 +5,13 @@
 import { test } from "node:test";
 import { ledgerTest } from "./git-support.mjs";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, chmodSync, lstatSync, symlinkSync, realpathSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, chmodSync, lstatSync, symlinkSync, realpathSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
-import { applyScaffold, shouldPromptVocab, DEFAULTS } from "../src/init.mjs";
+import { applyScaffold, planScaffold, shouldPromptVocab, DEFAULTS } from "../src/init.mjs";
+import { assertNotLegacyConfig } from "../src/import.mjs";
 import { testSeams as outputSeams, previewNextId } from "../src/local-output.mjs";
 import { initRefFormat } from "./git-support.mjs";
 import { seed, claim } from "../src/ledger.mjs";
@@ -1244,4 +1245,193 @@ test("a forced git discovery error makes local init refuse with the target uncha
     assert.match(summary.errors.join(), /dubious ownership/);
     assert.deepEqual(tree(root), before);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------------------------------------------------- legacy cutoff (TRL0039)
+const LEGACY_ITEMS = join(sourceRoot, "test", "fixtures", "legacy-adoption");
+const LEGACY_CUTOFF = { through: "TAP0004", closedBefore: "2026-11-19" };
+
+// A target with a committed-mode `legacy` config and the legacy-adoption items under
+// `tasksDir` (default `trellis`). `legacy: null` leaves the key out.
+function legacyTarget({ tasksDir, legacy = LEGACY_CUTOFF, inGit = false } = {}) {
+  const root = realpathSync(tempRepo());
+  mkdirSync(join(root, "trellis"), { recursive: true });
+  const cfg = localConfig({ generatedArtifacts: "committed", ...(tasksDir ? { tasksDir } : {}), ...(legacy === null ? {} : { legacy }) });
+  writeFileSync(join(root, "trellis", "backlog.config.json"), JSON.stringify(cfg, null, 2) + "\n");
+  cpSync(LEGACY_ITEMS, join(root, tasksDir || "trellis"), { recursive: true });
+  if (inGit) {
+    git(root, ["init", "-q", ...initRefFormat, "-b", "main"]);
+    git(root, ["config", "user.name", "Tester"]);
+    git(root, ["config", "user.email", "tester@example.com"]);
+    git(root, ["config", "commit.gpgsign", "false"]);
+  }
+  return root;
+}
+
+for (const [name, opts, extra] of [
+  ["a custom tasksDir", { tasksDir: "work/backlog" }, []],
+  ["the default tasksDir", {}, []],
+  ["an invalid null legacy value", { legacy: null }, ["null"]],
+  ["an invalid empty legacy object", { legacy: {} }, ["{}"]],
+]) {
+  test(`init --force with ${name} in the config is refused before any write`, () => {
+    const root = legacyTarget(extra.length ? {} : opts);
+    try {
+      if (extra.length) {
+        const cfgPath = join(root, "trellis", "backlog.config.json");
+        const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+        writeFileSync(cfgPath, JSON.stringify({ ...cfg, legacy: JSON.parse(extra[0]) }, null, 2) + "\n");
+      }
+      const before = tree(root);
+      const r = runInit(root, ["--force"]);
+      assert.equal(r.status, 2, r.stderr);
+      assert.match(r.stderr, /legacy/);
+      assert.deepEqual(tree(root), before);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+}
+
+test("init --force --import with a legacy config is refused by the same early guard", () => {
+  const root = legacyTarget();
+  try {
+    const before = tree(root);
+    const r = runInit(root, ["--force", "--import", legacySrc, "--profile", "taproot-ai-backlog"]);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /legacy/);
+    assert.deepEqual(tree(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// A tracked folder to retire, committed, in a target that also holds a config.
+function retireRepo(configure) {
+  const root = legacyTarget({ inGit: true });
+  configure(root);
+  mkdirSync(join(root, "planning/legacy"), { recursive: true });
+  writeFileSync(join(root, "planning/legacy/a.md"), "old task a\n");
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "setup"]);
+  return root;
+}
+
+test("init --force --retire-source in a repo with legacy exits 2 and changes nothing", () => {
+  const root = retireRepo(() => {});
+  try {
+    const before = tree(root);
+    const staged = git(root, ["diff", "--cached"]);
+    const r = runInit(root, ["--force", "--retire-source", "planning/legacy"]);
+    assert.equal(r.status, 2, r.stderr);
+    assert.deepEqual(tree(root), before);
+    assert.equal(git(root, ["diff", "--cached"]), staged);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("init --retire-source without --force still stages the removal in a repo with legacy", () => {
+  const root = retireRepo(() => {});
+  try {
+    const r = runInit(root, ["--retire-source", "planning/legacy"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(git(root, ["status", "--porcelain"]), /^D {2}planning\/legacy\/a\.md$/m);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an unreadable config does not trigger the legacy refusal: retire-only still works", () => {
+  for (const shape of ["config is a directory", "trellis is a file"]) {
+    const root = gitRepo();
+    try {
+      if (shape === "config is a directory") mkdirSync(join(root, "trellis", "backlog.config.json"), { recursive: true });
+      else writeFileSync(join(root, "trellis"), "not a folder\n");
+      mkdirSync(join(root, "planning/legacy"), { recursive: true });
+      writeFileSync(join(root, "planning/legacy/a.md"), "old task a\n");
+      git(root, ["add", "-A"]);
+      git(root, ["commit", "-q", "-m", "setup"]);
+      const r = runInit(root, ["--force", "--retire-source", "planning/legacy"]);
+      assert.equal(r.status, 0, `${shape}: ${r.stderr}`);
+      assert.match(git(root, ["status", "--porcelain"]), /^D {2}planning\/legacy\/a\.md$/m);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("init --force with trellis as a regular file still reports today's cannot-check message", () => {
+  const root = tempRepo();
+  try {
+    writeFileSync(join(root, "trellis"), "not a folder\n");
+    const r = runInit(root, ["--force"]);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /cannot check/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("assertNotLegacyConfig passes absent, unparseable, null and array configs through", () => {
+  const configs = [undefined, "{bad", "null", "[]"];
+  for (const text of configs) {
+    const root = tempRepo();
+    try {
+      if (text !== undefined) {
+        mkdirSync(join(root, "trellis"), { recursive: true });
+        writeFileSync(join(root, "trellis", "backlog.config.json"), text);
+      }
+      assert.doesNotThrow(() => assertNotLegacyConfig(root, "init --force", "why"), String(text));
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("init --force with no config, a raw [] config, or an unparseable one takes today's path", () => {
+  for (const text of [undefined, "[]", "{bad"]) {
+    const root = tempRepo();
+    try {
+      if (text !== undefined) {
+        mkdirSync(join(root, "trellis"), { recursive: true });
+        writeFileSync(join(root, "trellis", "backlog.config.json"), text);
+      }
+      const r = runInit(root, ["--force", "--prefix", "DEMO"]);
+      assert.equal(r.status, 0, `${text}: ${r.stderr}`);
+      assert.equal(readJson(join(root, "trellis", "backlog.config.json")).idPrefix, "DEMO");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("planScaffold drops the --force hint for a kept legacy config only", () => {
+  const withLegacy = legacyTarget();
+  const without = legacyTarget({ legacy: null });
+  try {
+    for (const [root, hint] of [[withLegacy, false], [without, true]]) {
+      const { warnings } = planScaffold(root, { prefix: "OTHER" }, sourceRoot);
+      const kept = warnings.find((w) => w.includes("supplied flags ignored"));
+      assert.ok(kept, "the conflict warning is still there");
+      assert.equal(kept.includes("--force"), hint);
+    }
+  } finally { rmSync(withLegacy, { recursive: true, force: true }); rmSync(without, { recursive: true, force: true }); }
+});
+
+test("init with legacy already in the config scaffolds, checks green and renders blanks and nulls", () => {
+  const root = legacyTarget();
+  try {
+    const r = runInit(root, []);
+    assert.equal(r.status, 0, r.stderr);
+    assertCheckClean(root);
+    for (const f of [["completed", "index.md"], ["removed", "index.md"]]) {
+      const text = readFileSync(T(root, ...f), "utf8");
+      assert.match(text, /\| Old (completed|removed) item[^|]* \|  \| 2026-06-01 \|/);
+    }
+    for (const t of readJson(T(root, "backlog.json")).tasks) {
+      for (const k of ["summary", "milestone", "priority", "effort"]) assert.equal(t[k], null, `${t.id} ${k}`);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("init over the same items without legacy is refused with today's messages", () => {
+  const root = legacyTarget({ legacy: null });
+  try {
+    const r = runInit(root, []);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /missing `summary`/);
+    assert.match(r.stderr, /missing `milestone`/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("init --help documents the legacy cutoff and the --force refusal", () => {
+  const r = spawnSync(process.execPath, [initScript, "--help"], { encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /legacy/);
+  assert.match(r.stdout, /--force is refused/);
 });
