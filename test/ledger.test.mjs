@@ -12,7 +12,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync, spawn } from "node:child_process";
 import {
-  LedgerError, claim, through, seed, list, preview, readLedger, scanIds, ledgerIdMatcher, gitVersionSupported, refuseSymlinkedArtifacts,
+  LedgerError, testSeams, claim, through, seed, list, preview, readLedger, scanIds, ledgerIdMatcher, gitVersionSupported, refuseSymlinkedArtifacts,
 } from "../src/ledger.mjs";
 
 const LEDGER_URL = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "ledger.mjs")).href;
@@ -995,6 +995,34 @@ test("titles reject Unicode line separators, and seed titles are cleaned the sam
     const rows = list(root, cfg).rows;
     assert.equal(rows[0].title, "one two");
     assert.equal(claim(root, cfg, { title: "next" }).id, "DEMO0006");
+  });
+});
+
+// ------------------------------------------------ external review round 8
+
+test("a worktree that vanishes before its path is resolved is a layout refusal, and the preview says why", () => {
+  withClone(({ root, cfg, lane }) => {
+    seed(root, cfg);
+    const path = lane("gone");
+    testSeams.beforeResolve = (w) => { if (w.path === realpathSync(path)) rmSync(path, { recursive: true, force: true }); };
+    try {
+      const before = tip(root);
+      const p = preview(root, cfg);
+      assert.equal(p.nextId, null);
+      assert.equal(p.reason, "unsupported_layout");
+      assert.equal(tip(root), before);
+    } finally { testSeams.beforeResolve = null; }
+  });
+});
+
+test("a preview refuses a current branch that a claim would refuse (line separator in the name)", () => {
+  withClone(({ root, cfg }) => {
+    seed(root, cfg);
+    git(root, "checkout", "-q", "-b", "a\u2028b"); // git allows this name, so no seam is needed
+    const p = preview(root, cfg);
+    assert.equal(p.nextId, null);
+    assert.equal(p.reason, "invalid_request");
+    assertRefused(() => claim(root, cfg, { title: "x" }), "invalid_request");
   });
 });
 

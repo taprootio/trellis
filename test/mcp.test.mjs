@@ -645,6 +645,18 @@ test("a backup cleanup failure after the commit point is a warning, not a failur
   } finally { c.cleanup(); }
 });
 
+test("a backup cleanup failure after a move is a warning, as in create_task", () => {
+  const c = ledgerRepo();
+  try {
+    createTask(c.root, VALID);
+    const out = moveTask(c.root, { id: "DEMO0001", to: "completed", date: "2026-06-26" }, { removeBackup: () => { throw new Error("cannot remove"); } });
+    assert.equal(out.moved.id, "DEMO0001");
+    assert.ok(out.warnings.length >= 1);
+    assert.match(out.warnings[0], /cannot remove/);
+    assertCheckClean(c.root);
+  } finally { c.cleanup(); }
+});
+
 for (const dangling of [false, true]) {
   test(`ledger mode refuses a symlinked backlog.json (${dangling ? "dangling" : "live"}) in create_task, move_task and regenerate, changing nothing`, { skip: process.platform === "win32" }, () => {
     const c = ledgerRepo();

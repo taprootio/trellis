@@ -582,8 +582,15 @@ test("ledger mode refuses a tasksDir inside .git; scan mode and lookalikes pass"
   assert.deepEqual(configErrors({ ...ARRAY_CFG, tasksDir: ".git/t" }), [], "scan mode is unchanged");
 });
 
+test("ledger mode reads a backslash in tasksDir by the platform's rules", () => {
+  const dir = ".git\\archive";
+  const errors = configErrors({ ...LEDGER_CFG, tasksDir: dir }).filter((e) => e.includes(".git"));
+  // On POSIX this is one ordinary folder name; on Windows it is a path inside .git.
+  assert.equal(errors.length, process.platform === "win32" ? 1 : 0);
+});
+
 test("ledger mode needs integer effort values; scan mode keeps fractions", () => {
-  for (const effort of [[0.5, 1, 3], { values: [1, 2.5] }]) {
+  for (const effort of [[0.5, 1, 3], { values: [1, 2.5] }, [1, 1e21]]) {
     assert.ok(configErrors({ ...LEDGER_CFG, effort }).some((e) => e.includes("integers")), JSON.stringify(effort));
   }
   assert.deepEqual(configErrors({ ...LEDGER_CFG, effort: [1, 2, 3] }), []);

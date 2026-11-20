@@ -518,7 +518,7 @@ export function createTask(repoRoot, args = {}, hooks = {}) {
 // move_task — active → completed/removed: move the file, update front-matter, and
 // prepend the closeout note. Rolls back (restore source, remove target) on a
 // validation failure.
-export function moveTask(repoRoot, args = {}) {
+export function moveTask(repoRoot, args = {}, hooks = {}) {
   const to = args.to;
   if (to !== "completed" && to !== "removed") throw new TrellisError("`to` must be \"completed\" or \"removed\"");
   const date = args.date === undefined ? todayISO() : args.date;
@@ -558,8 +558,8 @@ export function moveTask(repoRoot, args = {}) {
     rmSync(src, { force: true });
     const data2 = readBacklog(repoRoot, cfg);
     if (data2.errors.length) throw new TrellisError(`move produced an invalid backlog: ${data2.errors.join("; ")}`, "invalid_backlog");
-    writeArtifacts(repoRoot, cfg, data2);
-    return { moved: backlogObject(cfg, data2).tasks.find((t) => t.id === id), counts: backlogObject(cfg, data2).counts };
+    const { warnings } = writeArtifacts(repoRoot, cfg, data2, hooks);
+    return { moved: backlogObject(cfg, data2).tasks.find((t) => t.id === id), counts: backlogObject(cfg, data2).counts, ...(warnings && warnings.length ? { warnings } : {}) };
   } catch (e) {
     try { writeFileSync(src, original); } catch { /* best-effort */ } // restore the source…
     try { rmSync(target, { force: true }); } catch { /* best-effort */ } // …and undo the target write

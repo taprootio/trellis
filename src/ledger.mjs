@@ -27,6 +27,18 @@ export class LedgerError extends Error {
 }
 const refuse = (message, code) => new LedgerError(message, code, 2);
 
+// A worktree can vanish between listing and resolving, so a filesystem error here is a layout refusal, not a crash.
+function realPath(p) {
+  try {
+    return realpathSync.native(p);
+  } catch (e) {
+    throw refuse(`cannot resolve ${p}: ${e.message}`, "unsupported_layout");
+  }
+}
+
+// Test seam: runs for each worktree after git located its checkout and before its path is resolved.
+export const testSeams = { beforeResolve: null };
+
 export const MAX_CLAIM_ATTEMPTS = 10;
 export const MIN_GIT_VERSION = "2.45.1";
 // 2.45.1 is the first release that has `rev-parse --show-ref-format` and honors
@@ -382,22 +394,23 @@ function listWorktrees(repoRoot) {
 function verifyWorktrees(repoRoot, worktrees) {
   const real = new Set();
   const common = runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: repoRoot });
-  const commonDir = common.status === 0 ? realpathSync.native(common.stdout.replace(/\n$/, "")) : "";
+  const commonDir = common.status === 0 ? realPath(common.stdout.replace(/\n$/, "")) : "";
   const regs = registrations(commonDir);
   const taken = new Set();
   for (const w of worktrees) {
     const top = runGit(["rev-parse", "--show-toplevel"], { cwd: w.path });
     const topPath = top.stdout.replace(/\n$/, "");
-    if (top.status !== 0 || !topPath || realpathSync.native(topPath) !== realpathSync.native(w.path)) {
+    if (testSeams.beforeResolve) testSeams.beforeResolve(w);
+    if (top.status !== 0 || !topPath || realPath(topPath) !== realPath(w.path)) {
       throw refuse(`cannot locate the checkout of the listed worktree ${w.path}; the id ledger does not support this layout (a separate git dir, for one)`, "unsupported_layout");
     }
     // A checkout moved by hand leaves its registration pointing at the old path, where
     // another clone may now sit. The checkout must resolve to the git dir registered for it.
     const actual = runGit(["rev-parse", "--absolute-git-dir"], { cwd: w.path });
-    const actualDir = actual.status === 0 ? realpathSync.native(actual.stdout.replace(/\n$/, "")) : "";
+    const actualDir = actual.status === 0 ? realPath(actual.stdout.replace(/\n$/, "")) : "";
     // One-to-one: a checkout matches exactly one registration (the main one has none,
     // so it maps to the common dir), and no registration serves two checkouts.
-    const want = realpathSync.native(w.path);
+    const want = realPath(w.path);
     const hits = regs.filter((r) => r.checkout === want);
     const expected = hits.length === 0 ? commonDir : hits.length === 1 ? hits[0].gitDir : "";
     if (!commonDir || !actualDir || !expected || taken.has(expected) || actualDir !== expected) {
@@ -406,7 +419,7 @@ function verifyWorktrees(repoRoot, worktrees) {
     taken.add(expected);
     real.add(want);
   }
-  if (!real.has(realpathSync.native(repoRoot))) {
+  if (!real.has(realPath(repoRoot))) {
     throw refuse(`${repoRoot} is not in the worktree list of its clone; the id ledger does not support this layout`, "unsupported_layout");
   }
 }
@@ -426,7 +439,7 @@ function registrations(commonDir) {
     try {
       const target = readFileSync(join(dir, name, "gitdir"), "utf8").trim();
       if (!target) continue;
-      out.push({ gitDir: realpathSync.native(join(dir, name)), checkout: realpathSync.native(dirname(resolve(join(dir, name), target))) });
+      out.push({ gitDir: realPath(join(dir, name)), checkout: realPath(dirname(resolve(join(dir, name), target))) });
     } catch { /* an unreadable entry cannot be the match */ }
   }
   return out;
@@ -457,7 +470,7 @@ function existingStatusDirs(worktree, cfg) {
 }
 
 function walkStatusDirs(worktree, cfg) {
-  const base = realpathSync.native(worktree);
+  const base = realPath(worktree);
   const dirs = [];
   for (const status of STATUS_FOLDERS) {
     let cur = worktree;
@@ -474,7 +487,7 @@ function walkStatusDirs(worktree, cfg) {
         throw new LedgerError(`cannot read ${cur}: ${e.message}`, "unsupported_layout", 2);
       }
       if (st.isSymbolicLink()) throw refuse(`${cur} is a symlink; the id ledger does not support symlinked task folders`, "unsupported_layout");
-      if (realpathSync.native(cur) !== want) throw refuse(`${cur} differs from its on-disk path (case or symlink); the id ledger does not support it`, "unsupported_layout");
+      if (realPath(cur) !== want) throw refuse(`${cur} differs from its on-disk path (case or symlink); the id ledger does not support it`, "unsupported_layout");
     }
     if (present && lstatSync(cur).isDirectory()) dirs.push({ dir: cur, status });
   }
@@ -567,7 +580,7 @@ function sparseCheckoutOn(worktree) {
 // operation that allocates, and by preview. Returns each worktree with its scan.
 function scanClone(repoRoot, cfg) {
   const top = runGit(["rev-parse", "--show-toplevel"], { cwd: repoRoot }).stdout.replace(/\n$/, "");
-  if (!top || realpathSync.native(repoRoot) !== realpathSync.native(top)) {
+  if (!top || realPath(repoRoot) !== realPath(top)) {
     throw refuse(`${repoRoot} is not the root of its worktree (${top || "unknown"}); serve the worktree root`, "unsupported_layout");
   }
   const worktrees = listWorktrees(repoRoot);
@@ -644,6 +657,8 @@ export function checkLayout(repoRoot, cfg) {
 export function preview(repoRoot, cfg) {
   try {
     requirePlainPrefix(cfg);
+    // A claim would refuse this branch, so the preview must not promise an id.
+    branchOf(repoRoot);
     const ledger = readLedger(repoRoot, cfg);
     if (ledger.missing) {
       return { nextId: null, reason: "missing_ledger", note: `no id ledger at ${refOf(cfg)}; ${SEED_HINT}. ${RECOVERY_HINT}.` };

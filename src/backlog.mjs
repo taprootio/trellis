@@ -9,7 +9,7 @@
 // on purpose so Trellis stays drop-in with no install step.
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join, relative, isAbsolute, posix } from "node:path";
+import { join, relative, isAbsolute, normalize, sep } from "node:path";
 
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
 export const SPEC_VERSION = "2.5";
@@ -130,7 +130,7 @@ export function loadConfig(repoRoot) {
   }
   cfg.effortValues = Array.isArray(effortValues) ? effortValues : [];
   // Ledger mode re-reads what it writes, so an effort must survive the front-matter round trip.
-  if (cfg.idAllocation === "ledger" && cfg.effortValues.some((v) => typeof v === "number" && !Number.isInteger(v))) {
+  if (cfg.idAllocation === "ledger" && cfg.effortValues.some((v) => typeof v === "number" && !Number.isSafeInteger(v))) {
     errors.push("config: `effort` values must be integers when `idAllocation` is \"ledger\"");
   }
   attachEffortScale(cfg, errors);
@@ -173,8 +173,8 @@ function validateIdAllocation(cfg, errors) {
     if (problem) errors.push(`config: \`idLedgerRef\` ${problem}`);
   }
   if (cfg.idAllocation !== "ledger") return;
-  // Checked on the text (normalized the way paths() joins it), so `check` stays git-free. Writes under .git could corrupt the ledger ref.
-  if (typeof cfg.tasksDir === "string" && /^\.git(\/|$)/i.test(posix.normalize(cfg.tasksDir.replace(/\\/g, "/")) + "/")) {
+  // Checked on the text with the platform's own path rules (as paths() joins it), so `check` stays git-free. On POSIX a backslash is an ordinary name character. Writes under .git could corrupt the ledger ref.
+  if (typeof cfg.tasksDir === "string" && normalize(cfg.tasksDir).split(sep)[0].toLowerCase() === ".git") {
     errors.push("config: `tasksDir` must not be inside the repository's `.git` directory when `idAllocation` is \"ledger\"");
   }
   if (typeof cfg.idPrefix === "string" && cfg.idPrefix && !PLAIN_PREFIX_RE.test(cfg.idPrefix)) {
