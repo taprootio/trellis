@@ -171,13 +171,18 @@ async function promptMissing(opts) {
 
 // Says what good-agent detection (or an explicit skip) did to the playbooks, and how to
 // get them back. The recovery line is only for a repo that is not detected.
+function restoreCommand(summary) {
+  const rest = summary.omitted.filter((p) => p !== "playbooks");
+  return `trellis init --with-playbooks${rest.length ? ` --skip ${rest.join(",")}` : ""}`;
+}
+
 function reportDetection(summary) {
   if (summary.detected) {
     console.log(`  detected good-agent: ${summary.detected}`);
-    if (summary.playbooksOmittedBy === "detection") console.log("  playbooks left out because of it; add them by running `trellis init --with-playbooks` from the target repository (repeat your other --skip flags)");
+    if (summary.playbooksOmittedBy === "detection") console.log("  playbooks left out because of it; add them by running `" + restoreCommand(summary) + "` from the target repository");
     else if (summary.playbooksOmittedBy === "skip") console.log("  playbooks left out by --skip playbooks");
   } else if (summary.playbooksOmittedBy === "skip") {
-    console.log(`  ${INIT_TOKENS.blockNotUpdated} To add the playbooks later, run \`trellis init --with-playbooks\` from the target repository (repeat your other --skip flags); the TRELLIS block is not updated, so add the playbook pointers by hand`);
+    console.log(`  ${INIT_TOKENS.blockNotUpdated} To add the playbooks later, run \`${restoreCommand(summary)}\` from the target repository; the TRELLIS block is not updated, so add the playbook pointers by hand`);
   }
 }
 

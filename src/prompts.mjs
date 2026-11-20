@@ -14,7 +14,7 @@
 // vocabulary; for repo B, B's.
 
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { loadConfig, paths, scanIdPattern } from "./backlog.mjs";
 import { TrellisError } from "./mcp.mjs";
 import { ledgerIdMatcher } from "./ledger.mjs";
@@ -134,13 +134,33 @@ function promptByName(name) {
 // Ground every prompt in this repo's conventions, with the id vocabulary read
 // live from backlog.config.json (never baked into the prompt text). On a config
 // error we still point at AGENTS.md rather than emitting a wrong vocabulary.
-function conventionsPreamble(cfg, cfgErrors) {
+function conventionsPreamble(repoRoot, cfg, cfgErrors) {
   const vocab = cfgErrors.length
     ? "the repo's `backlog.config.json` governs its vocabulary"
     : `ids are \`${cfg.idPrefix}\` + ${cfg.idWidth} digits; milestones are ${cfg.milestones.join(" → ")}; priorities are ${cfg.priorities.join(", ")}`;
+  // Without an AGENTS.md the conventions resource is unavailable, so point at the repo's own
+  // instructions and the published spec instead.
+  if (!existsSync(join(repoRoot, "AGENTS.md"))) {
+    return "Ground in this repo's own conventions first: follow its own canonical instructions "
+      + "(such as a CONTRIBUTING file) and the Trellis spec, https://github.com/taprootio/trellis/blob/main/SPEC.md. "
+      + `The repo's conventions govern — ${vocab}.`;
+  }
   return "Ground in this repo's own conventions first: read its `AGENTS.md` (the "
     + "`trellis://conventions` resource) and the `SPEC.md` / docs it points at. The "
     + `repo's conventions govern — ${vocab}.`;
+}
+
+// True when `<id>.md` is a regular file directly inside a task folder and its name fits the
+// scanner's anchored filename pattern. An unusable prefix (an invalid regex) never matches.
+function isScannedTaskFile(repoRoot, id, cfg) {
+  const name = `${id}.md`;
+  try {
+    if (name !== basename(name) || !new RegExp(`^(${scanIdPattern(cfg)})\\.md$`).test(name)) return false;
+    const p = paths(repoRoot, cfg);
+    return [p.active, p.completedTasks, p.removed].some((d) => { try { return statSync(join(d, name)).isFile(); } catch { return false; } });
+  } catch {
+    return false;
+  }
 }
 
 // Validate the work-task `id` argument against this repo's id format (when the
@@ -152,9 +172,7 @@ function requireId(repoRoot, raw, cfg, cfgErrors) {
   if (!cfgErrors.length) {
     // One rule for every mode: the literal (escaped) id format, or an id `check` reads from
     // an existing task file (a prefix with a regex character can name such a file).
-    const p = paths(repoRoot, cfg);
-    const hasFile = new RegExp(`^${scanIdPattern(cfg)}$`).test(id) && [p.active, p.completedTasks, p.removed].some((d) => existsSync(join(d, `${id}.md`)));
-    if (!ledgerIdMatcher(cfg).test(id) && !hasFile) throw new TrellisError(`invalid task id: ${id} (expected ${cfg.idPrefix} + ${cfg.idWidth} digits)`, "invalid_request");
+    if (!ledgerIdMatcher(cfg).test(id) && !isScannedTaskFile(repoRoot, id, cfg)) throw new TrellisError(`invalid task id: ${id} (expected ${cfg.idPrefix} + ${cfg.idWidth} digits)`, "invalid_request");
   }
   return id;
 }
@@ -172,8 +190,8 @@ function instruction(repoRoot, name, args, cfg, cfgErrors) {
 }
 
 // Where the repo keeps its PR template, in GitHub's standard places (`.github/`, the repo
-// root, `docs/`), matched case-insensitively, or a `.github/PULL_REQUEST_TEMPLATE/` folder
-// holding templates. Returns the repo-relative path, or null.
+// root, `docs/`), matched case-insensitively, or a `PULL_REQUEST_TEMPLATE/` folder holding
+// templates in any of those places. Returns the repo-relative path, or null.
 function findPrTemplate(repoRoot) {
   // A symlink counts when its target is a regular file.
   const isRegularFile = (rel) => { try { return statSync(join(repoRoot, rel)).isFile(); } catch { return false; } };
@@ -182,8 +200,15 @@ function findPrTemplate(repoRoot) {
     const hit = entries(dir).find((e) => /^pull_request_template\.md$/i.test(e.name) && isRegularFile(dir === "." ? e.name : `${dir}/${e.name}`));
     if (hit) return dir === "." ? hit.name : `${dir}/${hit.name}`;
   }
-  const folder = entries(".github").find((e) => e.isDirectory() && /^pull_request_template$/i.test(e.name));
-  return folder && entries(`.github/${folder.name}`).some((e) => isRegularFile(`.github/${folder.name}/${e.name}`) && /\.md$/i.test(e.name)) ? `.github/${folder.name}/` : null;
+  // Template folders count when they hold at least one real .md file; a symlinked folder is followed.
+  const isDir = (rel) => { try { return statSync(join(repoRoot, rel)).isDirectory(); } catch { return false; } };
+  for (const dir of [".github", ".", "docs"]) {
+    for (const e of entries(dir).filter((x) => /^pull_request_template$/i.test(x.name))) {
+      const rel = dir === "." ? e.name : `${dir}/${e.name}`;
+      if (isDir(rel) && entries(rel).some((f) => /\.md$/i.test(f.name) && isRegularFile(`${rel}/${f.name}`))) return `${rel}/`;
+    }
+  }
+  return null;
 }
 
 // The answer for a prompt whose playbook file is absent. A repo that runs good-agent gets
@@ -194,9 +219,11 @@ function missingPlaybook(repoRoot, p, args, cfg, cfgErrors) {
   const detected = detectGoodAgent(repoRoot);
   if (p.name === "work-task") lines.push(`Task: **${requireId(repoRoot, args.id, cfg, cfgErrors)}**`);
   if (!detected) {
-    lines.push(`The ${p.name} playbook (${p.playbook}) is absent from this repo. From the repo this server serves (path on the next line), run \`trellis init --with-playbooks\`, repeating your other \`--skip\` values and dropping only \`playbooks\`.`, `run from: ${repoRoot}`);
+    // A repo with no template, or one kept outside the scaffold path, must not get the scaffolded one.
+    const needsSkip = p.name === "pr-draft" && findPrTemplate(repoRoot) !== ".github/pull_request_template.md";
+    lines.push(`The ${p.name} playbook (${p.playbook}) is absent from this repo. From the repo this server serves (path on the next line), run \`trellis init --with-playbooks\`, repeating your other \`--skip\` values and dropping only \`playbooks\`.${needsSkip ? " Also pass `--skip pr-template`, so init does not add a template you do not use." : ""}`, `run from: ${repoRoot}`);
   } else if (p.name === "pr-draft") {
-    lines.push(`Good-agent is detected (${detected}). Use its \`review-loop\` skill, and follow this repo's own PR flow (its AGENTS.md or CONTRIBUTING file). ${PROMPT_TOKENS.prFlow}`);
+    lines.push(`Good-agent is detected (${detected}). Use its \`review-loop\` skill, and follow this repo's own PR instructions. ${PROMPT_TOKENS.prFlow}`);
   } else {
     lines.push(`Good-agent is detected (${detected}). Use its \`write-task\`, \`work-task\` and \`review-loop\` skills.`);
   }
@@ -223,7 +250,7 @@ export function buildPrompt(repoRoot, name, args = {}) {
   const playbook = readFileSync(abs, "utf8").replace(/\n*$/, "\n");
 
   const text = [
-    conventionsPreamble(cfg, cfgErrors),
+    conventionsPreamble(repoRoot, cfg, cfgErrors),
     "",
     instruction(repoRoot, name, args, cfg, cfgErrors),
     "",

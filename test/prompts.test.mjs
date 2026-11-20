@@ -352,3 +352,72 @@ test("a PR template folder with no .md template does not count as a template", (
     assert.ok(textOf(root, "pr-draft").includes(PROMPT_TOKENS.noTemplate));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("an id check never throws on a prefix that is not a valid regex, and a directory is not a task file", () => {
+  const root = mkdtempSync(join(tmpdir(), "trellis-prompts-"));
+  try {
+    mkdirSync(join(root, "trellis"), { recursive: true });
+    const cfg = { specVersion: "2.5", idPrefix: "R[", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1] };
+    writeFileSync(join(root, "trellis", "backlog.config.json"), JSON.stringify(cfg));
+    assert.ok(textOf(root, "work-task", { id: "R[0001" }).includes("R[0001"));
+    assert.throws(() => textOf(root, "work-task", { id: "R[0002x" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+
+  const dirRoot = mkdtempSync(join(tmpdir(), "trellis-prompts-"));
+  try {
+    applyScaffold(dirRoot, { prefix: "R+" }, {}, sourceRoot);
+    mkdirSync(join(dirRoot, "trellis", "active", "RR0001.md"));
+    assert.throws(() => textOf(dirRoot, "work-task", { id: "RR0001" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+  } finally { rmSync(dirRoot, { recursive: true, force: true }); }
+});
+
+test("PR template folders count under .github, the root and docs, including symlinked folders", () => {
+  const cases = [
+    [(r) => { mkdirSync(join(r, "docs", "PULL_REQUEST_TEMPLATE"), { recursive: true }); writeFileSync(join(r, "docs", "PULL_REQUEST_TEMPLATE", "feature.md"), "# t\n"); }, "docs/PULL_REQUEST_TEMPLATE/"],
+    [(r) => { mkdirSync(join(r, "elsewhere")); writeFileSync(join(r, "elsewhere", "a.md"), "# t\n"); mkdirSync(join(r, ".github"), { recursive: true }); symlinkSync(join(r, "elsewhere"), join(r, ".github", "PULL_REQUEST_TEMPLATE")); }, ".github/PULL_REQUEST_TEMPLATE/"],
+  ];
+  for (const [seed, where] of cases) {
+    const root = bareRepo({ template: false });
+    try {
+      seed(root);
+      const text = textOf(root, "pr-draft");
+      assert.ok(!text.includes(PROMPT_TOKENS.noTemplate) && text.includes(where), where);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+  // A directory or a dangling link named like the template file does not hide the real one.
+  for (const bad of [(p) => mkdirSync(p), (p) => symlinkSync("/nonexistent-trellis-target", p)]) {
+    const root = bareRepo({ template: false });
+    try {
+      bad(join(root, ".github", "pull_request_template.md"));
+      mkdirSync(join(root, "docs"));
+      writeFileSync(join(root, "docs", "pull_request_template.md"), "# t\n");
+      assert.ok(textOf(root, "pr-draft").includes("docs/pull_request_template.md"));
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("the undetected pr-draft recovery adds --skip pr-template unless the scaffold's own template exists", () => {
+  const none = bareRepo({ template: false });
+  const outside = bareRepo({ template: false });
+  const own = bareRepo();
+  try {
+    writeFileSync(join(outside, "PULL_REQUEST_TEMPLATE.md"), "# t\n");
+    assert.ok(textOf(none, "pr-draft").includes("--skip pr-template"));
+    assert.ok(textOf(outside, "pr-draft").includes("--skip pr-template"));
+    assert.ok(!textOf(own, "pr-draft").includes("--skip pr-template"));
+    assert.ok(!textOf(none, "code-review").includes("--skip pr-template"));
+  } finally { for (const r of [none, outside, own]) rmSync(r, { recursive: true, force: true }); }
+});
+
+test("without an AGENTS.md the prompts do not require the conventions resource", () => {
+  const root = freshRepo();
+  try {
+    rmSync(join(root, "AGENTS.md"));
+    for (const name of NAMES) {
+      const text = textOf(root, name);
+      const before = text.slice(0, text.indexOf(PLAYBOOK_SEPARATOR));
+      assert.ok(!before.includes("trellis://conventions") && !before.includes("AGENTS.md"), name);
+      assert.ok(before.includes("SPEC.md"));
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

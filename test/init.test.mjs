@@ -2184,3 +2184,21 @@ test("the recovery commands say to run them from the target repository", () => {
     assert.ok(cliRun(root, ["--dry-run"]).stdout.includes("from the target repository"));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("the CLI recovery command carries the remaining skips", () => {
+  const root = tempRepo();
+  try {
+    const r = cliRun(root, ["--skip", "ci,playbooks"]);
+    assert.ok(tokenLine(r.stdout.replace(/^ +/gm, ""), INIT_TOKENS.blockNotUpdated).includes("trellis init --with-playbooks --skip ci"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an appended AGENTS.md kept out by the size guard also gets a README that links the spec", () => {
+  const root = tempRepo();
+  try {
+    writeFileSync(agentsPath(root), multibyteAgents(32600));
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    const readme = readFileSync(join(root, "trellis", "README.md"), "utf8");
+    assert.ok(!readme.includes("AGENTS.md") && readme.includes("SPEC.md"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
