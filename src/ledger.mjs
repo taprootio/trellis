@@ -12,7 +12,7 @@
 import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
-import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, PLAIN_PREFIX_RE, artifactSet, branchNameProblem, parseFrontMatter } from "./backlog.mjs";
+import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, PLAIN_PREFIX_RE, artifactSet, isRealDate, branchNameProblem, parseFrontMatter } from "./backlog.mjs";
 
 // A typed failure the CLI maps to an exit code and the MCP adapter maps to a
 // TrellisError. Exit 2 is "refused, nothing written"; exit 1 is a real failure
@@ -218,13 +218,6 @@ function checkThrough(id, cfg) {
 const today = () => new Date().toISOString().slice(0, 10);
 
 // ------------------------------------------------------------ read ledger
-// An out-of-range date such as 2026-13-45 is an Invalid Date, which toISOString rejects.
-function validDate(date) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
-  const d = new Date(`${date}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === date;
-}
-
 function parseClaims(text, cfg) {
   if (!text.endsWith("\n")) return { reason: "claims.tsv does not end with a newline" };
   const lines = text.slice(0, -1).split("\n");
@@ -237,7 +230,7 @@ function parseClaims(text, cfg) {
     if (f.length !== 5) return { reason: `${at} does not have five fields` };
     const [id, date, kind, branch, title] = f;
     if (!idRe.test(id)) return { reason: `${at} has an id that does not match ${cfg.idPrefix} + ${cfg.idWidth} digits` };
-    if (!validDate(date)) {
+    if (!isRealDate(date)) {
       return { reason: `${at} has a bad date` };
     }
     if (!KINDS.has(kind)) return { reason: `${at} has an unknown kind` };

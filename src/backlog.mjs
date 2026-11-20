@@ -59,6 +59,14 @@ export function ledgerRefProblem(ref) {
   return refNameProblem(ref);
 }
 
+// One owner of "real calendar date": the shape, then a UTC round trip so 2026-02-31
+// fails. Used by the ledger reader, the `legacy` config and closed-item dates.
+export function isRealDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
 export const MARKERS = {
   milestones: ["<!-- BEGIN GENERATED:MILESTONES -->", "<!-- END GENERATED:MILESTONES -->"],
   completed: ["<!-- BEGIN GENERATED:COMPLETED -->", "<!-- END GENERATED:COMPLETED -->"],
@@ -156,6 +164,7 @@ export function validateConfig(cfg) {
     }
   }
   validateIdAllocation(cfg, errors);
+  validateLegacy(cfg, errors);
   // A present key must be valid, so an explicit null is an error, not a default (TRL0038).
   if (Object.hasOwn(cfg, "generatedArtifacts") && cfg.generatedArtifacts !== "committed" && cfg.generatedArtifacts !== "local") {
     errors.push('config: `generatedArtifacts` must be "committed" or "local" when present');
@@ -204,6 +213,34 @@ export function validateConfig(cfg) {
     warnings.push(`config \`specVersion\` ${cfg.specVersion} differs in major version from this tool's spec ${SPEC_VERSION}`);
   }
   return { cfg, warnings, errors };
+}
+
+// `legacy` (TRL0039) exempts closed items from before adoption from the descriptive
+// metadata. A present key must be valid. `through` is checked without a regex built
+// from `idPrefix`, which scan mode interpolates unescaped.
+const LEGACY_KEYS = new Set(["through", "closedBefore"]);
+function validateLegacy(cfg, errors) {
+  if (!Object.hasOwn(cfg, "legacy")) return;
+  const legacy = cfg.legacy;
+  if (legacy === null || typeof legacy !== "object" || Array.isArray(legacy)) {
+    errors.push("config: `legacy` must be an object with `through` and `closedBefore`");
+    return;
+  }
+  for (const k of Object.keys(legacy)) if (!LEGACY_KEYS.has(k)) errors.push(`config: \`legacy\` has an unknown key \`${k}\``);
+  const prefixOk = typeof cfg.idPrefix === "string" && cfg.idPrefix;
+  if (prefixOk && !PLAIN_PREFIX_RE.test(cfg.idPrefix)) {
+    errors.push("config: `idPrefix` must be a letter followed by letters or digits when `legacy` is set");
+  }
+  const { through } = legacy;
+  if (typeof through !== "string" || !through) {
+    errors.push("config: `legacy.through` must be a full task id such as TR01388");
+  } else if (prefixOk && Number.isInteger(cfg.idWidth) && cfg.idWidth >= 1) {
+    const rest = through.startsWith(cfg.idPrefix) ? through.slice(cfg.idPrefix.length) : "";
+    if (!/^\d+$/.test(rest) || rest.length !== cfg.idWidth) {
+      errors.push(`config: \`legacy.through\` must be ${cfg.idPrefix} + ${cfg.idWidth} digits`);
+    }
+  }
+  if (!isRealDate(legacy.closedBefore)) errors.push("config: `legacy.closedBefore` must be a real date (YYYY-MM-DD)");
 }
 
 // `idAllocation` is "scan" (default) or "ledger" (TRL0037). Ledger mode also

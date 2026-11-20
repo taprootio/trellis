@@ -984,3 +984,53 @@ test("the local validation entry point orders roster, item and marker errors wit
     assert.match(errors[2], /README\.md: holds the generated marker line/);
   });
 });
+
+// ---------------------------------------------------------- legacy config (TRL0039)
+const LEGACY = { through: "DEMO0010", closedBefore: "2026-11-19" };
+const withLegacy = (legacy, extra = {}) => ({ ...ARRAY_CFG, legacy, ...extra });
+
+test("a valid legacy loads with no errors, and with ledger mode", () => {
+  assert.deepEqual(configErrors(withLegacy(LEGACY)), []);
+  assert.deepEqual(configErrors({ ...LEDGER_CFG, legacy: LEGACY }), []);
+});
+
+test("legacy.through must be a full id in the repo's format", () => {
+  const bad = ["TRL0010", "DEMO010", "DEMO00010", "DEMO00x0", "DEMO", "", 5, null, undefined];
+  for (const through of bad) {
+    assert.ok(configErrors(withLegacy({ ...LEGACY, through })).some((e) => e.includes("through")), JSON.stringify(through));
+  }
+  // The remainder must be digits only, even under a longer prefix such as TR.
+  const errs = configErrors({ ...ARRAY_CFG, idPrefix: "TR", idWidth: 5, legacy: { ...LEGACY, through: "TRL0038" } });
+  assert.ok(errs.some((e) => e.includes("through")));
+});
+
+test("legacy.closedBefore must be a real date string", () => {
+  for (const closedBefore of ["2026-02-31", "2026-13-01", "11/19/2026", "", 20261119, null, undefined, { toString: null }]) {
+    assert.ok(configErrors(withLegacy({ ...LEGACY, closedBefore })).some((e) => e.includes("closedBefore")), JSON.stringify(closedBefore));
+  }
+});
+
+test("legacy rejects extra keys, null, and non-objects", () => {
+  assert.ok(configErrors(withLegacy({ ...LEGACY, extra: 1 })).some((e) => e.includes("unknown key")));
+  for (const legacy of [null, [], "x", 3]) {
+    assert.ok(configErrors(withLegacy(legacy)).some((e) => e.includes("`legacy`")), JSON.stringify(legacy));
+  }
+});
+
+test("legacy needs a plain prefix; without legacy the same prefix behaves as today", () => {
+  for (const idPrefix of ["T.P", "T+P"]) {
+    const legacy = { through: `${idPrefix}0010`, closedBefore: "2026-11-19" };
+    assert.ok(configErrors({ ...ARRAY_CFG, idPrefix, legacy }).some((e) => e.includes("idPrefix")), idPrefix);
+    assert.ok(configErrors({ ...LEDGER_CFG, idPrefix, legacy }).length > 0, `ledger ${idPrefix}`);
+    assert.deepEqual(configErrors({ ...ARRAY_CFG, idPrefix }), [], `no legacy ${idPrefix}`);
+  }
+});
+
+test("legacy with a bad idPrefix or idWidth reports only the existing error and does not throw", () => {
+  for (const idPrefix of [5, ""]) {
+    const errs = configErrors({ ...ARRAY_CFG, idPrefix, legacy: LEGACY });
+    assert.ok(errs.some((e) => e.includes("idPrefix")));
+    assert.equal(errs.filter((e) => e.includes("idPrefix")).length, 1);
+  }
+  assert.ok(configErrors({ ...ARRAY_CFG, idWidth: 0, legacy: LEGACY }).some((e) => e.includes("idWidth")));
+});
