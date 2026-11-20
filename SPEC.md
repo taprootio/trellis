@@ -86,7 +86,9 @@ fields:
 - `date` is an ISO date;
 - `kind` is `seed`, `claim` or `through`;
 - `branch` is the worktree's branch, or `-` when detached or for `through`;
-- `title` is one line with no tabs or control characters (`-` when unknown).
+- `title` is one line with no tabs or control characters (`-` when unknown) and at
+  most 200 characters, counted as Unicode code points. Seeding cuts a longer item
+  title at a code-point boundary.
 
 A reader validates every row and treats any bad row as "not a ledger"; it never
 skips a row. Lines are only appended, each in one commit whose parent is the

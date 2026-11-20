@@ -278,7 +278,7 @@ test("claim: --seed --through on an existing ledger writes nothing and names cla
   } finally { c.cleanup(); }
 });
 
-test("claim: exits 1 when every retry loses the compare-and-swap", () => {
+test("claim: exits 1 when every retry loses the compare-and-swap", { skip: process.platform === "win32" }, () => {
   const c = claimRepo();
   try {
     run(c.root, ["claim", "--seed"]);

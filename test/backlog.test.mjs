@@ -582,6 +582,14 @@ test("ledger mode refuses a tasksDir inside .git; scan mode and lookalikes pass"
   assert.deepEqual(configErrors({ ...ARRAY_CFG, tasksDir: ".git/t" }), [], "scan mode is unchanged");
 });
 
+test("ledger mode checks .git after the trailing-separator cleanup", () => {
+  // On POSIX `.git\\` cleans to `.git`; `.git\\archive` is one ordinary folder name there.
+  const bad = (tasksDir) => configErrors({ ...LEDGER_CFG, tasksDir }).some((e) => e.includes(".git"));
+  assert.equal(bad(".git\\"), true);
+  assert.equal(bad(".git/\\"), true);
+  assert.equal(bad(".git\\archive"), process.platform === "win32");
+});
+
 test("ledger mode reads a backslash in tasksDir by the platform's rules", () => {
   const dir = ".git\\archive";
   const errors = configErrors({ ...LEDGER_CFG, tasksDir: dir }).filter((e) => e.includes(".git"));

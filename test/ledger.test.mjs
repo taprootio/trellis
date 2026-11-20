@@ -192,7 +192,7 @@ exec "${real}" "$@"
   return bin;
 }
 
-test("a lost compare-and-swap retries (git shim)", () => {
+test("a lost compare-and-swap retries (git shim)", { skip: process.platform === "win32" }, () => {
   const c = makeClone();
   try {
     const other = c.lane("lane");
@@ -254,7 +254,7 @@ test("seed --through writes the through row in the seed commit; the next claim i
   });
 });
 
-test("seed titles are cleaned, and an unreadable or unsafe file gives '-' with the id kept", () => {
+test("seed titles are cleaned, and an unreadable or unsafe file gives '-' with the id kept", { skip: process.platform === "win32" }, () => {
   withClone(({ root, cfg }) => {
     const odd = item(root, "active", "DEMO0001", "Tab\there and\x01control");
     const hidden = item(root, "active", "DEMO0002");
@@ -407,6 +407,22 @@ test("claim exits 2 in scan mode, and refuses a title that could forge a row", (
       assertRefused(() => claim(root, cfg, { title }), "invalid_request");
     }
     assert.equal(tip(root), t);
+  });
+});
+
+test("titles count code points; seed truncation never splits an emoji", () => {
+  withClone(({ root, cfg }) => {
+    seed(root, cfg);
+    // 200 emoji are 400 UTF-16 units but 200 code points, so they are accepted.
+    assert.equal(claim(root, cfg, { title: "\u{1F600}".repeat(200) }).id, "DEMO0001");
+    assertRefused(() => claim(root, cfg, { title: "\u{1F600}".repeat(201) }), "invalid_request");
+  });
+  withClone(({ root, cfg }) => {
+    item(root, "active", "DEMO0001", "x".repeat(199) + "\u{1F600}tail");
+    seed(root, cfg);
+    const title = list(root, cfg).rows[0].title;
+    assert.equal(title, "x".repeat(199) + "\u{1F600}");
+    assert.ok(!/[\ud800-\udfff]/.test(title.replace(/[\ud800-\udbff][\udc00-\udfff]/g, "")), "no lone surrogate");
   });
 });
 
@@ -568,7 +584,7 @@ test("the git version floor is 2.45.1", () => {
 
 // ----------------------------------------------------------- worktree scan
 
-test("a worktree path containing a newline is scanned", () => {
+test("a worktree path containing a newline is scanned", { skip: process.platform === "win32" }, () => {
   withClone(({ root, cfg, dir }) => {
     const odd = join(dir, "with\nnewline");
     git(root, "worktree", "add", "-q", "-b", "odd", odd);
@@ -761,6 +777,23 @@ test("a case alias of a status folder refuses before allocating", () => {
     git(root, "commit", "-q", "-m", "alias");
     git(root, "update-index", "--force-remove", path);
     refusedAndUnchanged(root, cfg);
+  });
+});
+
+test("an alias is found when case folding changes the folder name's length", (t) => {
+  withClone(({ root, cfg }) => {
+    const dotted = { ...cfg, tasksDir: "\u0130" };
+    seed(root, dotted);
+    const blob = execFileSync("git", ["-C", root, "hash-object", "-w", "--stdin"], { input: "x\n", encoding: "utf8" }).trim();
+    // "i" plus a combining dot is what the capital dotted I folds to; it is longer.
+    const path = "i\u0307/active/DEMO0005.md";
+    try {
+      git(root, "update-index", "--add", "--cacheinfo", `100644,${blob},${path}`);
+    } catch (e) {
+      t.skip(`git or this filesystem cannot hold the path: ${e.message}`);
+      return;
+    }
+    refusedAndUnchanged(root, dotted);
   });
 });
 

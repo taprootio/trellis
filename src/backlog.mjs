@@ -173,8 +173,8 @@ function validateIdAllocation(cfg, errors) {
     if (problem) errors.push(`config: \`idLedgerRef\` ${problem}`);
   }
   if (cfg.idAllocation !== "ledger") return;
-  // Checked on the text with the platform's own path rules (as paths() joins it), so `check` stays git-free. On POSIX a backslash is an ordinary name character. Writes under .git could corrupt the ledger ref.
-  if (typeof cfg.tasksDir === "string" && normalize(cfg.tasksDir).split(sep)[0].toLowerCase() === ".git") {
+  // Checked on the text (after the trailing-separator cleanup) with the platform's own path rules (as paths() joins it), so `check` stays git-free. On POSIX a backslash is an ordinary name character. Writes under .git could corrupt the ledger ref.
+  if (typeof cfg.tasksDir === "string" && normalize(cfg.tasksDir.replace(/[/\\]+$/, "")).split(sep)[0].toLowerCase() === ".git") {
     errors.push("config: `tasksDir` must not be inside the repository's `.git` directory when `idAllocation` is \"ledger\"");
   }
   if (typeof cfg.idPrefix === "string" && cfg.idPrefix && !PLAIN_PREFIX_RE.test(cfg.idPrefix)) {

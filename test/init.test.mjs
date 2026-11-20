@@ -40,9 +40,9 @@ function git(root, args) {
 }
 
 // A throwaway git repo (main branch, local identity, signing off).
-function gitRepo() {
+function gitRepo(initArgs = []) {
   const root = tempRepo();
-  git(root, ["init", "-q", "--ref-format=files", "-b", "main"]);
+  git(root, ["init", "-q", ...initArgs, "-b", "main"]);
   git(root, ["config", "user.name", "Tester"]);
   git(root, ["config", "user.email", "tester@example.com"]);
   git(root, ["config", "commit.gpgsign", "false"]);
@@ -942,7 +942,7 @@ test("init --import --force refuses on a ledger-mode backlog and writes nothing"
 });
 
 test("plain init --force refuses on a ledger-mode backlog; the config and ref are unchanged", () => {
-  const root = gitRepo();
+  const root = gitRepo(["--ref-format=files"]);
   try {
     applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
     ledgerTarget(root);

@@ -184,21 +184,24 @@ function requireLedgerMode(cfg) {
 // Control characters plus the Unicode line and paragraph separators (U+2028, U+2029).
 const UNSAFE_TEXT = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 export const unsafeText = (value) => UNSAFE_TEXT.test(value);
-// Every claim rewrites the whole claims.tsv, so titles are kept short.
+// Every claim rewrites the whole claims.tsv, so titles are kept short. SPEC.md §3.1
+// states the cap. It counts Unicode code points, not UTF-16 code units.
 export const MAX_TITLE_LENGTH = 200;
+const codePoints = (text) => Array.from(text);
 
 // Titles are one line with no tabs or control characters, so they cannot forge a row.
 export function ledgerTitle(value) {
   if (typeof value !== "string" || !value.trim()) throw refuse("`title` is required", "invalid_request");
   if (unsafeText(value)) throw refuse("`title` must be a single line with no tabs or control characters", "invalid_request");
   const t = value.trim();
-  if (t.length > MAX_TITLE_LENGTH) throw refuse(`\`title\` must be at most ${MAX_TITLE_LENGTH} characters`, "invalid_request");
+  if (codePoints(t).length > MAX_TITLE_LENGTH) throw refuse(`\`title\` must be at most ${MAX_TITLE_LENGTH} characters`, "invalid_request");
   return t;
 }
 
 // Titles read from item files are cleaned instead of refused.
 function cleanTitle(value) {
-  const t = String(value ?? "").replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").trim().slice(0, MAX_TITLE_LENGTH).trim();
+  // Cut at a code point boundary so an emoji is never split.
+  const t = codePoints(String(value ?? "").replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").trim()).slice(0, MAX_TITLE_LENGTH).join("").trim();
   return t || "-";
 }
 
@@ -501,13 +504,17 @@ function pickIds(paths, cfg) {
   const exactRe = fileMatcher(cfg);
   const looseRe = fileMatcher(cfg, "i");
   const prefixes = STATUS_FOLDERS.map((s) => [...tasksParts(cfg), ...s].join("/"));
+  const folded = prefixes.map((x) => x.toLowerCase());
   for (const p of paths) {
-    const lower = p.toLowerCase();
-    for (const prefix of prefixes) {
-      if (!lower.startsWith(prefix.toLowerCase() + "/")) continue;
-      const name = p.slice(prefix.length + 1);
-      if (name.includes("/")) continue;
-      if (p.startsWith(prefix + "/")) {
+    // Split at the last slash and fold the parent whole: folding can change length, so slicing by prefix length is wrong.
+    const cut = p.lastIndexOf("/");
+    if (cut < 0) continue;
+    const parent = p.slice(0, cut);
+    const name = p.slice(cut + 1);
+    const lowerParent = parent.toLowerCase();
+    for (let i = 0; i < prefixes.length; i++) {
+      if (lowerParent !== folded[i]) continue;
+      if (parent === prefixes[i]) {
         const m = name.match(exactRe);
         if (m) ids.add(m[1]);
       } else if (looseRe.test(name)) {
