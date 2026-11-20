@@ -14,7 +14,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join, relative, isAbsolute } from "node:path";
 import { execFileSync } from "node:child_process";
-import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, loadConfig, loadRoster, readBacklog, generateArtifacts, attachEffortScale } from "./backlog.mjs";
+import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, ledgerMarkerRe, loadConfig, loadRoster, readBacklog, generateArtifacts, attachEffortScale } from "./backlog.mjs";
 
 // The config home is fixed at `trellis/backlog.config.json` (CONFIG_DIR),
 // independent of `tasksDir`. A fresh scaffold writes a config that omits
@@ -199,8 +199,10 @@ function preflight(targetRoot, options, force) {
       const abs = join(targetRoot, rel);
       if (!existsSync(abs)) continue;
       const text = readFileSync(abs, "utf8");
+      // A ledger-mode target is filled by whole delimiter lines, so check the same way.
       const bi = text.indexOf(begin), ei = text.indexOf(end);
-      if (bi === -1 || ei === -1 || bi >= ei) {
+      const ok = cfg.idAllocation === "ledger" ? ledgerMarkerRe([begin, end]).test(text) : bi !== -1 && ei !== -1 && bi < ei;
+      if (!ok) {
         return [`${rel} exists but is missing its required \`${begin}\` … \`${end}\` markers in order; fix or remove it before init`];
       }
     }

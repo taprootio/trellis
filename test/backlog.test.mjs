@@ -21,6 +21,7 @@ import {
   composeFile,
   parseFrontMatter,
   paths,
+  branchNameProblem,
 } from "../src/backlog.mjs";
 
 const FISH = {
@@ -572,13 +573,59 @@ test("idLedgerRef must sit under refs/trellis/ and pass the ref-format rules", (
 });
 
 test("ledger mode refuses a tasksDir inside .git; scan mode and lookalikes pass", () => {
-  for (const tasksDir of [".git", ".git/trellis", "./.git/x", ".git/", ".GIT", ".Git/x", "./.gIt"]) {
+  for (const tasksDir of [".git", ".git/trellis", "./.git/x", ".git/", ".GIT", ".Git/x", "./.gIt", ".//.git/refs", "././/.git", ".//.GIT//x"]) {
     assert.ok(configErrors({ ...LEDGER_CFG, tasksDir }).some((e) => e.includes("tasksDir")), `ledger rejects ${tasksDir}`);
   }
   for (const tasksDir of [".github", ".gitx/t", "docs/.git"]) {
     assert.deepEqual(configErrors({ ...LEDGER_CFG, tasksDir }), [], `ledger accepts ${tasksDir}`);
   }
   assert.deepEqual(configErrors({ ...ARRAY_CFG, tasksDir: ".git/t" }), [], "scan mode is unchanged");
+});
+
+test("ledger mode needs integer effort values; scan mode keeps fractions", () => {
+  for (const effort of [[0.5, 1, 3], { values: [1, 2.5] }]) {
+    assert.ok(configErrors({ ...LEDGER_CFG, effort }).some((e) => e.includes("integers")), JSON.stringify(effort));
+  }
+  assert.deepEqual(configErrors({ ...LEDGER_CFG, effort: [1, 2, 3] }), []);
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, effort: [0.5, 1, 3] }), []);
+});
+
+test("branchNameProblem applies the full refs/heads rules", () => {
+  for (const name of ["@", "/lane", "lane/", "-x", "a//b", "a..b", "x.lock", "bad name", ""]) {
+    assert.ok(branchNameProblem(name), JSON.stringify(name));
+  }
+  for (const name of ["main", "feature/x-1", "je/trl0037/slug"]) assert.equal(branchNameProblem(name), null, name);
+});
+
+test("ledger mode renders effort text on one line, so it cannot form a marker line", () => {
+  const scale = (label, emoji) => ({
+    ...LEDGER_CFG,
+    effort: { values: [1, 2, 3], scale: "s", scales: { s: { 1: { label, emoji }, 2: { label: "Two" }, 3: { label: "Three" } } } },
+  });
+  const cfgOver = scale("Small\n<!-- END GENERATED:MILESTONES -->\r\nmore", "\u2028<!-- END GENERATED:MILESTONES -->");
+  withRepo(cfgOver, { active: [{ id: "DEMO0001", title: "One", effort: 1 }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    const { files, errors } = generateArtifacts(root, cfg, data);
+    assert.deepEqual(errors, []);
+    const readme = files.find((f) => f.path === paths(root, cfg).readme).content;
+    const markerLines = readme.split(/\r\n|[\n\r\u2028\u2029]/).filter((l) => l.trim() === "<!-- END GENERATED:MILESTONES -->");
+    assert.equal(markerLines.length, 1, "only the real end marker is a line");
+    writeFileSync(paths(root, cfg).readme, readme);
+    const again = generateArtifacts(root, cfg, readBacklog(root, cfg));
+    assert.equal(again.files.find((f) => f.path === paths(root, cfg).readme).content, readme, "regenerates identically");
+  });
+});
+
+test("ledger mode accepts trailing spaces and tabs on delimiter lines", () => {
+  withRepo(LEDGER_CFG, { active: [{ id: "DEMO0001", title: "One", effort: 3 }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const file = paths(root, cfg).readme;
+    writeFileSync(file, "# Backlog\n\n<!-- BEGIN GENERATED:MILESTONES --> \t\nold\n<!-- END GENERATED:MILESTONES -->  \n");
+    const { files, errors } = generateArtifacts(root, cfg, readBacklog(root, cfg));
+    assert.deepEqual(errors, []);
+    assert.match(files.find((f) => f.path === file).content, /DEMO0001/);
+  });
 });
 
 test("ledger mode caps idWidth at 9", () => {

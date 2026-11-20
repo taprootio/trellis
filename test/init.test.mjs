@@ -959,6 +959,23 @@ test("plain init --force refuses on a ledger-mode backlog; the config and ref ar
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("init preflight on a ledger-mode target matches delimiter lines like the generator", () => {
+  const root = tempRepo();
+  const readme = join(root, "trellis", "README.md");
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    ledgerTarget(root);
+    writeFileSync(readme, "# B\n\n<!-- BEGIN GENERATED:MILESTONES --> \t\n<!-- END GENERATED:MILESTONES -->  \n");
+    let r = spawnSync(process.execPath, [initScript, root], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    // The markers appear only inside a line of text, so the generator could not fill them.
+    writeFileSync(readme, "# B\n\nsee <!-- BEGIN GENERATED:MILESTONES --> and <!-- END GENERATED:MILESTONES -->\n");
+    r = spawnSync(process.execPath, [initScript, root], { encoding: "utf8" });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /markers/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("init --force still works on a scan-mode backlog", () => {
   const root = tempRepo();
   try {

@@ -10,9 +10,9 @@
 // `check` never depends on git or on local state (SPEC §8.3).
 
 import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
-import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, PLAIN_PREFIX_RE, parseFrontMatter, paths, refNameProblem } from "./backlog.mjs";
+import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, PLAIN_PREFIX_RE, branchNameProblem, parseFrontMatter, paths } from "./backlog.mjs";
 
 // A typed failure the CLI maps to an exit code and the MCP adapter maps to a
 // TrellisError. Exit 2 is "refused, nothing written"; exit 1 is a real failure
@@ -225,7 +225,7 @@ function parseClaims(text, cfg) {
     if (!KINDS.has(kind)) return { reason: `${at} has an unknown kind` };
     if (!branch || !title || unsafeText(branch) || unsafeText(title)) return { reason: `${at} has an empty or unsafe branch or title` };
     // A real branch name must be one git accepts; `-` stands for no branch.
-    if (branch !== "-" && (branch.startsWith("-") || branch === "@" || refNameProblem(branch))) return { reason: `${at} has a branch that is not a valid git branch name` };
+    if (branch !== "-" && branchNameProblem(branch)) return { reason: `${at} has a branch that is not a valid git branch name` };
     if (kind === "through" && branch !== "-") return { reason: `${at} is a through row with a branch` };
     rows.push({ id, date, kind, branch, title });
   }
@@ -383,6 +383,8 @@ function verifyWorktrees(repoRoot, worktrees) {
   const real = new Set();
   const common = runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: repoRoot });
   const commonDir = common.status === 0 ? realpathSync.native(common.stdout.replace(/\n$/, "")) : "";
+  const regs = registrations(commonDir);
+  const taken = new Set();
   for (const w of worktrees) {
     const top = runGit(["rev-parse", "--show-toplevel"], { cwd: w.path });
     const topPath = top.stdout.replace(/\n$/, "");
@@ -393,32 +395,41 @@ function verifyWorktrees(repoRoot, worktrees) {
     // another clone may now sit. The checkout must resolve to the git dir registered for it.
     const actual = runGit(["rev-parse", "--absolute-git-dir"], { cwd: w.path });
     const actualDir = actual.status === 0 ? realpathSync.native(actual.stdout.replace(/\n$/, "")) : "";
-    if (!commonDir || !actualDir || actualDir !== registeredGitDir(commonDir, w.path)) {
+    // One-to-one: a checkout matches exactly one registration (the main one has none,
+    // so it maps to the common dir), and no registration serves two checkouts.
+    const want = realpathSync.native(w.path);
+    const hits = regs.filter((r) => r.checkout === want);
+    const expected = hits.length === 0 ? commonDir : hits.length === 1 ? hits[0].gitDir : "";
+    if (!commonDir || !actualDir || !expected || taken.has(expected) || actualDir !== expected) {
       throw refuse(`the checkout at ${w.path} is not the one git registered for it (moved by hand?); the id ledger does not support this layout`, "unsupported_layout");
     }
-    real.add(realpathSync.native(w.path));
+    taken.add(expected);
+    real.add(want);
   }
   if (!real.has(realpathSync.native(repoRoot))) {
     throw refuse(`${repoRoot} is not in the worktree list of its clone; the id ledger does not support this layout`, "unsupported_layout");
   }
 }
 
-// The git dir registered for a checkout: its `worktrees/<name>` directory when a
-// gitdir file points at it, else the common dir (the main worktree).
-function registeredGitDir(commonDir, path) {
+// Every linked-worktree registration: its metadata dir and the checkout its `gitdir`
+// file names. The target may be relative to the registration dir (`worktree add
+// --relative-paths`). An unreadable entry cannot match, so it is left out.
+function registrations(commonDir) {
+  if (!commonDir) return [];
   const dir = join(commonDir, "worktrees");
-  const want = realpathSync.native(path);
   let names = [];
   try {
     names = readdirSync(dir);
   } catch { /* no linked worktrees */ }
+  const out = [];
   for (const name of names) {
     try {
       const target = readFileSync(join(dir, name, "gitdir"), "utf8").trim();
-      if (target && realpathSync.native(dirname(target)) === want) return realpathSync.native(join(dir, name));
+      if (!target) continue;
+      out.push({ gitDir: realpathSync.native(join(dir, name)), checkout: realpathSync.native(dirname(resolve(join(dir, name), target))) });
     } catch { /* an unreadable entry cannot be the match */ }
   }
-  return commonDir;
+  return out;
 }
 
 // Reads the full symbolic ref and strips refs/heads/ itself: `--short` would print
@@ -427,7 +438,7 @@ function branchOf(repoRoot) {
   const r = runGit(["symbolic-ref", "-q", "HEAD"], { cwd: repoRoot, raw: true });
   if (r.status !== 0) return "-";
   const name = stripHeads(decodeGit(r.stdout, "the branch name").replace(/\n$/, ""));
-  if (unsafeText(name)) throw refuse("the current branch name has a control or line-separator character; the id ledger cannot record it", "invalid_request");
+  if (name !== "-" && (unsafeText(name) || branchNameProblem(name))) throw refuse("the current branch name is not one the id ledger can record (control or line-separator character, or not a valid git branch name)", "invalid_request");
   return name || "-";
 }
 
@@ -754,7 +765,7 @@ export function seed(repoRoot, cfg, { through: through_ } = {}) {
   const date = today();
   const rows = [...found.keys()].sort().map((id) => {
     const wt = found.get(id);
-    return { id, date, kind: "seed", branch: unsafeText(wt.branch) ? "-" : wt.branch, title: seedTitle(wt.path, cfg, id) };
+    return { id, date, kind: "seed", branch: wt.branch !== "-" && (unsafeText(wt.branch) || branchNameProblem(wt.branch)) ? "-" : wt.branch, title: seedTitle(wt.path, cfg, id) };
   });
   if (through_ != null) rows.push({ id: through_, date, kind: "through", branch: "-", title: "-" });
 

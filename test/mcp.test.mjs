@@ -923,14 +923,13 @@ test("ledger mode: a title holding the end marker as text cannot end a generated
   } finally { c.cleanup(); }
 });
 
-test("ledger mode: an item that would not survive the re-read is refused before claiming", () => {
+test("ledger mode: a config with a fractional effort is a config error, so no id is claimed", () => {
   const c = ledgerRepo({ cfg: { effort: { values: [0.5, 1, 3] } } });
   try {
     const t = refTip(c.root);
     const before = artifactBytes(c.root);
-    throwsTrellis(() => createTask(c.root, { ...VALID, effort: 0.5 }), "invalid_request");
+    assert.throws(() => createTask(c.root, { ...VALID, effort: 3 }), /integers/);
     assert.equal(refTip(c.root), t, "no id was claimed");
     assert.deepEqual(artifactBytes(c.root), before);
-    assert.equal(createTask(c.root, { ...VALID, effort: 3 }).created.id, "DEMO0001");
   } finally { c.cleanup(); }
 });

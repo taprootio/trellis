@@ -9,7 +9,7 @@
 // on purpose so Trellis stays drop-in with no install step.
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join, relative, isAbsolute } from "node:path";
+import { join, relative, isAbsolute, posix } from "node:path";
 
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
 export const SPEC_VERSION = "2.5";
@@ -39,6 +39,14 @@ export function refNameProblem(ref) {
     return "has a component starting with `.` or ending in `.lock`";
   }
   return null;
+}
+
+// A branch name as git accepts it for `refs/heads/<name>`: the ref rules on the full
+// ref, plus the branch-only ones (no `@`, no leading `-`). Returns a problem or null.
+// One predicate for the ledger reader and every writer.
+export function branchNameProblem(name) {
+  if (name === "@" || name.startsWith("-")) return "is not a name git accepts for a branch";
+  return refNameProblem(`refs/heads/${name}`);
 }
 
 // Returns a problem description, or null when `ref` is a valid ledger ref: the
@@ -121,6 +129,10 @@ export function loadConfig(repoRoot) {
     errors.push("config: `effort` values must all be numbers");
   }
   cfg.effortValues = Array.isArray(effortValues) ? effortValues : [];
+  // Ledger mode re-reads what it writes, so an effort must survive the front-matter round trip.
+  if (cfg.idAllocation === "ledger" && cfg.effortValues.some((v) => typeof v === "number" && !Number.isInteger(v))) {
+    errors.push("config: `effort` values must be integers when `idAllocation` is \"ledger\"");
+  }
   attachEffortScale(cfg, errors);
 
   // `tasksDir` is optional (defaults to `trellis/`); when present it must be a
@@ -161,8 +173,8 @@ function validateIdAllocation(cfg, errors) {
     if (problem) errors.push(`config: \`idLedgerRef\` ${problem}`);
   }
   if (cfg.idAllocation !== "ledger") return;
-  // Checked on the text, so `check` stays git-free. Writes under .git could corrupt the ledger ref.
-  if (typeof cfg.tasksDir === "string" && /^(\.\/)*\.git(\/|\\|$)/i.test(cfg.tasksDir.replace(/^(\.[/\\])+/, "").replace(/[/\\]+$/, "") + "/")) {
+  // Checked on the text (normalized the way paths() joins it), so `check` stays git-free. Writes under .git could corrupt the ledger ref.
+  if (typeof cfg.tasksDir === "string" && /^\.git(\/|$)/i.test(posix.normalize(cfg.tasksDir.replace(/\\/g, "/")) + "/")) {
     errors.push("config: `tasksDir` must not be inside the repository's `.git` directory when `idAllocation` is \"ledger\"");
   }
   if (typeof cfg.idPrefix === "string" && cfg.idPrefix && !PLAIN_PREFIX_RE.test(cfg.idPrefix)) {
@@ -381,7 +393,9 @@ function effortError(cfg) {
 function effortCell(it, cfg) {
   if (cfg.effortScale.isIdentity || !it._effortLabel) return String(it.effort ?? "");
   const emoji = it._effortEmoji ? `${it._effortEmoji} ` : "";
-  return `${emoji}${it._effortLabel} · ${it.effort}`;
+  const text = `${emoji}${it._effortLabel} · ${it.effort}`;
+  // Ledger mode keeps configured text on one line, so it cannot form a marker line.
+  return cfg.idAllocation === "ledger" ? text.replace(/\r\n|[\n\r\v\f\u0085\u2028\u2029]/g, " ") : text;
 }
 
 // ----------------------------------------------------------- front-matter
@@ -653,11 +667,16 @@ function cell(s) { return String(s ?? "").replace(/\|/g, "\\|"); }
 
 // `literal` (ledger mode only, TRL0037) inserts the body through a callback, so a
 // title holding `$&` or `$1` is text. Scan mode keeps its exact bytes.
+// Ledger mode matches each delimiter only as a whole line (trailing spaces and tabs
+// allowed), so a title that holds the end marker as text cannot close the block
+// early (TRL0037). Shared with the init preflight.
+export function ledgerMarkerRe([begin, end]) {
+  return new RegExp(`^${begin}[ \\t]*$[\\s\\S]*?^${end}[ \\t]*$`, "m");
+}
+
 function fillMarkers(text, [begin, end], body, where, errors, literal = false) {
-  // Ledger mode matches each delimiter only as a whole line, so a title that holds
-  // the end marker as text cannot close the block early (TRL0037).
   const re = literal
-    ? new RegExp(`^${begin}$[\\s\\S]*?^${end}$`, "m")
+    ? ledgerMarkerRe([begin, end])
     : new RegExp(`${begin}[\\s\\S]*?${end}`);
   if (!re.test(text)) { errors.push(`${where}: generated markers not found (${begin} ... ${end})`); return text; }
   const filled = `${begin}\n${body}\n${end}`;

@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync, chmodSync, symlinkSync, readFileSync, existsSync, readdirSync, renameSync,
+  mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync, chmodSync, symlinkSync, readFileSync, existsSync, readdirSync, renameSync, cpSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -1094,7 +1094,7 @@ test("refuseSymlinkedArtifacts refuses a symlink, dangling or not, and passes re
 
 test("a branch field that is not a valid git branch name makes the ledger unusable", () => {
   withClone(({ root, cfg }) => {
-    for (const branch of ["bad branch", "-x", "a..b", "x.lock", "@"]) {
+    for (const branch of ["bad branch", "-x", "a..b", "x.lock", "@", "/lane", "lane/", "a//b"]) {
       rawLedger(root, HEADER + `DEMO0001\t2026-11-19\tclaim\t${branch}\tok\n`);
       assert.match(readLedger(root, cfg).unusable ?? "", /valid git branch name/, branch);
     }
@@ -1113,6 +1113,36 @@ test("a checkout moved by hand, with another clone at its old path, refuses allo
     // A different clone now sits where the registration still points.
     mkdirSync(path);
     git(path, "init", "-q", "-b", "other");
+    const before = tip(root);
+    assertRefused(() => claim(root, cfg, { title: "x" }), "unsupported_layout");
+    assert.equal(tip(root), before);
+  });
+});
+
+// ------------------------------------------------ external review round 7
+
+const relativePathsSupported = (() => {
+  const c = makeClone();
+  try {
+    git(c.root, "worktree", "add", "-q", "--relative-paths", "-b", "probe", join(c.dir, "probe"));
+    return true;
+  } catch { return false; } finally { c.cleanup(); }
+})();
+
+test("a worktree registered with a relative gitdir path is accepted", { skip: (!relativePathsSupported && "git lacks worktree --relative-paths") || process.platform === "win32" }, () => {
+  withClone(({ root, cfg, dir }) => {
+    git(root, "worktree", "add", "-q", "--relative-paths", "-b", "rel", join(dir, "rel"));
+    seed(root, cfg);
+    assert.equal(claim(root, cfg, { title: "ok" }).id, "DEMO0001");
+  });
+});
+
+test("two registrations for one checkout refuse allocation", { skip: process.platform === "win32" }, () => {
+  withClone(({ root, cfg, lane }) => {
+    lane("lane");
+    seed(root, cfg);
+    const worktrees = join(root, ".git", "worktrees");
+    cpSync(join(worktrees, "lane"), join(worktrees, "lane2"), { recursive: true });
     const before = tip(root);
     assertRefused(() => claim(root, cfg, { title: "x" }), "unsupported_layout");
     assert.equal(tip(root), before);
