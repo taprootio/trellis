@@ -14,7 +14,7 @@
 import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
-import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
+import { DEFAULTS, SKIP_PARTS, applyScaffold, parseSkip, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
 import { applyImport, importFailureLines, assertNotLedgerMode, assertNotLegacyConfig, assertNotLocalMode, assertNoLeftoverMarkers, assertSourceNotLocalOutput, ImportRefused } from "../src/import.mjs";
 import { loadConfig } from "../src/backlog.mjs";
 import { switchToLocal } from "../src/switch-local.mjs";
@@ -40,6 +40,9 @@ Flags:
   --id-floor <N>        with --import, floor the organic next id (default: auto — next 1000 above the band)
   --retire-source <p>   history-preservingly git-rm an imported source tree at <p>
                         (a separate, later step — see below; cannot combine with --import)
+  --skip <parts>        leave parts out of the scaffold: ${Object.keys(SKIP_PARTS).join(", ")}
+                        (comma list; repeated flags are united)
+  --with-playbooks      write the process playbooks even when good-agent is detected
   --force               overwrite existing files instead of skipping (refused when the
                         existing config has idAllocation "ledger", generatedArtifacts "local"
                         or a legacy cutoff)
@@ -112,6 +115,9 @@ function parseArgs(argv) {
         break;
       }
       case "--retire-source": opts.retireSource = next(); break;
+      // Raw values, one per flag (undefined when missing); validated once by parseSkip.
+      case "--skip": (opts.skip ||= []).push(next()); break;
+      case "--with-playbooks": opts.withPlaybooks = true; break;
       case "--prefix": opts.prefix = next(); break;
       case "--id-width": opts.idWidth = Number(next()); break;
       case "--milestones": opts.milestones = csv(next()); break;
@@ -165,6 +171,7 @@ function report(targetRoot, summary, dryRun) {
   line(dryRun ? "append" : "appended", summary.appended);
   line(dryRun ? "regenerate" : "generated", summary.generated);
   line("skipped", summary.skipped);
+  line("omitted", summary.omitted);
   // Remaining warnings are benign (e.g. a missing copy source) — the scaffold
   // still completed, so they do not change the exit code.
   for (const w of summary.warnings) console.warn(`  warning: ${w}`);
@@ -204,6 +211,8 @@ function retireFlagErrors(opts) {
   const errors = [];
   if (!opts.retireSource || !String(opts.retireSource).trim()) errors.push("--retire-source requires a path");
   if (opts.import) errors.push("--retire-source cannot be combined with --import — retire the source in a separate run after the import is committed");
+  if (opts.skip) errors.push("--retire-source cannot be combined with --skip, which only applies to scaffolding");
+  if (opts.withPlaybooks) errors.push("--retire-source cannot be combined with --with-playbooks, which only applies to scaffolding");
   return errors;
 }
 
@@ -292,6 +301,17 @@ if (opts.switchToLocal) {
     process.exit(2);
   }
   runSwitch(resolve(target), !!opts.dryRun);
+}
+
+// `--skip` is checked before any prompt or write. The raw values become the list of part names.
+if (opts.skip) {
+  const { parts, errors } = parseSkip(opts.skip);
+  if (opts.withPlaybooks && parts.includes("playbooks")) errors.push("--skip playbooks cannot be combined with --with-playbooks");
+  if (errors.length) {
+    for (const e of errors) console.error(`error: ${e}`);
+    process.exit(2);
+  }
+  opts.skip = parts;
 }
 
 await promptMissing(opts);

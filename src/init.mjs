@@ -55,14 +55,43 @@ export const AGENTS_MARKERS = ["<!-- BEGIN TRELLIS -->", "<!-- END TRELLIS -->"]
 // The package ships these under templates/ so npm does not also include the live
 // generated backlog index at trellis/README.md. In a source checkout, prefer the
 // canonical in-repo files so Trellis keeps dogfooding the layout it emits.
-const COPY_FILES = [
+const PLAYBOOK_FILES = [
   `${CONFIG_DIR}/playbooks/conventions.md`,
   `${CONFIG_DIR}/playbooks/work-task.md`,
   `${CONFIG_DIR}/playbooks/code-review.md`,
   `${CONFIG_DIR}/playbooks/pr-draft.md`,
-  `${CONFIG_DIR}/branch-protection.md`,
-  ".github/pull_request_template.md",
 ];
+const WORKFLOW_REL = ".github/workflows/backlog.yml";
+const BRANCH_PROTECTION_REL = `${CONFIG_DIR}/branch-protection.md`;
+const PR_TEMPLATE_REL = ".github/pull_request_template.md";
+const COPY_FILES = [...PLAYBOOK_FILES, BRANCH_PROTECTION_REL, PR_TEMPLATE_REL];
+
+// The parts `--skip` can leave out, each with the files it covers (TRL0040). One table
+// for the CLI and `applyScaffold`. AGENTS.md sits outside `templateFiles`, so
+// `planScaffold` applies the `agents` part itself.
+export const SKIP_PARTS = {
+  ci: [WORKFLOW_REL],
+  "pr-template": [PR_TEMPLATE_REL],
+  playbooks: PLAYBOOK_FILES,
+  "branch-protection": [BRANCH_PROTECTION_REL],
+  agents: ["AGENTS.md"],
+};
+
+// Turns the raw `--skip` values (one per flag; undefined when the value was missing)
+// into a deduplicated list of part names in table order, plus usage errors.
+export function parseSkip(values = []) {
+  const errors = [];
+  const named = new Set();
+  for (const v of values) {
+    const names = v == null ? [] : String(v).split(",").map((x) => x.trim()).filter(Boolean);
+    if (!names.length) errors.push("`--skip` needs a comma-separated list of parts");
+    for (const n of names) {
+      if (Object.hasOwn(SKIP_PARTS, n)) named.add(n);
+      else errors.push(`unknown \`--skip\` part: ${n} (expected ${Object.keys(SKIP_PARTS).join(", ")})`);
+    }
+  }
+  return { parts: Object.keys(SKIP_PARTS).filter((p) => named.has(p)), errors: [...new Set(errors)] };
+}
 
 function copySourcePath(sourceRoot, rel) {
   const local = join(sourceRoot, rel);
@@ -370,7 +399,7 @@ ${end}
 
 // Build the template files (everything except the generated artifacts, which the
 // core fills in afterward). Returns [{ rel, content }].
-function templateFiles(o, sourceRoot, root, local = false) {
+function templateFiles(o, sourceRoot, root, local = false, omit = new Set()) {
   const files = [
     { rel: CONFIG_REL, content: configContent(o) },
     { rel: TEAM_REL, content: teamContent() },
@@ -382,10 +411,11 @@ function templateFiles(o, sourceRoot, root, local = false) {
       { rel: `${root}/completed/index.md`, content: completedSkeleton() },
       { rel: `${root}/removed/index.md`, content: removedSkeleton() },
     ]),
-    { rel: ".github/workflows/backlog.yml", content: workflowContent() },
-  ];
+    { rel: WORKFLOW_REL, content: workflowContent() },
+  ].filter((f) => !omit.has(f.rel));
   const warnings = [];
-  for (const rel of COPY_FILES) {
+  // An omitted part's source is never resolved, so it can never be reported missing.
+  for (const rel of COPY_FILES.filter((r) => !omit.has(r))) {
     const src = copySourcePath(sourceRoot, rel);
     if (src) files.push({ rel, content: readFileSync(src, "utf8") });
     else warnings.push(`source not found, skipped copy: ${rel}`);
@@ -416,10 +446,11 @@ function stripTrellisBlock(text) {
 // the repo-relative path just imported — a reference to it is the strongest signal a
 // doc points at the now-retired backlog. Precision over recall: a false positive is
 // only a line the agent skips.
-export function scanReconcile(targetRoot, { root = DEFAULT_TASKS_DIR, importSource } = {}) {
+export function scanReconcile(targetRoot, { root = DEFAULT_TASKS_DIR, importSource, excludeAgents = false } = {}) {
   const notes = [];
   const headingRe = /^[ \t]*#{1,6}[ \t]+(.*\bbacklog\b.*)$/im;
   for (const file of RECONCILE_FILES) {
+    if (excludeAgents && file === "AGENTS.md") continue;
     const abs = join(targetRoot, file);
     if (!existsSync(abs)) continue;
     const authorText = file === "AGENTS.md" ? stripTrellisBlock(readFileSync(abs, "utf8")) : readFileSync(abs, "utf8");
@@ -473,7 +504,9 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   const keptCfg = keepCfg ? existing.cfg : null;
 
   const actions = [];
-  const { files, warnings } = templateFiles(o, sourceRoot, root, local);
+  const omitted = Object.keys(SKIP_PARTS).filter((p) => (opts.skip || []).includes(p));
+  const omit = new Set(omitted.flatMap((p) => SKIP_PARTS[p]));
+  const { files, warnings } = templateFiles(o, sourceRoot, root, local, omit);
   if (keepCfg && suppliedConflicts(opts, o)) {
     warnings.push(`existing backlog.config.json kept; its vocabulary governs (prefix \`${o.prefix}\`) — supplied flags ignored${Object.hasOwn(keptCfg, "legacy") ? "" : " (use --force to overwrite)"}`);
   }
@@ -494,9 +527,12 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   }
 
   // AGENTS.md: create if absent, append the block if present without it, else skip.
+  // `--skip agents` leaves it out entirely.
   const agentsAbs = join(targetRoot, "AGENTS.md");
   const block = agentsBlock(o, root, local ? "local" : "committed");
-  if (!existsSync(agentsAbs)) {
+  if (omit.has("AGENTS.md")) {
+    // No action: nothing is created, appended or printed for AGENTS.md.
+  } else if (!existsSync(agentsAbs)) {
     actions.push({ rel: "AGENTS.md", content: `# AGENTS\n\n${block}`, action: "create" });
   } else {
     const cur = readFileSync(agentsAbs, "utf8");
@@ -511,9 +547,9 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   // Read-only reconciliation scan (TRL0027): stale backlog guidance for the agent to
   // rewrite by hand. Advisory — kept separate from `warnings` (scaffold mechanics) and
   // from `errors` (it never blocks).
-  const reconcile = scanReconcile(targetRoot, { root, importSource: importSourceRel(targetRoot, opts.import) });
+  const reconcile = scanReconcile(targetRoot, { root, importSource: importSourceRel(targetRoot, opts.import), excludeAgents: omit.has("AGENTS.md") });
 
-  return { options: o, resolved, actions, warnings, root, reconcile, local, cfg: keptCfg };
+  return { options: o, resolved, actions, warnings, root, reconcile, local, cfg: keptCfg, omitted };
 }
 
 // ---------------------------------------------------------------- apply
@@ -525,12 +561,20 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false, deferGene
   // `errors` is fatal (the run did not produce a --check-green scaffold);
   // `warnings` is benign (e.g. a missing copy source). The CLI keys its exit code
   // and "Refused" banner off `errors`, never off `warnings`.
-  const summary = { created: [], skipped: [], appended: [], generated: [], reconcile: [], warnings: [], errors: [] };
+  const summary = { created: [], skipped: [], appended: [], generated: [], omitted: [], reconcile: [], warnings: [], errors: [] };
+
+  // An unknown part name is refused before anything is planned or written.
+  const skipErrors = parseSkip(opts.skip || []).errors;
+  if (skipErrors.length) {
+    summary.errors.push(...skipErrors);
+    return { options: resolveOptions(opts), summary };
+  }
 
   // planScaffold only reads, so the target stays untouched through every check
   // below — a rejected run leaves nothing behind. It also resolves the options
   // (no need to resolve again here).
-  const { options, resolved, actions, warnings, root, reconcile, local, cfg: keptCfg } = planScaffold(targetRoot, opts, sourceRoot);
+  const { options, resolved, actions, warnings, root, reconcile, local, cfg: keptCfg, omitted } = planScaffold(targetRoot, opts, sourceRoot);
+  summary.omitted = omitted;
   summary.reconcile = reconcile; // advisory, populated even on a refusal (the CLI only prints it on success)
   const GENERATED = generatedFiles(targetRoot, root, local); // artifact rel-paths under the effective backlog root
   summary.root = root; // surfaced so the CLI can point at the actual scaffold root

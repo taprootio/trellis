@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
-import { applyScaffold, planScaffold, shouldPromptVocab, agentsBlock, AGENTS_MARKERS, DEFAULTS } from "../src/init.mjs";
+import { applyScaffold, planScaffold, shouldPromptVocab, agentsBlock, AGENTS_MARKERS, SKIP_PARTS, DEFAULTS } from "../src/init.mjs";
 import { assertNotLegacyConfig } from "../src/import.mjs";
 import { testSeams as outputSeams, previewNextId } from "../src/local-output.mjs";
 import { initRefFormat } from "./git-support.mjs";
@@ -1481,5 +1481,148 @@ test("a scaffold writes the pinned full block into AGENTS.md", () => {
   try {
     applyScaffold(root, {}, {}, sourceRoot);
     assert.equal(markedBlock(readFileSync(join(root, "AGENTS.md"), "utf8")), readFixture("agents-block-local.md"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// -------------------------------------------------------- --skip parts (TRL0040)
+const SKIP_NAMES = Object.keys(SKIP_PARTS);
+const WORKFLOW = ".github/workflows/backlog.yml";
+// The files and the raw index bytes, so "unchanged" covers the Git index too.
+const snapshotWithIndex = (root) => ({ ...snapshotAll(root), ".git/index": existsSync(join(root, ".git", "index")) ? readFileSync(join(root, ".git", "index")).toString("hex") : null });
+
+test("each --skip part leaves its files out and lists the part under omitted", () => {
+  for (const part of SKIP_NAMES) {
+    const root = tempRepo();
+    try {
+      const { summary } = applyScaffold(root, { prefix: "DEMO", skip: [part] }, {}, sourceRoot);
+      assert.deepEqual(summary.errors, [], part);
+      assert.deepEqual(summary.omitted, [part]);
+      for (const rel of SKIP_PARTS[part]) assert.equal(existsSync(join(root, rel)), false, rel);
+      // Everything outside the part is still written, and nothing is reported missing.
+      const others = SKIP_NAMES.filter((n) => n !== part).flatMap((n) => SKIP_PARTS[n]);
+      for (const rel of others) assert.ok(existsSync(join(root, rel)), rel);
+      assert.deepEqual(summary.warnings, []);
+      assert.deepEqual(summary.skipped, []);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("an omitted part's copy source is never read, so it cannot be reported missing", () => {
+  const copySources = Object.values(SKIP_PARTS).flat().filter((rel) => rel !== WORKFLOW && rel !== "AGENTS.md");
+  for (const part of SKIP_NAMES) {
+    const src = tempRepo();
+    const root = tempRepo();
+    try {
+      // A source holding every copy file except the omitted part's.
+      for (const rel of copySources.filter((r) => !SKIP_PARTS[part].includes(r))) {
+        mkdirSync(dirname(join(src, rel)), { recursive: true });
+        writeFileSync(join(src, rel), readFileSync(join(sourceRoot, rel), "utf8"));
+      }
+      const { summary } = applyScaffold(root, { prefix: "DEMO", skip: [part] }, {}, src);
+      assert.deepEqual(summary.warnings, [], part);
+      assert.deepEqual(summary.omitted, [part]);
+    } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("--skip values from repeated flags and comma lists form one union", () => {
+  for (const args of [["--skip", "ci", "--skip", "playbooks"], ["--skip", "ci,playbooks"], ["--skip=playbooks", "--skip", "ci,playbooks"]]) {
+    const root = tempRepo();
+    try {
+      for (const flags of [args, [...args, "--dry-run"]]) {
+        const r = runInit(root, ["--prefix", "DEMO", ...flags]);
+        assert.equal(r.status, 0, r.stderr);
+        assert.match(r.stdout, /omitted \(2\): ci, playbooks/);
+      }
+      assert.equal(existsSync(join(root, WORKFLOW)), false);
+      assert.equal(existsSync(join(root, "trellis", "playbooks")), false);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("an omitted part whose file already exists is not listed under skipped", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    const plain = applyScaffold(root, {}, { dryRun: true }, sourceRoot).summary;
+    const { summary } = applyScaffold(root, { skip: ["ci"] }, {}, sourceRoot);
+    assert.deepEqual(summary.skipped, plain.skipped.filter((rel) => rel !== WORKFLOW));
+    assert.deepEqual(summary.omitted, ["ci"]);
+    assert.ok(existsSync(join(root, WORKFLOW)), "an existing file is left alone");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a bad --skip value is a usage error and nothing is written", () => {
+  for (const args of [["--skip", "nope"], ["--skip", "ci,nope"], ["--skip", "--force"], ["--skip="], ["--skip", ","], ["--skip"]]) {
+    const root = tempRepo();
+    try {
+      const r = runInit(root, [...args]);
+      assert.equal(r.status, 2, args.join(" "));
+      assert.deepEqual(readdirSync(root), [], "nothing written");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+  const root = tempRepo();
+  try {
+    assert.equal(applyScaffold(root, { skip: ["nope"] }, {}, sourceRoot).summary.errors.length, 1);
+    assert.deepEqual(readdirSync(root), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("--skip agents writes no AGENTS.md and leaves an existing one out of the reconciliation scan", () => {
+  const fresh = tempRepo();
+  try {
+    applyScaffold(fresh, { skip: ["agents"] }, {}, sourceRoot);
+    assert.equal(existsSync(join(fresh, "AGENTS.md")), false);
+  } finally { rmSync(fresh, { recursive: true, force: true }); }
+  const root = tempRepo();
+  try {
+    const authored = "# Team guide\n\n## AI Backlog\n\nOld notes.\n";
+    writeFileSync(join(root, "AGENTS.md"), authored);
+    const noted = (skip) => applyScaffold(root, { skip }, { dryRun: true }, sourceRoot).summary.reconcile.map((r) => r.file);
+    assert.deepEqual(noted([]), ["AGENTS.md"]);
+    assert.deepEqual(noted(["agents"]), []);
+    assert.equal(readFileSync(join(root, "AGENTS.md"), "utf8"), authored);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("--skip playbooks with --with-playbooks is a usage error and the target is unchanged", () => {
+  const root = gitRepo();
+  try {
+    const before = snapshotWithIndex(root);
+    const r = runInit(root, ["--skip", "playbooks", "--with-playbooks"]);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /--skip/);
+    assert.match(r.stderr, /--with-playbooks/);
+    assert.deepEqual(snapshotWithIndex(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// A committed, scaffolded repo the switch and the retirement can both start from.
+function committedRepo() {
+  const root = gitRepo();
+  applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+  mkdirSync(join(root, "planning"), { recursive: true });
+  writeFileSync(join(root, "planning", "a.md"), "old task\n");
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "fixture"]);
+  return root;
+}
+
+test("--switch-to-local and --retire-source refuse --skip and --with-playbooks, changing nothing", () => {
+  const root = committedRepo();
+  try {
+    const cases = [
+      [["--switch-to-local", "--skip", "pr-template"], ["--switch-to-local", "--skip"]],
+      [["--switch-to-local", "--with-playbooks"], ["--switch-to-local", "--with-playbooks"]],
+      [["--retire-source", "planning", "--skip", "pr-template"], ["--retire-source", "--skip"]],
+      [["--retire-source", "planning", "--with-playbooks"], ["--retire-source", "--with-playbooks"]],
+    ];
+    for (const [args, names] of cases) {
+      const before = snapshotWithIndex(root);
+      const r = runInit(root, args);
+      assert.equal(r.status, 2, args.join(" "));
+      for (const n of names) assert.ok(r.stderr.includes(n), `${n} in: ${r.stderr}`);
+      assert.deepEqual(snapshotWithIndex(root), before);
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
