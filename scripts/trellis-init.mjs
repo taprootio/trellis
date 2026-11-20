@@ -58,7 +58,7 @@ an ignored <tasksDir>/.generated/ folder, nothing generated committed). It takes
 and the target, never prompts, and never stages, commits, runs git rm or edits .gitignore: add
 the ignore line it prints first, run it, then run the git rm commands it prints, then run
 "trellis init" (no --force, repeating the --skip flags you used before), "trellis generate" and
-"trellis check". It refuses, changing nothing, when its AGENTS.md edit would take the file over ${AGENTS_BYTE_LIMIT} bytes.
+"trellis check". It refuses, changing nothing, when its AGENTS.md edit would take the file from at most ${AGENTS_BYTE_LIMIT.toLocaleString("en-US")} bytes to more; a file already over the limit gets a warning and the switch goes on.
 
 good-agent detection: a target with good-agent.config.json or .agents/skills/work-task/SKILL.md
 (each a regular file) is a good-agent repo. Init then skips the playbooks, names the marker it

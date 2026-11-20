@@ -1643,6 +1643,8 @@ test("the claim line is its own bullet in a ledger config, and absent in scan mo
     const at = lines.findIndex((l) => CLAIM_RE.test(l));
     assert.ok(at > 0, "the claim line is present");
     assert.ok(lines[at].startsWith("- "), "it starts its own bullet");
+    assert.ok(lines[at].endsWith("by hand."), "a whole line");
+    assert.ok(lines[at + 1].startsWith("- "), "the next line starts a new bullet");
     assert.ok(at < lines.findIndex((l) => /BEGIN\/END GENERATED/.test(l)), "it sits before the artifact bullet");
     assert.equal(lines.filter((l) => CLAIM_RE.test(l)).length, 1);
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -1801,7 +1803,10 @@ test("the compact block: ledger claim line, local wording, committed markers and
     seedMarker(localLedger);
     const block = plannedBlock(localLedger);
     assert.match(block, CLAIM_RE);
-    assert.ok(block.split("\n").find((l) => CLAIM_RE.test(l)).startsWith("- "));
+    const lines = block.split("\n");
+    const at = lines.findIndex((l) => CLAIM_RE.test(l));
+    assert.ok(lines[at].startsWith("- ") && lines[at].endsWith("by hand."));
+    assert.ok(lines[at + 1].startsWith("- "), "the next line starts a new bullet");
     assert.ok(block.includes(artifactBullet("trellis", "local", "compact")));
     assert.ok(Buffer.byteLength(block) < 1200, `${Buffer.byteLength(block)} bytes`);
   } finally { rmSync(localLedger, { recursive: true, force: true }); }
@@ -2135,4 +2140,28 @@ test("init --help lists --skip and --with-playbooks and carries the recovery tok
   const paragraph = r.stdout.slice(start, r.stdout.indexOf("\n\n", start));
   assert.ok(paragraph.includes("--skip"));
   assert.ok(!paragraph.includes("--with-playbooks"));
+});
+
+test("a comma list inside one --skip value is normalized before planning", () => {
+  const root = tempRepo();
+  try {
+    const { summary } = applyScaffold(root, { prefix: "DEMO", skip: ["ci,agents"] }, {}, sourceRoot);
+    assert.deepEqual(summary.omitted, ["ci", "agents"]);
+    assert.equal(existsSync(join(root, WORKFLOW)), false);
+    assert.equal(existsSync(agentsPath(root)), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("under --skip agents the new README points at the spec, not AGENTS.md", () => {
+  const root = tempRepo();
+  const plain = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO", skip: ["agents"] }, {}, sourceRoot);
+    const readme = readFileSync(join(root, "trellis", "README.md"), "utf8");
+    assert.ok(!readme.includes("AGENTS.md"));
+    assert.ok(readme.includes("SPEC.md"));
+    assertCheckClean(root);
+    applyScaffold(plain, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.ok(readFileSync(join(plain, "trellis", "README.md"), "utf8").includes("AGENTS.md"));
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(plain, { recursive: true, force: true }); }
 });

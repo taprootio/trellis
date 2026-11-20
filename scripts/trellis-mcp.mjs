@@ -15,14 +15,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { pathToFileURL } from "node:url";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { optionToken, requiredValue, resolveRepoRoot, usageError } from "../src/cli.mjs";
 import { OPS, TrellisError } from "../src/mcp.mjs";
 import { RESOURCES, PROMPTS, listResources, readResource, buildPrompt } from "../src/prompts.mjs";
 
-// Server implementation version (distinct from the spec version; packaging and
-// real versioning are TRL0010).
-const SERVER_VERSION = "0.1.0";
+// The server reports the package's own version.
+const SERVER_VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 function parseArgs(argv) {
   let repo;

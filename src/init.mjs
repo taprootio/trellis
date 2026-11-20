@@ -315,12 +315,14 @@ function markerSkeleton([begin, end], heading, blurb) {
   return `# ${heading}\n\n${blurb}\n\n${begin}\n${end}\n`;
 }
 
-function readmeSkeleton() {
+// Under `--skip agents` there is no AGENTS.md block, so the README points at the spec.
+function readmeSkeleton(omitAgents = false) {
   return markerSkeleton(
     MARKERS.milestones,
     "Backlog",
     "Managed with [Trellis](https://github.com/taprootio/trellis) — a file-based\n" +
-      "backlog. See `AGENTS.md` for the schema and conventions. The tables below are\n" +
+      (omitAgents ? "backlog. See the [Trellis spec](https://github.com/taprootio/trellis/blob/main/SPEC.md)\nfor the schema and conventions." : "backlog. See `AGENTS.md` for the schema and conventions.") +
+      " The tables below are\n" +
       "generated; do not hand-edit between the markers — edit the per-item files in\n" +
       "`active/`, then regenerate (`npx @taprootio/trellis generate`).",
   );
@@ -483,7 +485,7 @@ function templateFiles(o, sourceRoot, root, local = false, omit = new Set()) {
     { rel: `${root}/completed/tasks/.gitkeep`, content: "" },
     // Local mode: the README and index files are author-owned, so init never creates them.
     ...(local ? [] : [
-      { rel: `${root}/README.md`, content: readmeSkeleton() },
+      { rel: `${root}/README.md`, content: readmeSkeleton(omit.has("AGENTS.md")) },
       { rel: `${root}/completed/index.md`, content: completedSkeleton() },
       { rel: `${root}/removed/index.md`, content: removedSkeleton() },
     ]),
@@ -663,16 +665,16 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false, deferGene
   const summary = { created: [], skipped: [], appended: [], generated: [], omitted: [], printed: [], detected: null, playbooksOmittedBy: null, reconcile: [], warnings: [], errors: [] };
 
   // An unknown part name is refused before anything is planned or written.
-  const skipErrors = parseSkip(opts.skip || []).errors;
-  if (skipErrors.length) {
-    summary.errors.push(...skipErrors);
+  const parsedSkip = parseSkip(opts.skip || []);
+  if (parsedSkip.errors.length) {
+    summary.errors.push(...parsedSkip.errors);
     return { options: resolveOptions(opts), summary };
   }
 
   // planScaffold only reads, so the target stays untouched through every check
   // below — a rejected run leaves nothing behind. It also resolves the options
   // (no need to resolve again here).
-  const { options, resolved, actions, warnings, root, reconcile, local, cfg: keptCfg, omitted, detected, playbooksOmittedBy } = planScaffold(targetRoot, opts, sourceRoot);
+  const { options, resolved, actions, warnings, root, reconcile, local, cfg: keptCfg, omitted, detected, playbooksOmittedBy } = planScaffold(targetRoot, { ...opts, skip: parsedSkip.parts }, sourceRoot);
   summary.omitted = omitted;
   summary.detected = detected;
   summary.playbooksOmittedBy = playbooksOmittedBy;

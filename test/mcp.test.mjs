@@ -1270,3 +1270,10 @@ test("a rejected first removal with legacy leaves no removed/ directory and the 
     assert.deepEqual(snapshotTree(c.root), before);
   } finally { c.cleanup(); }
 });
+
+test("the MCP server reports the package version on initialize", () => {
+  const request = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "t", version: "0" } } });
+  const r = spawnSync(process.execPath, [join(sourceRoot, "scripts", "trellis-mcp.mjs"), "--repo", sourceRoot], { input: request + "\n", encoding: "utf8", timeout: 20000 });
+  const reply = JSON.parse(r.stdout.split("\n").find((l) => l.includes('"serverInfo"')));
+  assert.equal(reply.result.serverInfo.version, JSON.parse(readFileSync(join(sourceRoot, "package.json"), "utf8")).version);
+});

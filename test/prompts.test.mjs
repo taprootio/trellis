@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
 import { listResources, readResource, buildPrompt, RESOURCES, PROMPTS, PROMPT_TOKENS } from "../src/prompts.mjs";
 import { TrellisError } from "../src/mcp.mjs";
+import { loadConfig, readBacklog } from "../src/backlog.mjs";
 import { TOOLS } from "../scripts/trellis-mcp.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -285,15 +286,45 @@ test("each prompt falls back on its own: a directory with only code-review.md st
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("the id check matches the prefix literally", () => {
+test("prompt ids follow `check`: a scan-mode R+ prefix serves RR0001.md through both prompt paths", () => {
   const root = mkdtempSync(join(tmpdir(), "trellis-prompts-"));
   try {
     applyScaffold(root, { prefix: "R+" }, {}, sourceRoot);
-    assert.ok(textOf(root, "work-task", { id: "R+0001" }).includes("R+0001"));
-    assert.throws(() => textOf(root, "work-task", { id: "RR0001" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+    writeFileSync(join(root, "trellis", "active", "RR0001.md"), "---\nid: RR0001\ntitle: Odd prefix\nstatus: active\nmilestone: Alpha\npriority: High\neffort: 3\ndepends_on: []\nsummary: Summary.\n---\n\nBody.\n");
+    const { cfg } = loadConfig(root);
+    assert.deepEqual(readBacklog(root, cfg).errors, [], "check accepts the id");
+    assert.ok(textOf(root, "work-task", { id: "RR0001" }).includes("RR0001"), "playbook present");
     rmSync(join(root, "trellis", "playbooks"), { recursive: true });
-    assert.throws(() => textOf(root, "work-task", { id: "RR0001" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+    assert.ok(textOf(root, "work-task", { id: "RR0001" }).includes("RR0001"), "playbook absent");
+    assert.throws(() => textOf(root, "work-task", { id: "nope" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the missing-playbook recovery command names the served repo and keeps other skips", () => {
+  const root = bareRepo();
+  try {
+    const text = textOf(root, "code-review");
+    assert.ok(text.includes(root) && text.includes("--with-playbooks") && text.includes("--skip"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the pr-draft handoff finds a repo-owned PR template in GitHub's standard places", () => {
+  const cases = [
+    [(r) => writeFileSync(join(r, "PULL_REQUEST_TEMPLATE.md"), "# t\n"), "PULL_REQUEST_TEMPLATE.md"],
+    [(r) => { mkdirSync(join(r, "docs")); writeFileSync(join(r, "docs", "pull_request_template.md"), "# t\n"); }, "docs/pull_request_template.md"],
+    [(r) => { mkdirSync(join(r, ".github", "PULL_REQUEST_TEMPLATE")); writeFileSync(join(r, ".github", "PULL_REQUEST_TEMPLATE", "a.md"), "# t\n"); }, ".github/PULL_REQUEST_TEMPLATE/"],
+  ];
+  for (const detected of [true, false]) {
+    for (const [seed, where] of cases) {
+      const root = bareRepo({ detected, template: false });
+      try {
+        seed(root);
+        const text = textOf(root, "pr-draft");
+        assert.ok(!text.includes(PROMPT_TOKENS.noTemplate), where);
+        assert.ok(text.includes(where), where);
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }
+  }
 });
 
 test("the pr-draft catalog description is template-neutral, and a present playbook is embedded as before", () => {

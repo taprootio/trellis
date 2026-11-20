@@ -14,15 +14,16 @@ does not.
 
 ## With a PR template
 
-The repo has [`.github/pull_request_template.md`](../../.github/pull_request_template.md).
-The description conforms to it.
+The repo has a PR template (`pull_request_template.md`, in `.github/`, the repo root
+or `docs/`, or a `.github/PULL_REQUEST_TEMPLATE/` folder of templates). Use the one
+you find there; the description conforms to it.
 
-Also gather the PR template: `.github/pull_request_template.md`.
+Also gather the PR template from where the repo keeps it.
 
 > Generate a pull-request **title** and **description** for the current branch,
 > based only on its actual commits and diff (do not invent changes).
 >
-> - **Description:** fill every section of `.github/pull_request_template.md`
+> - **Description:** fill every section of the repo's PR template
 >   (Summary, Task, Changes, Verification, Follow-ups). Tick a checklist item
 >   only when the evidence supports it; otherwise leave it unchecked and say why.
 > - **Output:** a single fenced `markdown` block whose first line is the title as

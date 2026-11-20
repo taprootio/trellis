@@ -585,9 +585,13 @@ function idsFromDir(dir, fileRe) {
   return readdirSync(dir).map((f) => f.match(fileRe)).filter(Boolean).map((m) => m[1]);
 }
 
+// The scan-mode id pattern, as readBacklog reads it from the config (the prefix is not
+// escaped). The one owner for item checks, filenames and the MCP prompts (TRL0040).
+export const scanIdPattern = (cfg) => `${cfg.idPrefix}\\d{${cfg.idWidth}}`;
+
 // The per-item checks, shared by readBacklog and the ledger create preflight (TRL0037).
 function makeValidators(cfg, roster, ids) {
-  const idRe = new RegExp(`^${cfg.idPrefix}\\d{${cfg.idWidth}}$`);
+  const idRe = new RegExp(`^${scanIdPattern(cfg)}$`);
   const isoDate = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
   // Resolve `effort` (number or label alias) and attach the display fields used
@@ -704,7 +708,7 @@ export function activeItemErrors(cfg, data, it) {
 
 export function readBacklog(repoRoot, cfg) {
   const p = paths(repoRoot, cfg);
-  const fileRe = new RegExp(`^(${cfg.idPrefix}\\d{${cfg.idWidth}})\\.md$`);
+  const fileRe = new RegExp(`^(${scanIdPattern(cfg)})\\.md$`);
   const errors = [];
 
   // The roster lives at the fixed config home; its load/validation errors are
