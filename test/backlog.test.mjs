@@ -1248,3 +1248,26 @@ test("through compares ids lexically, so ids past 2^53 do not collapse", () => {
     assert.ok(errs.some((e) => e.includes("missing `summary`")));
   } finally { cleanup(root); }
 });
+
+test("a scan-mode repo without legacy renders a $& title literally", () => {
+  withRepo(ARRAY_CFG, { completed: [{ id: "DEMO0001", title: "Explain $&", effort: 3 }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const { files, errors } = generateArtifacts(root, cfg, readBacklog(root, cfg));
+    assert.deepEqual(errors, []);
+    const index = files.find((f) => f.path === paths(root, cfg).completedIndex).content;
+    assert.match(index, /\| Explain \$& \|/);
+    assert.equal(index.split("BEGIN GENERATED:COMPLETED").length, 2);
+  });
+});
+
+test("a qualifying item with a retired effort label and an old _effortLabel keeps the value and emits no display fields", () => {
+  const root = legacyRoot(TAP_CFG, { fixture: false });
+  try {
+    putItem(root, "completed", "TAP0002", closed("completed", "2026-06-01", { ...FULL, effort: "Kraken", _effortLabel: "Trout" }));
+    const { cfg, data } = legacyRead(root);
+    assert.deepEqual(data.errors, []);
+    const t = JSON.parse(buildBacklogJson(cfg, data)).tasks[0];
+    assert.equal(t.effort, "Kraken");
+    for (const k of ["effortLabel", "effortEmoji", "effortImage"]) assert.equal(k in t, false, k);
+  } finally { cleanup(root); }
+});

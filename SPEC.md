@@ -301,7 +301,8 @@ custom **effort scale** for display.
   (default `trellis/assets/effort/`).
 - A qualifying closed item under `legacy` (§5.1) may omit any of `summary`,
   `milestone`, `priority` and `effort`. The completed and removed tables have no
-  milestone, priority or effort column, so only the Summary cell is empty; the four
+  milestone, priority or effort column, so the Summary cell is empty only when `summary`
+  is missing or blank (an item that omits effort but keeps its summary still shows it); the four
   nullable fields belong to the `backlog.json` contract (§8.2).
 - The array form `effort: [1, 2, 3, 5, 8, 13, 21]` is shorthand for
   `{ "values": [ … ], "scale": "fibonacci" }` and remains valid.
@@ -563,8 +564,8 @@ artifact under `<tasksDir>/.generated/` and nothing generated is committed:
   consumer that read `backlog.json` from the default branch must run `trellis
   generate` first, or use the MCP `list_tasks` tool.
 - **Nulls.** `.generated/backlog.json` carries the same nulls and omissions for
-  qualifying closed items under `legacy` (§8.2), and the generated tables the same
-  empty Summary cell.
+  qualifying closed items under `legacy` (§8.2), and the generated tables an
+  empty Summary cell only where `summary` is missing or blank.
 - **Migration.** `trellis init --switch-to-local` moves a committed-mode repo over:
   it strips the generated blocks from `README.md` and the index files, sets the
   config, and prints the `git rm` commands for the legacy generated files. It never
@@ -581,7 +582,10 @@ warns on a major mismatch between `specVersion` and the implemented spec.
 the local id ledger (§3.1), and the optional `generatedArtifacts` config key with
 local generated artifacts (§8.5), and the optional `legacy` config key, which lets
 closed items from before adoption omit the descriptive metadata (§5.1). Repos that
-omit them behave as in 2.4.
+omit them behave as in 2.4. One compatibility exception: the generator now inserts
+table text literally. A committed scan-mode index generated from a title containing
+`$'`, `$&` or `$1` held corrupt bytes, so it may now fail `check` until regenerated,
+even without `legacy`. Upgrading repos rerun `trellis generate`.
 
 ## 10. CI and branch protection
 

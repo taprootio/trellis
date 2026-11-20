@@ -652,10 +652,11 @@ function makeValidators(cfg, roster, ids) {
   };
 
   // Make a qualifying item's blank descriptive fields missing, so every renderer sees
-  // the same item. Archived effort display keys would otherwise survive the read.
+  // the same item. Archived effort display keys would otherwise survive the read, so
+  // they go whatever the effort value; attachEffort sets them again when it resolves.
   const clearLegacyBlanks = (it) => {
     for (const k of ["summary", "milestone", "priority", "effort"]) if (blank(it[k]) || it[k] === "") delete it[k];
-    if (it.effort === undefined) for (const k of ["_effortLabel", "_effortEmoji", "_effortImage"]) delete it[k];
+    for (const k of ["_effortLabel", "_effortEmoji", "_effortImage"]) delete it[k];
   };
 
   // Owner/collaborator validation (SPEC §5.1, §7.2, §8.3). On **every** item the

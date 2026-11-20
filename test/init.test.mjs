@@ -1320,6 +1320,8 @@ test("init --force --retire-source in a repo with legacy exits 2 and changes not
     const staged = git(root, ["diff", "--cached"]);
     const r = runInit(root, ["--force", "--retire-source", "planning/legacy"]);
     assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /no use with --retire-source/);
+    assert.doesNotMatch(r.stderr, /replacement config/);
     assert.deepEqual(tree(root), before);
     assert.equal(git(root, ["diff", "--cached"]), staged);
   } finally { rmSync(root, { recursive: true, force: true }); }
