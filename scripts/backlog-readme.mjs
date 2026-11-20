@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { relative } from "node:path";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
-import { LedgerError, preview, refuseSymlinkedArtifacts } from "../src/ledger.mjs";
+import { LedgerError, preview, refuseSymlinkedArtifacts, artifactPaths } from "../src/ledger.mjs";
 import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 
 const HELP = `trellis generate/check — validate and regenerate Trellis artifacts
@@ -66,6 +66,18 @@ const { cfg, warnings, errors: cfgErrors } = loadConfig(repoRoot);
 for (const w of warnings) console.warn(`warning: ${w}`);
 if (cfgErrors.length) die(cfgErrors);
 
+// Ledger mode refuses a bad generated artifact before anything is rendered. The
+// check stays git-free and read-only, so it skips this.
+if (!isCheck && cfg.idAllocation === "ledger") {
+  try {
+    refuseSymlinkedArtifacts(artifactPaths(repoRoot, cfg));
+  } catch (e) {
+    if (!(e instanceof LedgerError)) throw e;
+    console.error(e.message);
+    process.exit(e.exitCode);
+  }
+}
+
 const data = readBacklog(repoRoot, cfg);
 if (data.errors.length) die(data.errors);
 
@@ -80,15 +92,6 @@ if (isCheck) {
   }
   console.log("Backlog check OK.");
 } else {
-  if (cfg.idAllocation === "ledger") {
-    try {
-      refuseSymlinkedArtifacts(files.map((f) => f.path));
-    } catch (e) {
-      if (!(e instanceof LedgerError)) throw e;
-      console.error(e.message);
-      process.exit(e.exitCode);
-    }
-  }
   for (const f of files) writeFileSync(f.path, f.content);
   // In ledger mode ids come from `trellis claim`, so the scan value is not the next id.
   const idNote = cfg.idAllocation === "ledger" ? preview(repoRoot, cfg).note : `Next id: ${nextId}`;

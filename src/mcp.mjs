@@ -36,7 +36,7 @@ import {
 import { applyImport, ImportRefused } from "./import.mjs";
 import { loadProfile } from "./profiles.mjs";
 import { deriveTaskHistory, deriveAllHistory, HistoryError } from "./history.mjs";
-import { LedgerError, claim, preview, checkLayout, refuseSymlinkedArtifacts, artifactPaths } from "./ledger.mjs";
+import { LedgerError, unsafeText, claim, preview, checkLayout, refuseSymlinkedArtifacts, artifactPaths } from "./ledger.mjs";
 
 // A domain error the transport maps to an MCP tool error (isError result) rather
 // than a protocol failure. `code` is a short slug for programmatic handling.
@@ -218,6 +218,8 @@ function assertId(id, cfg) {
 // w.r.t. the item files — only the four generated artifacts are touched.
 // `hooks` are test seams (see writeArtifactsStaged).
 function writeArtifacts(repoRoot, cfg, data, hooks = {}) {
+  // Refuse a bad artifact before anything is rendered.
+  if (isLedgerMode(cfg)) ledgerCall(() => refuseSymlinkedArtifacts(artifactPaths(repoRoot, cfg)));
   const { files, nextId: next, errors } = generateArtifacts(repoRoot, cfg, data);
   if (errors.length) throw new TrellisError(`generate failed: ${errors.join("; ")}`, "generate_failed");
   if (isLedgerMode(cfg)) return writeArtifactsStaged(repoRoot, files, next, hooks);
@@ -446,6 +448,9 @@ export function createTask(repoRoot, args = {}, hooks = {}) {
   // A claimed id is never released, so in ledger mode every input the re-read would
   // reject is checked before claiming, not after.
   if (ledgerMode) {
+    for (const [field, value] of [["title", title], ["summary", summary], ["milestone", milestone], ["priority", priority], ["owner", owner]]) {
+      if (value !== undefined && unsafeText(value)) throw new TrellisError(`\`${field}\` must be a single line with no control or line-separator characters`, "invalid_request");
+    }
     for (const d of depends_on) {
       if (!data.ids.has(d)) throw new TrellisError(`depends_on ${d} is not a known task id`, "invalid_request");
     }

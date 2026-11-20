@@ -28,8 +28,9 @@ export class LedgerError extends Error {
 const refuse = (message, code) => new LedgerError(message, code, 2);
 
 export const MAX_CLAIM_ATTEMPTS = 10;
-export const MIN_GIT_VERSION = "2.44.1";
-// 2.45.0 ignores GIT_NO_LAZY_FETCH, so it is excluded from the supported range.
+export const MIN_GIT_VERSION = "2.45.1";
+// 2.45.1 is the first release that has `rev-parse --show-ref-format` and honors
+// GIT_NO_LAZY_FETCH. 2.45.0 is below the floor, so the exclusion is moot but kept.
 const EXCLUDED_GIT_VERSIONS = ["2.45.0"];
 // The reader buffers a whole git output; a ledger above this could not be read back.
 export const MAX_LEDGER_BYTES = 256 * 1024 * 1024;
@@ -109,7 +110,6 @@ function parseVersion(text) {
 }
 
 // True when `versionText` (the output of `git --version`) is at least `min`.
-// 2.44.1 is the first release that honors GIT_NO_LAZY_FETCH, and 2.45.0 regressed it.
 export function gitVersionSupported(versionText, min = MIN_GIT_VERSION) {
   const have = parseVersion(versionText);
   const need = parseVersion(min);
@@ -126,7 +126,7 @@ export function gitVersionSupported(versionText, min = MIN_GIT_VERSION) {
 export function probeGit(repoRoot) {
   const v = runGit(["--version"]);
   if (v.status !== 0 || !gitVersionSupported(v.stdout)) {
-    throw refuse(`the id ledger needs git ${MIN_GIT_VERSION} or later, except 2.45.0 (found: ${firstLine(v.stdout || v.stderr)})`, "unsupported_git");
+    throw refuse(`the id ledger needs git ${MIN_GIT_VERSION} or later (found: ${firstLine(v.stdout || v.stderr)})`, "unsupported_git");
   }
   const inside = runGit(["rev-parse", "--is-inside-work-tree"], { cwd: repoRoot });
   if (inside.status !== 0 || inside.stdout.trim() !== "true") {
@@ -171,7 +171,7 @@ function requireLedgerMode(cfg) {
 
 // Control characters plus the Unicode line and paragraph separators (U+2028, U+2029).
 const UNSAFE_TEXT = /[\p{Cc}\p{Zl}\p{Zp}]/u;
-const unsafeText = (value) => UNSAFE_TEXT.test(value);
+export const unsafeText = (value) => UNSAFE_TEXT.test(value);
 // Every claim rewrites the whole claims.tsv, so titles are kept short.
 export const MAX_TITLE_LENGTH = 200;
 
@@ -224,6 +224,7 @@ function parseClaims(text, cfg) {
     }
     if (!KINDS.has(kind)) return { reason: `${at} has an unknown kind` };
     if (!branch || !title || unsafeText(branch) || unsafeText(title)) return { reason: `${at} has an empty or unsafe branch or title` };
+    if (kind === "through" && branch !== "-") return { reason: `${at} is a through row with a branch` };
     rows.push({ id, date, kind, branch, title });
   }
   return { rows, text };
@@ -286,7 +287,7 @@ function requireLedger(repoRoot, cfg) {
 // ------------------------------------------------------------- worktrees
 // Git paths and ref names are bytes. A name that is not valid UTF-8 cannot be
 // carried through a JavaScript string and back to git, so allocation refuses it.
-const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 function decodeGit(buf, what) {
   try {
     return strictUtf8.decode(buf);
@@ -313,12 +314,22 @@ function checkWorktreeRegistry(repoRoot) {
   }
   for (const name of names) {
     const file = join(dir, name, "gitdir");
+    // Only registration directories count; a stray file is not one.
     try {
-      readFileSync(file);
+      if (!lstatSync(join(dir, name)).isDirectory()) continue;
     } catch (e) {
-      if (e.code === "ENOENT" || e.code === "ENOTDIR") continue;
+      if (e.code === "ENOENT") continue;
+      throw refuse(`cannot read ${join(dir, name)}: ${e.message}; the id ledger cannot list every worktree`, "unsupported_layout");
+    }
+    // A registration that exists needs a non-empty gitdir file, or `git worktree
+    // list` would drop it and could hide a reserved id.
+    let text;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch (e) {
       throw refuse(`cannot read ${file}: ${e.message}; the id ledger cannot list every worktree`, "unsupported_layout");
     }
+    if (!text.trim()) throw refuse(`${file} is empty; the id ledger cannot list every worktree`, "unsupported_layout");
   }
 }
 
@@ -567,6 +578,8 @@ export function refuseSymlinkedArtifacts(artifactPaths) {
     if (st.isSymbolicLink()) {
       throw refuse(`${path} is a symlink; ledger mode does not write through symlinked generated files. Replace it with a regular file`, "invalid_request");
     }
+    // A FIFO would block the read, and a directory cannot be replaced.
+    if (!st.isFile()) throw refuse(`${path} is not a regular file; ledger mode only writes regular generated files`, "invalid_request");
   }
 }
 

@@ -486,6 +486,8 @@ test("a bad row, tree or tip makes the ledger unusable and every write refuses",
     "line separator in title": HEADER + "DEMO0001\t2026-11-19\tclaim\tmain\tt\u2028u\n",
     "next-line character in branch": HEADER + "DEMO0001\t2026-11-19\tclaim\tma\u0085in\tt\n",
     "blank line": HEADER + "\n",
+    "leading BOM": "\uFEFF" + HEADER,
+    "through row with a branch": HEADER + "DEMO0001\t2026-11-19\tthrough\tmain\t-\n",
   };
   for (const [name, text] of Object.entries(bad)) {
     withClone(({ root, cfg }) => {
@@ -551,14 +553,14 @@ test("a directory that is not a git work tree is refused", () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("the git version floor is 2.44.1", () => {
-  assert.equal(gitVersionSupported("git version 2.44.0"), false);
-  assert.equal(gitVersionSupported("git version 2.44.1"), true);
+test("the git version floor is 2.45.1", () => {
+  assert.equal(gitVersionSupported("git version 2.44.1"), false, "no --show-ref-format before 2.45");
+  assert.equal(gitVersionSupported("git version 2.45.1"), true);
   assert.equal(gitVersionSupported("git version 2.55.0"), true);
   assert.equal(gitVersionSupported("git version 2.39.3 (Apple Git-146)"), false);
   assert.equal(gitVersionSupported("git version 3.0.0"), true);
   assert.equal(gitVersionSupported("git version 2.45.1.windows.1"), true);
-  assert.equal(gitVersionSupported("git version 2.45.0"), false, "2.45.0 ignores GIT_NO_LAZY_FETCH");
+  assert.equal(gitVersionSupported("git version 2.45.0"), false, "2.45.0 is below the floor");
   assert.equal(gitVersionSupported("git version 2.45.0.windows.1"), false);
   assert.equal(gitVersionSupported("not git"), false);
 });
@@ -1033,6 +1035,20 @@ test("an unreadable worktree registry refuses allocation", { skip: unprivileged 
   });
 });
 
+test("an empty or missing gitdir file in a registration directory refuses allocation", () => {
+  for (const mode of ["empty", "missing"]) {
+    withClone(({ root, cfg, lane }) => {
+      lane("lane");
+      seed(root, cfg);
+      const before = tip(root);
+      const file = join(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"), "worktrees", "lane", "gitdir");
+      if (mode === "empty") writeFileSync(file, ""); else rmSync(file);
+      assertRefused(() => claim(root, cfg, { title: "x" }), "unsupported_layout");
+      assert.equal(tip(root), before, mode);
+    });
+  }
+});
+
 test("a branch name with a line separator refuses a claim and is recorded as - by a seed", { skip: process.platform === "win32" }, () => {
   withClone(({ root, cfg, lane }) => {
     const bad = "a b";
@@ -1068,5 +1084,9 @@ test("refuseSymlinkedArtifacts refuses a symlink, dangling or not, and passes re
     for (const name of ["live.json", "dangling.json"]) {
       assertRefused(() => refuseSymlinkedArtifacts([join(dir, name)]), "invalid_request");
     }
+    mkdirSync(join(dir, "folder.json"));
+    assertRefused(() => refuseSymlinkedArtifacts([join(dir, "folder.json")]), "invalid_request");
+    execFileSync("mkfifo", [join(dir, "pipe.json")]);
+    assertRefused(() => refuseSymlinkedArtifacts([join(dir, "pipe.json")]), "invalid_request");
   });
 });

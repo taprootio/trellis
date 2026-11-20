@@ -345,6 +345,21 @@ test("generate in scan mode still prints Next id", () => {
   } finally { c.cleanup(); }
 });
 
+test("the readme script in ledger mode refuses a dangling README before rendering", { skip: process.platform === "win32" }, () => {
+  const c = claimRepo();
+  try {
+    assert.equal(run(c.root, ["claim", "--seed"]).status, 0);
+    const link = join(c.root, "trellis/README.md");
+    rmSync(link);
+    symlinkSync(join(c.root, "nowhere.md"), link);
+    const r = spawnSync(process.execPath, [join(sourceRoot, "scripts/backlog-readme.mjs"), "--target", c.root], { encoding: "utf8" });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /README\.md is a symlink/);
+    assert.ok(lstatSync(link).isSymbolicLink());
+    assert.equal(existsSync(join(c.root, "nowhere.md")), false);
+  } finally { c.cleanup(); }
+});
+
 for (const dangling of [false, true]) {
   test(`generate in ledger mode refuses a symlinked backlog.json (${dangling ? "dangling" : "live"}) and init does too`, { skip: process.platform === "win32" }, () => {
     const c = claimRepo();

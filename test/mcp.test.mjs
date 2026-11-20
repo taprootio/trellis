@@ -668,6 +668,25 @@ for (const dangling of [false, true]) {
   });
 }
 
+test("ledger mode refuses a FIFO artifact without blocking, and unsafe front-matter text before claiming", { skip: process.platform === "win32" }, () => {
+  const c = ledgerRepo();
+  try {
+    const before = refTip(c.root);
+    for (const key of ["title", "summary", "milestone", "priority"]) {
+      for (const bad of ["a\u2028b", "a\u0001b", "a\u2029b"]) {
+        throwsTrellis(() => createTask(c.root, { ...VALID, [key]: bad }), "invalid_request");
+      }
+    }
+    assert.equal(refTip(c.root), before, "no id was claimed");
+    const readme = join(c.root, "trellis", "README.md");
+    rmSync(readme);
+    execFileSync("mkfifo", [readme]);
+    throwsTrellis(() => createTask(c.root, VALID), "invalid_request");
+    throwsTrellis(() => regenerateOp(c.root), "invalid_request");
+    assert.equal(refTip(c.root), before);
+  } finally { c.cleanup(); }
+});
+
 test("ledger mode refuses a symlinked README.md and completed index the same way", { skip: process.platform === "win32" }, () => {
   for (const rel of ["README.md", join("completed", "index.md")]) {
     const c = ledgerRepo();

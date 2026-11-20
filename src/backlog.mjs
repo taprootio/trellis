@@ -155,6 +155,10 @@ function validateIdAllocation(cfg, errors) {
     if (problem) errors.push(`config: \`idLedgerRef\` ${problem}`);
   }
   if (cfg.idAllocation !== "ledger") return;
+  // Checked on the text, so `check` stays git-free. Writes under .git could corrupt the ledger ref.
+  if (typeof cfg.tasksDir === "string" && /^(\.\/)*\.git(\/|\\|$)/.test(cfg.tasksDir.replace(/^(\.[/\\])+/, "").replace(/[/\\]+$/, "") + "/")) {
+    errors.push("config: `tasksDir` must not be inside the repository's `.git` directory when `idAllocation` is \"ledger\"");
+  }
   if (typeof cfg.idPrefix === "string" && cfg.idPrefix && !PLAIN_PREFIX_RE.test(cfg.idPrefix)) {
     errors.push("config: `idPrefix` must be a letter followed by letters or digits when `idAllocation` is \"ledger\"");
   }
