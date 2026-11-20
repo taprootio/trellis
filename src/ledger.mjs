@@ -10,7 +10,7 @@
 // `check` never depends on git or on local state (SPEC §8.3).
 
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, PLAIN_PREFIX_RE, parseFrontMatter } from "./backlog.mjs";
 
@@ -60,8 +60,12 @@ function gitEnv(extra = {}) {
   return { ...env, GIT_NO_REPLACE_OBJECTS: "1", GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0", ...extra };
 }
 
+const NO_HOOKS = process.platform === "win32" ? "NUL" : "/dev/null";
+
 function runGit(args, { cwd, input, env } = {}) {
-  const full = ["--literal-pathspecs", ...(cwd ? ["-C", cwd] : []), ...args];
+  // No fsmonitor (it would run a configured command on index reads) and no hooks
+  // (ledger ref updates must not run reference-transaction hooks).
+  const full = ["--literal-pathspecs", "-c", "core.fsmonitor=false", "-c", `core.hooksPath=${NO_HOOKS}`, ...(cwd ? ["-C", cwd] : []), ...args];
   const r = spawnSync("git", full, {
     encoding: "utf8",
     input,
@@ -137,8 +141,9 @@ export function probeGit(repoRoot) {
 // ------------------------------------------------------------- id helpers
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const refOf = (cfg) => cfg.idLedgerRef || DEFAULT_LEDGER_REF;
-// `.` segments are dropped so "./trellis" matches the paths git reports.
-const tasksParts = (cfg) => (cfg.tasksDir || DEFAULT_TASKS_DIR).split(/[\\/]/).filter((p) => p && p !== ".");
+// Split the way paths() joins it, so a backslash stays a filename character on
+// POSIX. `.` segments are dropped so "./trellis" matches the paths git reports.
+const tasksParts = (cfg) => join(".", cfg.tasksDir || DEFAULT_TASKS_DIR).split(sep).filter((p) => p && p !== ".");
 const idNumber = (id, cfg) => Number(id.slice(cfg.idPrefix.length));
 
 // Matches a whole id. The prefix is escaped, so a scan config such as `R+` matches
@@ -250,6 +255,9 @@ export function readLedger(repoRoot, cfg) {
   const entries = tree.stdout.split("\0").filter(Boolean);
   const m = entries.length === 1 && entries[0].match(/^100644 blob ([0-9a-f]+)\t(.+)$/);
   if (!m || m[2] !== LEDGER_FILE) return { unusable: `the tip of ${ref} does not hold exactly one ${LEDGER_FILE}` };
+  const size = runGit(["cat-file", "-s", m[1]], { cwd: repoRoot });
+  if (size.status !== 0) return { unusable: `${LEDGER_FILE} cannot be read` };
+  if (Number(size.stdout) >= MAX_LEDGER_BYTES) return { unusable: `${LEDGER_FILE} is too large to read` };
   const blob = runGit(["cat-file", "blob", m[1]], { cwd: repoRoot });
   if (blob.status !== 0) return { unusable: `${LEDGER_FILE} cannot be read` };
   const parsed = parseClaims(blob.stdout, cfg);
@@ -290,7 +298,7 @@ function listWorktrees(repoRoot) {
 
 function branchOf(repoRoot) {
   const r = runGit(["symbolic-ref", "-q", "--short", "HEAD"], { cwd: repoRoot });
-  const name = r.stdout.trim();
+  const name = r.stdout.replace(/\n$/, "");
   return r.status === 0 && name && !CONTROL.test(name) ? name : "-";
 }
 
@@ -363,7 +371,7 @@ function headCommit(worktree) {
   const sym = runGit(["symbolic-ref", "-q", "HEAD"], { cwd: worktree });
   let ref = "HEAD";
   if (sym.status === 0) {
-    ref = sym.stdout.trim();
+    ref = sym.stdout.replace(/\n$/, "");
     if (git(worktree, ["show-ref", "--exists", ref], { ok: [0, 2] }).status === 2) return null;
   } else if (sym.status !== 1) {
     throw new LedgerError(`git symbolic-ref -q HEAD failed: ${firstLine(sym.stderr)}`);

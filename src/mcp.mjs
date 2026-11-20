@@ -16,10 +16,10 @@
 
 import {
   readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, openSync, closeSync, renameSync, copyFileSync,
-  lstatSync, statSync, readlinkSync, realpathSync, fchmodSync,
+  lstatSync, statSync, readlinkSync, realpathSync, fchmodSync, unlinkSync,
 } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { join, relative, dirname, basename, isAbsolute } from "node:path";
+import { join, relative, dirname, basename, isAbsolute, sep } from "node:path";
 import {
   loadConfig,
   readBacklog,
@@ -261,6 +261,10 @@ function resolveDestination(path) {
     if (!st.isSymbolicLink()) return join(native(dirname(cur)), basename(cur));
     try { return native(cur); } catch (e) { if (e.code !== "ENOENT") throw e; }
     const target = readlinkSync(cur);
+    // A trailing separator names a directory, so there is no file to write through to.
+    if (sep === "/" ? target.endsWith("/") : /[\\/]$/.test(target)) {
+      throw new TrellisError(`${path} is a symlink to a directory path (${target}); refusing to write through it`, "generate_failed");
+    }
     const raw = isAbsolute(target) ? target : `${native(dirname(cur))}/${target}`;
     cur = join(native(dirname(raw)), basename(raw));
   }
@@ -281,13 +285,17 @@ function reserveStage(dest, ext, mode) {
   throw new TrellisError(`could not reserve a staging file beside ${dest}`, "generate_failed");
 }
 
-function stageFile(dest, ext, content, mode) {
+export function stageFile(dest, ext, content, mode) {
   const { name, fd } = reserveStage(dest, ext, 0o600);
   try {
     writeFileSync(fd, content);
     fchmodSync(fd, mode);
-  } finally {
     closeSync(fd);
+  } catch (e) {
+    // The path was reserved by this call, so a failed write must not leave it behind.
+    try { closeSync(fd); } catch { /* already closed */ }
+    try { unlinkSync(name); } catch { /* best-effort cleanup */ }
+    throw e;
   }
   return name;
 }
@@ -468,6 +476,12 @@ export function createTask(repoRoot, args = {}, hooks = {}) {
     }
     if (!cfg.milestones.includes(milestone)) throw new TrellisError(`milestone must be one of ${cfg.milestones.join(", ")}`, "invalid_request");
     if (!cfg.priorities.includes(priority)) throw new TrellisError(`priority must be one of ${cfg.priorities.join(", ")}`, "invalid_request");
+  }
+  // A destination the write would refuse (a link to a directory path) must fail
+  // before the claim too.
+  if (ledgerMode) {
+    const g = paths(repoRoot, cfg);
+    for (const f of [g.readme, g.completedIndex, g.removedIndex, g.backlogJson]) resolveDestination(f);
   }
   // Ledger mode claims the id, and never falls back to the scan: a fresh clone
   // would hand out an id another worktree holds. The claim is never undone.

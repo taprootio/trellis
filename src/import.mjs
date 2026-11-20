@@ -67,14 +67,22 @@ export class ImportRefused extends Error {
 // Throws ImportRefused when the target's config says `idAllocation: "ledger"`.
 // Import could assign an id that is an open claim, so it is unsupported there; and
 // `init --force` would rewrite a config that owns the ledger settings. The config is
-// read raw: a missing or unparseable one is not ledger mode, and the later steps
+// read raw: a missing or unparseable one is not ledger mode (an unreadable one is refused), and the later steps
 // report it their own way.
 export const LEDGER_IMPORT_WHY = "ids come from the local ledger, and an import could reuse an open claim. Import before switching to ledger mode and running `trellis claim --seed`";
 
 export function assertNotLedgerMode(targetRoot, what, why = LEDGER_IMPORT_WHY) {
+  let text;
+  try {
+    text = readFileSync(join(targetRoot, CONFIG_DIR, "backlog.config.json"), "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return;
+    // An unreadable config might be a ledger config, so fail closed.
+    throw new ImportRefused(`${what} cannot check ${CONFIG_DIR}/backlog.config.json (${e.code || e.message}). Nothing was written.`);
+  }
   let cfg;
   try {
-    cfg = JSON.parse(readFileSync(join(targetRoot, CONFIG_DIR, "backlog.config.json"), "utf8"));
+    cfg = JSON.parse(text);
   } catch {
     return;
   }

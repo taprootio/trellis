@@ -257,7 +257,7 @@ test("claim: two spawned processes get distinct, consecutive ids", async () => {
       let out = "";
       const p = spawn(process.execPath, [cliScript, "claim", "--title", `from ${n}`], { cwd, stdio: ["ignore", "pipe", "inherit"] });
       p.stdout.on("data", (d) => { out += d; });
-      p.on("exit", (code) => resolve({ code, id: out.trim() }));
+      p.on("close", (code) => resolve({ code, id: out.trim() }));
     });
     const results = await Promise.all([go(c.root, "a"), go(c.lane, "b"), go(c.root, "c"), go(c.lane, "d")]);
     assert.ok(results.every((r) => r.code === 0));

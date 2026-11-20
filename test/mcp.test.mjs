@@ -18,7 +18,7 @@ import { loadProfile } from "../src/profiles.mjs";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
 import { registerTools } from "../scripts/trellis-mcp.mjs";
 import {
-  listTasks, getTask, nextIdOp, claimIdOp, createTask, moveTask, validateOp, regenerateOp, importOp, TrellisError,
+  listTasks, getTask, nextIdOp, claimIdOp, createTask, moveTask, validateOp, regenerateOp, importOp, stageFile, TrellisError,
 } from "../src/mcp.mjs";
 import { seed, claim, through, list as ledgerList } from "../src/ledger.mjs";
 
@@ -881,5 +881,30 @@ test("import in ledger mode throws invalid_request, and the registered tool retu
     assert.match(res.content[0].text, /Import before switching/);
     assert.deepEqual(artifactBytes(c.root), before);
     assert.equal(existsSync(join(c.root, "trellis", "active", "DEMO0001.md")), false);
+  } finally { c.cleanup(); }
+});
+
+// ------------------------------------------------- external review round 2
+
+test("a dangling artifact symlink whose target ends in a separator is refused before any write", { skip: process.platform === "win32" }, () => {
+  const c = ledgerRepo();
+  try {
+    const link = join(c.root, "trellis", "backlog.json");
+    rmSync(link);
+    symlinkSync("newdir/", link);
+    const before = refTip(c.root);
+    throwsTrellis(() => createTask(c.root, VALID), "generate_failed");
+    assert.equal(refTip(c.root), before);
+    assert.equal(existsSync(join(c.root, "trellis", "newdir")), false);
+    assert.deepEqual(leftovers(c.root), []);
+  } finally { c.cleanup(); }
+});
+
+test("stageFile removes its reserved file when the write fails", () => {
+  const c = ledgerRepo();
+  try {
+    const dest = join(c.root, "trellis", "x.json");
+    assert.throws(() => stageFile(dest, "tmp", 42, 0o644));
+    assert.deepEqual(readdirSync(join(c.root, "trellis")).filter((n) => /\.tmp$/.test(n)), []);
   } finally { c.cleanup(); }
 });

@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync, chmodSync, symlinkSync, readFileSync, existsSync,
+  mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync, chmodSync, symlinkSync, readFileSync, existsSync, readdirSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -117,7 +117,7 @@ test("claims run in parallel processes without a duplicate id", async () => {
       const p = spawn(process.execPath, [runner, root, "5"], { stdio: ["ignore", "pipe", "inherit"] });
       let out = "";
       p.stdout.on("data", (d) => { out += d; });
-      p.on("exit", (code) => (code === 0 ? resolve(JSON.parse(out)) : reject(new Error(`exit ${code}`))));
+      p.on("close", (code) => (code === 0 ? resolve(JSON.parse(out)) : reject(new Error(`exit ${code}`))));
     });
     const [x, y] = await Promise.all([run(c.root), run(other)]);
     const all = [...x, ...y].sort();
@@ -846,5 +846,81 @@ test("a claim that would outgrow the reader's buffer is refused before any write
     assertRefused(() => through(root, cfg, "DEMO0500", { maxBytes: 50 }), "ledger_too_large");
     assert.equal(tip(root), before);
     assert.equal(claim(root, cfg, { title: "still fine" }).id, "DEMO0002");
+  });
+});
+
+// ------------------------------------------------- external review round 2
+
+const posixOnly = { skip: process.platform === "win32" && "a backslash is a separator on Windows" };
+
+test("a tasksDir with a backslash is one folder name on POSIX, on disk and in git", posixOnly, () => {
+  const cfgOver = { tasksDir: "a\\b" };
+  const file = (wt) => {
+    const dir = join(wt, "a\\b", "active");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "DEMO0005.md"), "---\nid: DEMO0005\ntitle: T\nstatus: active\n---\n");
+    return join(dir, "DEMO0005.md");
+  };
+  withClone(({ root, cfg }) => {
+    file(root);
+    assert.deepEqual([...scanIds(root, cfg).disk], ["DEMO0005"]);
+  }, cfgOver);
+  withClone(({ root, cfg }) => {
+    const f = file(root);
+    git(root, "add", "-A");
+    git(root, "commit", "-q", "-m", "item");
+    rmSync(f);
+    const scan = scanIds(root, cfg);
+    assert.deepEqual([[...scan.index], [...scan.head]], [["DEMO0005"], ["DEMO0005"]]);
+  }, cfgOver);
+});
+
+test("a branch name ending in a non-breaking space is recorded whole", () => {
+  withClone(({ root, cfg }) => {
+    const name = "feat ";
+    git(root, "checkout", "-q", "-b", name);
+    seed(root, cfg);
+    claim(root, cfg, { title: "nbsp" });
+    assert.equal(list(root, cfg).rows[0].branch, name);
+  });
+});
+
+test("an fsmonitor command and a reference-transaction hook are never run by the ledger", posixOnly, () => {
+  withClone(({ root, cfg }) => {
+    const marks = join(root, "..", "marks");
+    mkdirSync(marks);
+    const script = (name) => {
+      const p = join(root, "..", name);
+      writeFileSync(p, `#!/bin/sh\necho x >> ${JSON.stringify(join(marks, name))}\n`);
+      chmodSync(p, 0o755);
+      return p;
+    };
+    git(root, "config", "core.fsmonitor", script("fsmonitor.sh"));
+    const hook = join(root, ".git", "hooks", "reference-transaction");
+    writeFileSync(hook, `#!/bin/sh\necho x >> ${JSON.stringify(join(marks, "hook"))}\n`);
+    chmodSync(hook, 0o755);
+    // Plain git runs both, so the markers prove the setup works.
+    git(root, "status");
+    git(root, "update-ref", "refs/probe", "HEAD");
+    assert.ok(existsSync(join(marks, "fsmonitor.sh")) && existsSync(join(marks, "hook")));
+    rmSync(marks, { recursive: true });
+    mkdirSync(marks);
+    seed(root, cfg);
+    claim(root, cfg, { title: "quiet" });
+    assert.deepEqual(readdirSync(marks), []);
+  });
+});
+
+test("a claims.tsv over the reader limit is unusable, not a failure", () => {
+  withClone(({ root, cfg }) => {
+    const big = join(root, "..", "big");
+    writeFileSync(big, Buffer.alloc(257 * 1024 * 1024, 0x61));
+    const blob = git(root, "hash-object", "-w", big);
+    const tree = execFileSync("git", ["-C", root, "mktree"], { input: `100644 blob ${blob}\tclaims.tsv\n`, encoding: "utf8" }).trim();
+    const commit = git(root, "commit-tree", tree, "-m", "big");
+    git(root, "update-ref", REF, commit);
+    const r = readLedger(root, cfg);
+    assert.match(r.unusable, /too large/);
+    assertRefused(() => claim(root, cfg, { title: "x" }), "invalid_ledger");
   });
 });

@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -965,5 +965,20 @@ test("init --force still works on a scan-mode backlog", () => {
     applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
     const r = spawnSync(process.execPath, [initScript, root, "--force", "--prefix", "DEMO"], { encoding: "utf8" });
     assert.equal(r.status, 0, r.stderr);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("init --force refuses when the existing config cannot be read", { skip: (process.platform === "win32" || process.getuid?.() === 0) && "needs POSIX permissions and a non-root user" }, () => {
+  const root = tempRepo();
+  const cfgPath = join(root, "trellis", "backlog.config.json");
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    ledgerTarget(root);
+    chmodSync(cfgPath, 0o000);
+    const r = spawnSync(process.execPath, [initScript, root, "--force"], { encoding: "utf8" });
+    chmodSync(cfgPath, 0o644);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /cannot check/);
+    assert.match(readFileSync(cfgPath, "utf8"), /"ledger"/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
