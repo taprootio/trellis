@@ -45,6 +45,7 @@
     "trellis": "node scripts/trellis.mjs",
     "backlog:readme": "node scripts/backlog-readme.mjs",
     "backlog:check": "node scripts/backlog-readme.mjs --check",
+    "check:agent": "good-agent check",
     "trellis:init": "node scripts/trellis-init.mjs",
     "trellis:import": "node scripts/trellis-import.mjs",
     "trellis:history": "node scripts/trellis-history.mjs",
@@ -55,5 +56,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "good-agent": "0.3.0"
   }
 }

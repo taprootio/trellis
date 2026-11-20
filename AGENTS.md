@@ -40,12 +40,12 @@ For the front-matter schema, status lifecycle, effort scales, the generator /
 - Closing a task: move it to `completed/tasks/`, set `status: completed` +
   `completed_on`, and regenerate (the completed index is generated) — in the same
   change. Full rules in SPEC.md §4–§5.
-- To take a task from `active/` to ready-for-review, follow
-  [`trellis/playbooks/work-task.md`](trellis/playbooks/work-task.md) — refine with the
-  user, plan, branch, work, review, hand off.
-- Code reviews follow [`trellis/playbooks/code-review.md`](trellis/playbooks/code-review.md):
-  ground in these conventions first, then report findings as the canonical JSON
-  array (`file` / `line` / `severity` blocker·warning·nit / `suggestion`).
+- To take a task from `active/` to ready-for-review, follow the shipped
+  `work-task` skill (see the GOOD-AGENT block below); write new stories with the
+  `write-task` skill.
+- Reviews follow the shipped `review-loop` skill: ground in these conventions
+  first, then report findings as the canonical JSON array (`file` / `line` /
+  `severity` blocker·warning·nit / `suggestion`).
 
 ### Loop contract
 
@@ -58,8 +58,44 @@ reference instance) declares their values. See
 | `regenerate` | `npm run backlog:readme` |
 | `check` | `npm run backlog:check` |
 | `branch-naming` | `je/<id-lowercase>/<slug>` (e.g. `je/trl0007/portable-loop`) |
-| `gates` | `npm run backlog:check` + `node --test` |
+| `gates` | `npm run backlog:check` + `node --test` + `npm run check:agent` |
 | `attribution` | none — no `Co-Authored-By:` trailers or "Generated with …" footers |
+
+<!-- BEGIN GOOD-AGENT -->
+## Review policy (good-agent)
+
+Work is reviewed with the `review-loop` skill: internally in a fresh
+context until clean, then externally by the other AI tool until clean.
+Claude-authored work is reviewed by Codex and Codex-authored work by
+Claude (`review.externalReviewer` in `good-agent.config.json`). Review
+runs at the configured ceiling (`review.codex`, `review.claude`); never
+raise it without the owner. Closeouts record independence, rounds and
+dispositions, never a model name.
+
+Stories are written with the `write-task` skill, and task work follows the
+`work-task` skill, which runs `review-loop` on the plan and on the diff. All
+three are installed under `.agents/skills/` and `.claude/skills/` by `npx
+good-agent init --skill` as generated copies; do not edit them. For this
+repo's own task work they replace the loop pointers to `trellis/playbooks/`.
+The backlog lifecycle above still governs: where a task file lives, the
+Loop contract seam points, and closing a task. Run the external diff review with `npx --no-install good-agent review
+--author <claude|codex> --base <base sha> --task <task path> --verified
+"<check>"`; plan and story reviews add `--prompt plan` or `--prompt story`.
+The task path is `trellis/active/<id>.md` while the task is open and
+`trellis/completed/tasks/<id>.md` for a re-review after closeout. The base
+is the task branch's starting commit, or for a PR-time re-review after a
+merge or rebase, the freshly fetched PR base commit. A commit
+that only updates a task's review record needs no further review round.
+`npm run check:agent` is one of the `gates`; contributor tooling needs
+Node 22 or later (good-agent's floor), while the published package still
+supports Node 18.
+
+Releases: merging a `package.json` `version` change to `main` publishes
+(`.github/workflows/release.yml`), and the GitHub release uses generated
+notes. There is no changelog file, so the skills' changelog step does not
+apply here. Record the version decision (bump and why, or no release) in
+the task and the PR body.
+<!-- END GOOD-AGENT -->
 
 ## Roadmap
 
@@ -70,6 +106,10 @@ and "review" loops Taproot proved out — layers on top as MCP **prompts**
 (`work-task`, `code-review`, `pr-draft`) plus the spec/conventions/playbooks as
 MCP **resources** (`trellis://…`) and the equivalent Markdown playbooks (TRL0006;
 see `src/prompts.mjs`), so any MCP-aware tool (Claude, Cursor, Windsurf, Codex,
-Cline, Zed) runs the same loop. Prompts and resources read the repo's own files
+Cline, Zed) runs the same loop. Those prompts and playbooks are product features
+for repos that use Trellis; Trellis's own contributors use the shipped
+good-agent skills instead, including `open-pr` to draft and open pull
+requests (it adds the release decision and review record that `pr-draft`
+and the PR template leave out). Prompts and resources read the repo's own files
 live and serve the server's repo (`--repo` / cwd); a shared server that keys them
 by `repoRoot` is TRL0019.
