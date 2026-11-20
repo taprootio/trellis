@@ -801,7 +801,8 @@ function fillMarkers(text, [begin, end], body, where, errors, literal = false) {
     : new RegExp(`${begin}[\\s\\S]*?${end}`);
   if (!re.test(text)) { errors.push(`${where}: generated markers not found (${begin} ... ${end})`); return text; }
   const filled = `${begin}\n${body}\n${end}`;
-  return text.replace(re, literal ? () => filled : filled);
+  // A callback keeps `$&` or `$1` in a title literal; a replacement string would expand it.
+  return text.replace(re, () => filled);
 }
 
 // Link bases for the table builders. Committed files sit beside their items'

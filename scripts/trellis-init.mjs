@@ -319,7 +319,7 @@ const dryRun = !!opts.dryRun;
 // write, including on the --retire-source path (TRL0039).
 if (opts.force) {
   try {
-    assertNotLegacyConfig(targetRoot, "init --force", "the replacement config would drop it. Rerun the same command without --force (keeping --retire-source or --import); trellis/backlog.config.json must stay");
+    assertNotLegacyConfig(targetRoot, "init --force", "the replacement config would drop it. Rerun the same command without --force (keeping --retire-source or --import): for scaffolding, --force would drop legacy; for --retire-source, --force has no use, since it only stages the removal of the source. trellis/backlog.config.json must stay");
   } catch (e) {
     if (!(e instanceof ImportRefused)) throw e;
     console.error(`error: ${e.message}`);

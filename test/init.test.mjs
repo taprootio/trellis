@@ -1435,3 +1435,16 @@ test("init --help documents the legacy cutoff and the --force refusal", () => {
   assert.match(r.stdout, /legacy/);
   assert.match(r.stdout, /--force is refused/);
 });
+
+test("an archived title holding $& survives init and check in a scan-mode repo with legacy", () => {
+  const root = legacyTarget();
+  try {
+    const item = T(root, "completed", "tasks", "TAP0002.md");
+    writeFileSync(item, readFileSync(item, "utf8").replace("title: Old completed item", () => "title: Explain $&"));
+    assert.equal(runInit(root, []).status, 0);
+    assertCheckClean(root);
+    const index = readFileSync(T(root, "completed", "index.md"), "utf8");
+    assert.match(index, /\| Explain \$& \|/);
+    assert.equal(index.split("BEGIN GENERATED:COMPLETED").length, 2, "the markers are not duplicated");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

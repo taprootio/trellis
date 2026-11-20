@@ -283,9 +283,12 @@ custom **effort scale** for display.
   a label to its number; an unresolvable or ambiguous value is an error.
 - `backlog.json` ALWAYS carries the resolved canonical number plus the resolved
   `effortLabel`, and `effortEmoji`/`effortImage` when present — so consumers
-  render without reading the config. The one exception is a qualifying closed item
-  under `legacy` (§5.1) that omits `effort`: it has no resolved number, so
-  `backlog.json` carries `null` and no label, emoji or image (§8.2).
+  render without reading the config. Three cases differ: an identity scale emits no
+  display fields; a closed item whose historical `effort` no longer resolves under
+  the current scale (for example a retired label) keeps that string as written, with
+  no display fields; and a qualifying closed item under `legacy` (§5.1) whose `effort`
+  is missing or blank has no number, so `backlog.json` carries `null` and no label,
+  emoji or image (§8.2).
 
 ### 6.3 Rendering
 

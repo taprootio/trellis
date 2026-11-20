@@ -1260,8 +1260,8 @@ test("a rejected first removal with legacy leaves no removed/ directory and the 
     createTask(c.root, VALID);
     const active = join(c.root, "trellis", "active", "DEMO0001.md");
     rmSync(join(c.root, "trellis", "removed"), { recursive: true, force: true });
-    // A mode other than the default creation mode, so the mode check means something.
-    chmodSync(active, 0o640);
+    // A mode default creation cannot produce, so the mode check means something.
+    chmodSync(active, 0o740);
     const before = snapshotTree(c.root);
     const mode = lstatSync(active).mode;
     assert.throws(() => moveTask(c.root, { id: "DEMO0001", to: "removed", reason: "x", date: "2026-02-31" }), /real calendar date/);
