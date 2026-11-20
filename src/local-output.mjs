@@ -6,8 +6,9 @@
 // writer and the ignore-line formatter. It is kept out of the core
 // (src/backlog.mjs) so that `check` never depends on git (SPEC §8.3).
 
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
-import { dirname, join, normalize, posix as posixPath, relative, sep } from "node:path";
+import { closeSync, existsSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { basename, dirname, join, normalize, posix as posixPath, relative, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { DEFAULT_TASKS_DIR, GENERATED_DIR, artifactSet, isLocalMode, markerLineErrors } from "./backlog.mjs";
 import { LedgerError, gitEnv, preview } from "./ledger.mjs";
@@ -21,8 +22,9 @@ export class OutputRefused extends LedgerError {
   }
 }
 
-// Test seam: runs before each file is written, with the path and its index.
-export const testSeams = { beforeWrite: null };
+// Test seams: `beforeWrite` runs before each file is written (path and index);
+// `rename` replaces the rename used to install files and back them up.
+export const testSeams = { beforeWrite: null, rename: null };
 
 const firstLine = (s) => String(s || "").trim().split("\n")[0] || "git error";
 const posix = (rel) => rel.split(sep).join("/");
@@ -33,6 +35,7 @@ const posix = (rel) => rel.split(sep).join("/");
 // no fsmonitor command, no optional index refresh, and an English locale so the
 // "not a git repository" text can be recognized. Literal pathspecs apply only
 // where git supports them (`ls-files`, `status`); `check-ignore` exits 128 on them.
+// `literal: false` leaves pathspec magic to the caller, who then writes `:(literal,icase)`.
 export function probe(repoRoot, args, { literal = false } = {}) {
   const full = [...(literal ? ["--literal-pathspecs"] : []), "-c", "core.fsmonitor=false", "-C", repoRoot, ...args];
   return spawnSync("git", full, {
@@ -87,6 +90,12 @@ export function foldsCase(repoRoot) {
   return r.status === 0 && r.stdout.trim() === "true";
 }
 
+// A literal pathspec for `rel`, case-insensitive when asked. Callers that pass these must
+// run the probe without the global `--literal-pathspecs` flag, which would read the magic as text.
+export function pathspec(rel, icase) {
+  return icase ? `:(literal,icase)./${rel}` : `./${rel}`;
+}
+
 // The shared output-path verifier: `check-ignore -q --no-index` per output (0 is
 // ignored, 1 is not, 128 is a git error to report) and literal `ls-files` for
 // tracked outputs. Returns `{ inside: false }` when git does not apply.
@@ -99,14 +108,13 @@ export function verifyOutputPaths(repoRoot, cfg) {
     if (r.status === 1) unignored.push(e.rel);
     else if (r.status !== 0) throw new OutputRefused(`git check-ignore failed for ${e.rel}: ${r.error ? r.error.message : firstLine(r.stderr)}`);
   }
-  // List each output's folder, then match the expected paths case-insensitively where the
-  // filesystem is, so a tracked `.generated/INDEX.md` counts as the output it aliases.
-  const fold = foldsCase(repoRoot) ? (p) => p.toLowerCase() : (p) => p;
-  const folders = [...new Set(outputs.map((e) => `./${posix(dirname(e.rel))}`))];
-  const ls = probe(repoRoot, ["ls-files", "-z", "--", ...folders], { literal: true });
+  // Match the expected paths with `:(literal,icase)` where the filesystem folds case, so git
+  // itself finds a tracked `.generated/INDEX.md` as the output it aliases.
+  const icase = foldsCase(repoRoot);
+  const specs = outputs.map((e) => pathspec(posix(e.rel), icase));
+  const ls = probe(repoRoot, ["ls-files", "-z", "--", ...specs], { literal: !icase });
   if (ls.status !== 0) throw new OutputRefused(`git ls-files failed: ${ls.error ? ls.error.message : firstLine(ls.stderr)}`);
-  const expected = new Set(outputs.map((e) => fold(posix(e.rel))));
-  const tracked = ls.stdout.split("\0").filter(Boolean).filter((p) => expected.has(fold(p)));
+  const tracked = ls.stdout.split("\0").filter(Boolean);
   return { inside: true, unignored, tracked };
 }
 
@@ -194,27 +202,108 @@ export function removeCreatedDirs(created) {
   }
 }
 
-// Writes each changed file, making its folder first. A failure restores changed
-// files, removes new or partly written ones, then removes the folders this call
-// created when they are empty, so a failed run leaves the tree as it was.
-// Returns the absolute paths it changed.
+// Creates a staging or backup file that did not exist, so a path an attacker or an
+// earlier run left behind (even a symlink) is never written through.
+function reserveStage(dest, ext) {
+  for (let i = 0; i < 20; i++) {
+    const name = join(dirname(dest), `.${basename(dest)}.${process.pid}-${randomBytes(6).toString("hex")}.${ext}`);
+    try {
+      return { name, fd: openSync(name, "wx", 0o600) };
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+  }
+  throw new LedgerError(`could not reserve a staging file beside ${dest}`, "generate_failed");
+}
+
+export function stageFile(dest, ext, content, mode) {
+  const { name, fd } = reserveStage(dest, ext);
+  try {
+    writeFileSync(fd, content);
+    fchmodSync(fd, mode);
+    closeSync(fd);
+  } catch (e) {
+    // The path was reserved by this call, so a failed write must not leave it behind.
+    try { closeSync(fd); } catch { /* already closed */ }
+    try { unlinkSync(name); } catch { /* best-effort cleanup */ }
+    throw e;
+  }
+  return name;
+}
+
+const move = (from, to) => (testSeams.rename || renameSync)(from, to);
+
+// Installs files through staged copies and backups. Each replacement is staged beside its
+// destination, the original is renamed to a unique backup, and the stage is renamed into
+// place. A failure renames every backup back and removes files that had no original. A
+// backup is recorded only after its rename succeeds. One that cannot go back is kept and
+// named in the thrown error. `entries` are `{ path, content, skip? }`; `hooks.before(path, i)`
+// runs ahead of each entry and `hooks.after()` once all are in. Returns the installed paths
+// and the backups it could not remove (`leftover`, with its reason).
+export function installStaged(entries, hooks = {}, failureText = "could not restore every file") {
+  const plan = entries.map((entry) => ({ entry, temp: null, backup: null, done: false }));
+  const installed = [];
+  try {
+    for (const p of plan) {
+      if (p.entry.skip) continue;
+      const mode = existsSync(p.entry.path) ? statSync(p.entry.path).mode & 0o7777 : 0o666 & ~process.umask();
+      p.temp = stageFile(p.entry.path, "tmp", p.entry.content, mode);
+    }
+    plan.forEach((p, i) => {
+      if (hooks.before) hooks.before(p.entry.path, i);
+      if (p.entry.skip) return;
+      if (existsSync(p.entry.path)) {
+        const backup = join(dirname(p.entry.path), `.${basename(p.entry.path)}.${process.pid}-${randomBytes(6).toString("hex")}.bak`);
+        move(p.entry.path, backup);
+        p.backup = backup;
+        installed.push(p);
+      }
+      move(p.temp, p.entry.path);
+      p.temp = null;
+      if (!installed.includes(p)) installed.push(p);
+    });
+    if (hooks.after) hooks.after();
+  } catch (e) {
+    const kept = [];
+    for (const p of installed.reverse()) {
+      try {
+        if (p.backup) move(p.backup, p.entry.path); else rmSync(p.entry.path, { force: true });
+        p.backup = null;
+      } catch {
+        if (p.backup) kept.push(`${p.backup} (original of ${p.entry.path})`);
+        p.backup = null;
+      }
+    }
+    for (const p of plan) {
+      if (p.temp) { try { rmSync(p.temp, { force: true }); } catch { /* best-effort cleanup */ } }
+    }
+    if (kept.length) {
+      const err = new LedgerError(`${e.message}; ${failureText}; originals kept at: ${kept.join(", ")}`, "generate_failed");
+      err.kept = kept;
+      err.original = e.message;
+      throw err;
+    }
+    throw e;
+  }
+  const leftover = [];
+  for (const p of plan) {
+    if (!p.backup) continue;
+    try { rmSync(p.backup, { force: true }); } catch (e) { leftover.push(`could not remove the backup ${p.backup}: ${e.message}`); }
+  }
+  return { installed: plan.filter((p) => !p.entry.skip).map((p) => p.entry.path), leftover };
+}
+
+// Writes each changed file, making its folder first, through `installStaged`. A failure
+// restores changed files, removes new ones, then removes the folders this call created
+// when they are empty, so a failed run leaves the tree as it was. Returns the absolute
+// paths it changed.
 export function writeArtifactFiles(files) {
-  const prior = files.map((f) => (existsSync(f.path) ? readFileSync(f.path, "utf8") : null));
   const created = [];
-  const started = [];
   try {
     for (const dir of new Set(files.map((f) => dirname(f.path)))) makeDirs(dir, created);
-    files.forEach((f, i) => {
-      if (testSeams.beforeWrite) testSeams.beforeWrite(f.path, i);
-      if (prior[i] === f.content) return;
-      started.push(i);
-      writeFileSync(f.path, f.content);
-    });
-    return started.map((i) => files[i].path);
+    const entries = files.map((f) => ({ path: f.path, content: f.content, skip: existsSync(f.path) && readFileSync(f.path, "utf8") === f.content }));
+    return installStaged(entries, { before: (path, i) => { if (testSeams.beforeWrite) testSeams.beforeWrite(path, i); } }).installed;
   } catch (e) {
-    for (const i of started.reverse()) {
-      try { prior[i] === null ? rmSync(files[i].path, { force: true }) : writeFileSync(files[i].path, prior[i]); } catch { /* best-effort restore */ }
-    }
     removeCreatedDirs(created);
     throw e;
   }

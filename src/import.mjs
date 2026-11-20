@@ -313,8 +313,10 @@ function buildBody(raw, newId, title) {
 // A local file is recognized by its own header (the heading and the "generated" note the
 // local generator writes), wherever its `.generated/` folder sits, so a real task that
 // is named `index.md` in a `.generated/` folder still imports.
+// The committed `backlog.json` is JSON, not a Markdown item, so it is excluded only inside a
+// `.generated` folder; a mapped source-root `backlog.json` is the user's own file (round 3).
 const COMMITTED_ARTIFACTS = new Set(
-  artifactSet(".", { tasksDir: ".", generatedArtifacts: "committed" }).generated.map((e) => e.rel.split(sep).join("/")),
+  artifactSet(".", { tasksDir: ".", generatedArtifacts: "committed" }).generated.filter((e) => e.key !== "backlog").map((e) => e.rel.split(sep).join("/")),
 );
 const LOCAL_HEADS = new Map(
   artifactSet(".", { tasksDir: ".", generatedArtifacts: "local" }).generated
@@ -324,6 +326,7 @@ const LOCAL_HEADS = new Map(
 function isGeneratedArtifact(rel, abs) {
   const parts = rel.split(/[/\\]/);
   if (COMMITTED_ARTIFACTS.has(parts.join("/"))) return true;
+  if (parts[parts.length - 1] === "backlog.json" && parts[parts.length - 2] === GENERATED_DIR) return true;
   const head = LOCAL_HEADS.get(parts[parts.length - 1]);
   if (!head || parts[parts.length - 2] !== GENERATED_DIR) return false;
   try { return readFileSync(abs, "utf8").replace(/\r\n/g, "\n").startsWith(head); } catch { return false; }

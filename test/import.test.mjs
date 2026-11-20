@@ -1142,6 +1142,20 @@ test("a task at .generated/index.md without the local header imports, and a head
   } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("a mapped source-root backlog.json is an ordinary file; one under .generated is skipped", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-genjson-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    writeFileSync(join(src, "backlog.json"), "Plain notes in a file the user mapped.\n");
+    writeFileSync(join(src, ".generated", "backlog.json"), "{}\n");
+    const at = (dir) => ({ ...loadProfile("trellis").mapping, sources: { active: { dirs: [dir], file: "*.json" } } });
+    const plain = planImport(root, src, at("."), {});
+    assert.equal(plain.counts.total, 1, "the source-root backlog.json is not excluded by name (it was before round 3)");
+    assert.equal(planImport(root, src, at(".generated"), {}).counts.total, 0, "the generated copy is skipped");
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("an imported item with a large body is written whole", () => {
   const root = initTarget();
   const src = realpathSync(mkdtempSync(join(tmpdir(), "trellis-bigsrc-")));

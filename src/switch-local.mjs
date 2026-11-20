@@ -7,13 +7,11 @@
 // are installed through staged files and backups (the config last), and any failure puts
 // them all back, so a rerun starts clean and a finished switch is a no-op.
 
-import { existsSync, lstatSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
-import { randomBytes } from "node:crypto";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { DEFAULT_TASKS_DIR, GENERATED_DIR, MARKERS, SPEC_VERSION, artifactSet, loadConfig, paths } from "./backlog.mjs";
 import { AGENTS_MARKERS, artifactBullet, completedSkeleton, removedSkeleton } from "./init.mjs";
-import { stageFile } from "./mcp.mjs";
-import { OutputRefused, checkOutputFiles, discoverGit, foldsCase, gitPrefix, ignoreLineFor, probe, verifyOutputPaths } from "./local-output.mjs";
+import { OutputRefused, checkOutputFiles, discoverGit, foldsCase, gitPrefix, ignoreLineFor, installStaged, pathspec, probe, verifyOutputPaths } from "./local-output.mjs";
 
 // Test seam: runs before each file write (with its path and index) and after the last one.
 export const testSeams = { beforeWrite: null, afterWrites: null };
@@ -29,10 +27,22 @@ function refuse(message) {
 
 // `git` through the shared probe: the cleaned environment, no fsmonitor command, no
 // optional index refresh, and literal pathspecs (`status` and `ls-files` support them).
-function git(repoRoot, args) {
-  const r = probe(repoRoot, args, { literal: true });
+function git(repoRoot, args, { literal = true } = {}) {
+  const r = probe(repoRoot, args, { literal });
   if (r.status !== 0) refuse(`git ${args[0]} failed: ${r.error ? r.error.message : firstLine(r.stderr)}`);
   return r.stdout;
+}
+
+// Reads a file the switch may edit as bytes and decodes them as strict UTF-8, so a file in
+// another encoding is refused before any edit instead of being rewritten with U+FFFD. The
+// BOM is kept, so untouched bytes stay untouched.
+function readText(path, rel) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(readFileSync(path));
+  } catch (e) {
+    if (e instanceof TypeError) refuse(`${rel} is not valid UTF-8, so the switch cannot edit it safely. Convert it to UTF-8, then run again`);
+    throw e;
+  }
 }
 
 // A path the switch would edit or remove must be a regular file, not a link to
@@ -142,8 +152,10 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
   }
   const dirRel = rel(set.dir);
   // On a case-insensitive filesystem `.GENERATED/` is the same folder, so compare folded.
-  const fold = foldsCase(repoRoot) ? (p) => p.toLowerCase() : (p) => p;
-  const underGenerated = git(repoRoot, ["ls-files", "-z", "--", `./${posix(relative(repoRoot, dirname(set.dir)))}`]).split("\0").filter(Boolean)
+  // git matches the folder itself with `:(literal,icase)`, then the names are folded to find `.generated/`.
+  const icase = foldsCase(repoRoot);
+  const fold = icase ? (p) => p.toLowerCase() : (p) => p;
+  const underGenerated = git(repoRoot, ["ls-files", "-z", "--", pathspec(posix(relative(repoRoot, dirname(set.dir))), icase)], { literal: !icase }).split("\0").filter(Boolean)
     .filter((p) => fold(p).startsWith(`${fold(dirRel)}/`));
   if (underGenerated.length) {
     refuse(`${underGenerated.join(", ")} ${underGenerated.length > 1 ? "are" : "is"} tracked by git, but local mode keeps ${dirRel}/ out of git. Untrack ${underGenerated.length > 1 ? "them" : "it"} (git rm --cached), then run again`);
@@ -181,7 +193,7 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
   const pairs = [[readme, MARKERS.milestones, null], [completedIdx, MARKERS.completed, completedSkeleton()], [removedIdx, MARKERS.removed, removedSkeleton()]];
   for (const [f, own, skeleton] of pairs) {
     if (!existsSync(f.path)) continue;
-    const text = readFileSync(f.path, "utf8");
+    const text = readText(f.path, rel(f.path));
     const r = posix(f.rel);
     if (!inspectMarkers(r, text, own)) continue;
     const stripped = stripBlock(text, own);
@@ -205,7 +217,7 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
 
   // 5. AGENTS.md: replace the artifact bullet only on an exact match of Trellis's own text.
   if (existsSync(agentsPath)) {
-    const text = readFileSync(agentsPath, "utf8");
+    const text = readText(agentsPath, "AGENTS.md");
     const [begin, end] = AGENTS_MARKERS;
     const bi = text.indexOf(begin);
     const ei = bi === -1 ? -1 : text.indexOf(end, bi);
@@ -226,7 +238,7 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
   // 6. The config, last. It is patched from a fresh parse of its own bytes, never from
   // the loaded object, which carries derived fields. A config that is already local and
   // current keeps its bytes, even when it is uncommitted.
-  const configText = readFileSync(configPath, "utf8");
+  const configText = readText(configPath, rel(configPath));
   const obj = JSON.parse(configText);
   if (obj.generatedArtifacts !== "local" || lowerThanCurrent(obj.specVersion)) {
     requireClean(rel(configPath), 'needs `generatedArtifacts` set to "local"');
@@ -242,35 +254,18 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
   const result = { edits: edits.map((e) => ({ rel: e.rel, why: e.why })), removals, warnings, dryRun };
   if (dryRun || !edits.length) return result;
 
-  // 7. Install the edits (config last). Each replacement is staged beside its file, the
-  // original is renamed to a unique backup, and the stage is renamed into place. A failure
-  // renames every backup back; a backup that cannot go back is kept and named.
-  const staged = [];
-  const backups = [];
-  const kept = [];
+  // 7. Install the edits (config last) through the shared staged installer: a failure renames
+  // every backup back, and a backup that cannot go back is kept and named.
+  let outcome;
   try {
-    for (const e of edits) staged.push({ e, temp: stageFile(e.path, "tmp", e.after, statSync(e.path).mode & 0o7777), backup: null });
-    staged.forEach((st, i) => {
-      if (testSeams.beforeWrite) testSeams.beforeWrite(st.e.path, i);
-      st.backup = join(dirname(st.e.path), `.${basename(st.e.path)}.${process.pid}-${randomBytes(6).toString("hex")}.bak`);
-      backups.push(st);
-      renameSync(st.e.path, st.backup);
-      renameSync(st.temp, st.e.path);
-      st.temp = null;
+    outcome = installStaged(edits.map((e) => ({ path: e.path, content: e.after })), {
+      before: (path, i) => { if (testSeams.beforeWrite) testSeams.beforeWrite(path, i); },
+      after: () => { if (testSeams.afterWrites) testSeams.afterWrites(); },
     });
-    if (testSeams.afterWrites) testSeams.afterWrites();
   } catch (e) {
-    for (const st of backups.reverse()) {
-      try { renameSync(st.backup, st.e.path); st.backup = null; } catch { kept.push(`${st.backup} (original of ${st.e.rel})`); }
-    }
-    for (const st of staged) {
-      if (st.temp) { try { rmSync(st.temp, { force: true }); } catch { /* best-effort cleanup */ } }
-    }
-    if (kept.length) throw new Error(`the switch failed and could not restore every file; originals kept at: ${kept.join(", ")}: ${e.message}`);
+    if (e.kept) throw new Error(`the switch failed and could not restore every file; originals kept at: ${e.kept.join(", ")}: ${e.original}`);
     throw new Error(`the switch failed and every edited file was restored: ${e.message}`);
   }
-  for (const st of backups) {
-    try { rmSync(st.backup, { force: true }); } catch (e) { warnings.push(`could not remove the backup ${st.backup}: ${e.message}`); }
-  }
+  warnings.push(...outcome.leftover);
   return result;
 }

@@ -39,7 +39,10 @@ import {
 import { applyImport, ImportRefused } from "./import.mjs";
 import { loadProfile } from "./profiles.mjs";
 import { deriveTaskHistory, deriveAllHistory, HistoryError } from "./history.mjs";
-import { outputPreflight, writeArtifactFiles, makeDirs, removeCreatedDirs } from "./local-output.mjs";
+import { outputPreflight, writeArtifactFiles, makeDirs, removeCreatedDirs, stageFile } from "./local-output.mjs";
+
+// Kept as an export of this module for its callers and tests; the owner is local-output.
+export { stageFile };
 import { LedgerError, unsafeText, claim, preview, checkLayout, refuseSymlinkedArtifacts, artifactPaths } from "./ledger.mjs";
 
 // A domain error the transport maps to an MCP tool error (isError result) rather
@@ -245,35 +248,6 @@ function writeArtifacts(repoRoot, cfg, data, hooks = {}, pv = ledgerPreview(repo
   // restores every artifact — honouring the Risk's "never left … with stale generated files."
   const changed = writeArtifactFiles(files).map((path) => relative(repoRoot, path));
   return { changed, nextId: next };
-}
-
-// Creates a staging or backup file that did not exist, so a path an attacker or an
-// earlier run left behind (even a symlink) is never written through.
-function reserveStage(dest, ext, mode) {
-  for (let i = 0; i < 20; i++) {
-    const name = join(dirname(dest), `.${basename(dest)}.${process.pid}-${randomBytes(6).toString("hex")}.${ext}`);
-    try {
-      return { name, fd: openSync(name, "wx", mode) };
-    } catch (e) {
-      if (e.code !== "EEXIST") throw e;
-    }
-  }
-  throw new TrellisError(`could not reserve a staging file beside ${dest}`, "generate_failed");
-}
-
-export function stageFile(dest, ext, content, mode) {
-  const { name, fd } = reserveStage(dest, ext, 0o600);
-  try {
-    writeFileSync(fd, content);
-    fchmodSync(fd, mode);
-    closeSync(fd);
-  } catch (e) {
-    // The path was reserved by this call, so a failed write must not leave it behind.
-    try { closeSync(fd); } catch { /* already closed */ }
-    try { unlinkSync(name); } catch { /* best-effort cleanup */ }
-    throw e;
-  }
-  return name;
 }
 
 // Ledger-mode artifact write (TRL0037). A claimed id cannot be released, so the

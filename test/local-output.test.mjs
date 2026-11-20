@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ledgerTest, initRefFormat } from "./git-support.mjs";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, symlinkSync, realpathSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, renameSync, existsSync, symlinkSync, realpathSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -339,3 +339,50 @@ for (const inGit of [true, false]) {
     } finally { c.cleanup(); }
   });
 }
+
+// ------------------------------------------------- external review round 3
+const foldsOnDisk = (() => {
+  const d = realpathSync(mkdtempSync(join(tmpdir(), "trellis-case-")));
+  try { writeFileSync(join(d, "a"), ""); return existsSync(join(d, "A")); } finally { rmSync(d, { recursive: true, force: true }); }
+})();
+
+test("a tracked .GENERATED/index.md refuses in the writer preflight on a case-insensitive worktree", { skip: !foldsOnDisk && "case-sensitive filesystem" }, () => {
+  const c = localRepo();
+  try {
+    git(c.root, "config", "core.ignorecase", "true");
+    const sha = execFileSync("git", ["-C", c.root, "hash-object", "-w", "--stdin"], { input: "x\n", encoding: "utf8" }).trim();
+    git(c.root, "update-index", "--add", "--cacheinfo", `100644,${sha},trellis/.GENERATED/index.md`);
+    refused(() => outputPreflight(c.root, c.cfg), /tracked by git/);
+  } finally { c.cleanup(); }
+});
+
+test("a forced failure after the first install restores originals and leaves no stage or backup file", () => {
+  const c = localRepo();
+  try {
+    mkdirSync(c.dir);
+    writeFileSync(join(c.dir, "index.md"), "old index\n");
+    writeFileSync(join(c.dir, "completed.md"), "old completed\n");
+    const files = OUTPUTS.map((n, i) => ({ path: join(c.dir, n), content: `new ${i}\n` }));
+    failAt(2);
+    assert.throws(() => writeArtifactFiles(files), /boom/);
+    assert.equal(readFileSync(join(c.dir, "index.md"), "utf8"), "old index\n");
+    assert.equal(readFileSync(join(c.dir, "completed.md"), "utf8"), "old completed\n");
+    assert.deepEqual(readdirSync(c.dir).sort(), ["completed.md", "index.md"], "no stage, backup or new file remains");
+  } finally { testSeams.beforeWrite = null; c.cleanup(); }
+});
+
+test("a backup that cannot be renamed back is kept and named", () => {
+  const c = localRepo();
+  try {
+    mkdirSync(c.dir);
+    writeFileSync(join(c.dir, "index.md"), "old index\n");
+    const files = OUTPUTS.map((n, i) => ({ path: join(c.dir, n), content: `new ${i}\n` }));
+    failAt(1);
+    testSeams.rename = (from, to) => {
+      if (from.endsWith(".bak")) throw new Error("no restore");
+      renameSync(from, to);
+    };
+    assert.throws(() => writeArtifactFiles(files), (e) => /boom; could not restore every file; originals kept at: .*\.bak \(original of .*index\.md\)/.test(e.message));
+    assert.equal(readdirSync(c.dir).filter((n) => n.endsWith(".bak")).length, 1, "the backup is still on disk");
+  } finally { testSeams.beforeWrite = null; testSeams.rename = null; c.cleanup(); }
+});

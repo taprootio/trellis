@@ -11,7 +11,7 @@ import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyScaffold, shouldPromptVocab, DEFAULTS, completedSkeleton, artifactBullet } from "../src/init.mjs";
 import { switchToLocal, testSeams } from "../src/switch-local.mjs";
-import { OutputRefused, ignoreLineFor } from "../src/local-output.mjs";
+import { OutputRefused, ignoreLineFor, testSeams as outputSeams } from "../src/local-output.mjs";
 import { initRefFormat } from "./git-support.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -506,4 +506,50 @@ test("a failure after the first install puts every original back and leaves no s
     assert.throws(() => switchToLocal(f.root), /every edited file was restored: forced failure/);
     assert.deepEqual(tree(f.root), before);
   } finally { testSeams.beforeWrite = null; f.cleanup(); }
+});
+
+// ------------------------------------------------- external review round 3
+const foldsOnDisk = (() => {
+  const d = realpathSync(mkdtempSync(join(tmpdir(), "trellis-case-")));
+  try { writeFileSync(join(d, "a"), ""); return existsSync(join(d, "A")); } finally { rmSync(d, { recursive: true, force: true }); }
+})();
+
+test("tracked children under a differently cased tasks folder refuse the switch", { skip: !foldsOnDisk && "case-sensitive filesystem" }, () => {
+  const f = fixture();
+  try {
+    git(f.root, "config", "core.ignorecase", "true");
+    const sha = execFileSync("git", ["-C", f.root, "hash-object", "-w", "--stdin"], { input: "x\n", encoding: "utf8", env: GIT_ENV }).trim();
+    git(f.root, "update-index", "--add", "--cacheinfo", `100644,${sha},TRELLIS/.GENERATED/index.md`);
+    refusedWith(f.root, /tracked by git/);
+  } finally { f.cleanup(); }
+});
+
+test("a file that is not valid UTF-8 refuses the switch before any edit, naming the file", () => {
+  for (const [name, rel] of [["README", "trellis/README.md"], ["AGENTS", "AGENTS.md"]]) {
+    const f = fixture();
+    try {
+      const path = join(f.root, rel);
+      const before = readFileSync(path);
+      // Windows-1252 prose: 0xE9 is "e acute" there and an invalid byte in UTF-8.
+      writeFileSync(path, Buffer.concat([before, Buffer.from([0x0a, 0x43, 0x61, 0x66, 0xe9, 0x0a])]));
+      f.commit("latin prose");
+      const snapshot = readFileSync(path);
+      const r = refusedWith(f.root, /not valid UTF-8/);
+      assert.match(r.stderr, new RegExp(rel.replace(".", "\\.")), name);
+      assert.deepEqual(readFileSync(path), snapshot, "bytes untouched");
+    } finally { f.cleanup(); }
+  }
+});
+
+test("a failed original-to-backup rename records no backup, so the restore reports a clean rollback", () => {
+  const f = fixture();
+  try {
+    const before = tree(f.root);
+    outputSeams.rename = (from, to) => {
+      if (to.endsWith(".bak")) throw new Error("rename refused");
+      renameSync(from, to);
+    };
+    assert.throws(() => switchToLocal(f.root), /every edited file was restored: rename refused/);
+    assert.deepEqual(tree(f.root), before);
+  } finally { outputSeams.rename = null; f.cleanup(); }
 });
