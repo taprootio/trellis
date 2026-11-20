@@ -45,7 +45,7 @@
       ],
       "owner": null,
       "collaborators": [],
-      "summary": "Add a dependency graph and filtering by milestone, priority, and effort to the local viewer."
+      "summary": "Add a dependency graph, blocked-versus-ready flags and effort filtering to the local viewer."
     },
     {
       "id": "TRL0011",
