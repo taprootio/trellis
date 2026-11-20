@@ -85,15 +85,21 @@ an import.
    against an empty default tree.
 2. Add `depends_on: []` to any item that lacks it: it stays required.
 
-   Adopting in local generated-artifacts mode? First write `generatedArtifacts:
-   "local"` and `specVersion: "2.5"` in the config (a new untracked config at the
-   current spec version is then kept as written), set `legacy`, and, when the switch
-   will rewrite a tracked config, commit that config change, since `init
-   --switch-to-local` refuses a config with uncommitted changes. Then stop here and
+   Adopting in local generated-artifacts mode (SPEC §8.5)? Skip steps 3 and 4 and
    follow the [switch
-   procedure](#switch-a-trellis-backlog-to-local-generated-artifacts) below instead of
-   steps 3 and 4. Running the committed-mode steps first can rewrite tracked indexes
-   and leave uncommitted changes that the switch refuses to strip.
+   procedure](#switch-a-trellis-backlog-to-local-generated-artifacts) instead,
+   after preparing the config for your case:
+   - A new, untracked, hand-authored config: write `generatedArtifacts: "local"`,
+     `specVersion: "2.5"` and `legacy` directly. The switch keeps that config as
+     written.
+   - An existing committed-mode backlog: add `legacy` only, keep committed mode, and
+     commit that change. `init --switch-to-local` then changes the mode itself, and it
+     refuses a config with uncommitted changes. Setting `generatedArtifacts: "local"`
+     yourself first would flip the mode early and leave the generated markers in
+     place, so `check` would fail.
+
+   Running the committed-mode steps first can rewrite tracked indexes and leave
+   uncommitted changes that the switch refuses to strip.
 3. Run `npx @taprootio/trellis init` **without** `--force`. `init --force` is refused
    (exit 2, nothing written) once the config has `legacy`. Rerun the same command
    without `--force`, keeping `--retire-source` or `--import`. The reason depends on
@@ -109,17 +115,8 @@ an import.
    pair and keep the authored text outside it, or move the file aside first.
 4. Run `npx @taprootio/trellis check`.
 
-To adopt in local generated-artifacts mode (SPEC §8.5), follow [Switch a Trellis
-backlog to local generated artifacts](#switch-a-trellis-backlog-to-local-generated-artifacts)
-with `legacy` already in the config. A repo migrating from committed mode sets `legacy`
-and commits that config change before `init --switch-to-local`, which refuses a config
-with uncommitted changes; this applies only to switches that rewrite the config. A new
-config that is already local at the current spec version is kept as it is. First-time
-local adopters write `generatedArtifacts: "local"` and `specVersion: "2.5"` in the
-hand-authored config, so a new untracked config is not rewritten and refused: the
-switch rewrites a committed-mode config or one that declares an older `specVersion`,
-and an already-local config with no `specVersion` is kept as written. Local adopters
-run `init --switch-to-local` and the removal commands it prints before ordinary `init`.
+Local adopters: see the note after step 2. They run `init --switch-to-local` and the
+removal commands it prints before ordinary `init`.
 
 ### Not in ledger mode
 
