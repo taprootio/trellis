@@ -402,6 +402,8 @@ test("the undetected recovery tells the user to copy the playbook, for all three
     for (const name of NAMES) {
       const text = textOf(root, name);
       assert.ok(text.includes("templates/trellis/playbooks/") && text.includes(`${name}.md`), name);
+      for (const dep of { "work-task": ["conventions.md", "code-review.md", "pr-draft.md"], "code-review": ["conventions.md"], "pr-draft": [] }[name]) assert.ok(text.includes(dep), `${name} needs ${dep}`);
+      assert.ok(text.includes("keep existing copies"));
       assert.ok(!text.includes("trellis init"), "never suggests init");
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -436,7 +438,7 @@ test("the work-task prompt on a repo without AGENTS.md carries the fallback rule
     const text = textOf(root, "work-task");
     assert.ok(text.includes("Wherever this playbook names AGENTS.md"), "the playbook carries the fallback");
     assert.ok(text.includes("SPEC.md"));
-    for (const f of ["work-task", "code-review", "conventions"]) {
+    for (const f of ["work-task", "code-review", "conventions", "pr-draft"]) {
       for (const base of ["trellis", "templates/trellis"]) {
         assert.ok(readFileSync(join(sourceRoot, base, "playbooks", `${f}.md`), "utf8").includes("Wherever this playbook names AGENTS.md"), `${base}/${f}`);
       }
@@ -460,12 +462,23 @@ test("without an AGENTS.md the prompts do not require the conventions resource",
 test("a task file must be in the directory listing by its exact name", () => {
   const root = mkdtempSync(join(tmpdir(), "trellis-prompts-"));
   try {
-    applyScaffold(root, { prefix: "R+" }, {}, sourceRoot);
+    applyScaffold(root, { prefix: "[Rr]" }, {}, sourceRoot);
     const dir = join(root, "trellis", "active");
-    writeFileSync(join(dir, "RR0001.md"), "---\nid: RR0001\n---\n");
-    assert.ok(readdirSync(dir).includes("RR0001.md") && !readdirSync(dir).includes("rr0001.md"));
-    assert.ok(textOf(root, "work-task", { id: "RR0001" }).includes("RR0001"));
-    // A name differing only in case never passes, even where the filesystem would open it.
-    assert.throws(() => textOf(root, "work-task", { id: "rr0001" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+    writeFileSync(join(dir, "R0001.md"), "---\nid: R0001\n---\n");
+    assert.ok(readdirSync(dir).includes("R0001.md") && !readdirSync(dir).includes("r0001.md"));
+    assert.ok(textOf(root, "work-task", { id: "R0001" }).includes("R0001"));
+    // The scan pattern `[Rr]\d{4}` accepts `r0001`. Rejecting it only exercises the exact-name
+    // guard on a case-insensitive filesystem; on a case-sensitive one it passes either way.
+    assert.throws(() => textOf(root, "work-task", { id: "r0001" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a .txt template inside a PULL_REQUEST_TEMPLATE folder counts", () => {
+  const root = bareRepo({ template: false });
+  try {
+    mkdirSync(join(root, "docs", "PULL_REQUEST_TEMPLATE"), { recursive: true });
+    writeFileSync(join(root, "docs", "PULL_REQUEST_TEMPLATE", "feature.txt"), "t\n");
+    const text = textOf(root, "pr-draft");
+    assert.ok(text.includes("docs/PULL_REQUEST_TEMPLATE/") && !text.includes(PROMPT_TOKENS.noTemplate));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

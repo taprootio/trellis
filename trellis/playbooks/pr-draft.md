@@ -60,4 +60,4 @@ One copy-ready Markdown block:
   the others in the body.
 - **Attribution:** follow the repo's `attribution` policy (AGENTS.md); the
   default is none — no `Co-Authored-By:` trailers or AI "Generated with …"
-  footers in the title or description.
+  footers in the title or description. Wherever this playbook names AGENTS.md, a repo without one uses its own canonical instructions (such as CONTRIBUTING.md) or the published spec (https://github.com/taprootio/trellis/blob/main/SPEC.md).

@@ -206,22 +206,30 @@ function findPrTemplate(repoRoot) {
   for (const dir of [".github", ".", "docs"]) {
     for (const e of entries(dir).filter((x) => /^pull_request_template$/i.test(x.name))) {
       const rel = dir === "." ? e.name : `${dir}/${e.name}`;
-      if (isDir(rel) && entries(rel).some((f) => /\.md$/i.test(f.name) && isRegularFile(`${rel}/${f.name}`))) return `${rel}/`;
+      if (isDir(rel) && entries(rel).some((f) => /\.(md|txt)$/i.test(f.name) && isRegularFile(`${rel}/${f.name}`))) return `${rel}/`;
     }
   }
   return null;
 }
 
 // The answer for a prompt whose playbook file is absent. A repo that runs good-agent gets
-// pointed at its skills; any other repo at `trellis init --with-playbooks`. It never embeds
+// pointed at its skills; any other repo is told which playbook files to copy from the package. It never embeds
 // a playbook body, and the work-task id is validated like the normal prompt's.
+// The playbook files a prompt's playbook reads or points at, besides itself.
+const PLAYBOOK_DEPENDENCIES = {
+  "work-task": ["conventions.md", "code-review.md", "pr-draft.md"],
+  "code-review": ["conventions.md"],
+  "pr-draft": [],
+};
+
 function missingPlaybook(repoRoot, p, args, cfg, cfgErrors) {
   const lines = [PROMPT_TOKENS.handoff];
   const detected = detectGoodAgent(repoRoot);
   if (p.name === "work-task") lines.push(`Task: **${requireId(repoRoot, args.id, cfg, cfgErrors)}**`);
   if (!detected) {
-    // The server cannot know earlier skips, so it never suggests `init`: a copy restores only the playbook.
-    lines.push(`The ${p.name} playbook (${p.playbook}) is absent from this repo. From the repo this server serves (path on the next line), copy ${basename(p.playbook)} from the installed Trellis package's \`templates/trellis/playbooks/\` into \`trellis/playbooks/\` there. Nothing else needs creating or regenerating.`, `run from: ${repoRoot}`);
+    // The server cannot know earlier skips, so it never suggests `init`: copying the files restores the playbook.
+    const files = [basename(p.playbook), ...PLAYBOOK_DEPENDENCIES[p.name]].join(", ");
+    lines.push(`The ${p.name} playbook (${p.playbook}) is absent from this repo. From the repo this server serves (path on the next line), copy any of these files that are missing (${files}) from the installed Trellis package's \`templates/trellis/playbooks/\` into \`trellis/playbooks/\` there, and keep existing copies.`, `run from: ${repoRoot}`);
   } else if (p.name === "pr-draft") {
     lines.push(`Good-agent is detected (${detected}). Use its \`review-loop\` skill, and follow this repo's own PR instructions. ${PROMPT_TOKENS.prFlow}`);
   } else {
