@@ -5,10 +5,10 @@
 import { test } from "node:test";
 import { ledgerTest, initRefFormat } from "./git-support.mjs";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, realpathSync, symlinkSync, renameSync, lstatSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, realpathSync, symlinkSync, renameSync, lstatSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { applyScaffold } from "../src/init.mjs";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
@@ -383,3 +383,299 @@ for (const dangling of [false, true]) {
     } finally { c.cleanup(); }
   });
 }
+
+// ------------------------------------------ local generated artifacts (TRL0038)
+const readmeScript = join(sourceRoot, "scripts", "backlog-readme.mjs");
+const localOutputUrl = pathToFileURL(join(sourceRoot, "src", "local-output.mjs")).href;
+const LOCAL_BASE = { specVersion: "2.5", idPrefix: "DEMO", idWidth: 4, milestones: ["Alpha"], priorities: ["High", "Low"], effort: [1, 2, 3, 5], generatedArtifacts: "local" };
+const ITEM = (id, extra = "") => `---\nid: ${id}\ntitle: Task ${id}\nstatus: active\nmilestone: Alpha\npriority: High\neffort: 3\ndepends_on: []\nsummary: Summary.\n${extra}---\n\nBody.\n`;
+const GEN = ["index.md", "completed.md", "removed.md", "backlog.json"];
+
+// A local-mode repo with one active item and a marker-free README. `git: false`
+// leaves it outside any work tree; `ignore: false` omits the ignore rule.
+function localRepo({ cfg = {}, git: inGit = true, ignore = true } = {}) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "trellis-local-cli-")));
+  const t = join(root, "trellis");
+  for (const d of ["active", "completed/tasks", "removed"]) mkdirSync(join(t, d), { recursive: true });
+  writeFileSync(join(t, "backlog.config.json"), JSON.stringify({ ...LOCAL_BASE, ...cfg }, null, 2) + "\n");
+  writeFileSync(join(t, "README.md"), "# Backlog\n\nAuthored prose.\n");
+  writeFileSync(join(t, "active", "DEMO0001.md"), ITEM("DEMO0001"));
+  if (inGit) {
+    execFileSync("git", ["-C", root, "init", "-q", ...initRefFormat, "-b", "main"]);
+    execFileSync("git", ["-C", root, "config", "user.name", "Tester"]);
+    execFileSync("git", ["-C", root, "config", "user.email", "tester@example.com"]);
+  }
+  if (ignore) writeFileSync(join(root, ".gitignore"), "trellis/.generated/\n");
+  return { root, gen: join(t, ".generated"), readme: join(t, "README.md"), cleanup: () => rmSync(root, { recursive: true, force: true }) };
+}
+const generate = (c, extra = {}) => run(c.root, ["generate"], extra);
+const checkCmd = (c, extra = {}) => run(c.root, ["check"], extra);
+// A tree snapshot (path and bytes) so "writes nothing" compares the whole repo, not a guess.
+function snapshot(root) {
+  const out = {};
+  const walk = (dir) => {
+    for (const name of readdirSync(dir, { withFileTypes: true })) {
+      if (name.name === ".git") continue;
+      const p = join(dir, name.name);
+      if (name.isDirectory()) { out[p.slice(root.length)] = "<dir>"; walk(p); }
+      else out[p.slice(root.length)] = lstatSync(p).isSymbolicLink() ? "<link>" : readFileSync(p, "utf8");
+    }
+  };
+  walk(root);
+  return out;
+}
+// A `git` first on PATH that fails commands containing `when` (or only logs when null).
+function shimPath(c, when, body) {
+  const bin = join(c.root, "..", `shim-${process.pid}-${Math.random().toString(16).slice(2)}`);
+  mkdirSync(bin);
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const log = join(bin, "calls.log");
+  const guard = when ? `for a in "$@"; do\n  if [ "$a" = "${when}" ]; then\n${body}\n  fi\ndone\n` : "";
+  writeFileSync(join(bin, "git"), `#!/bin/sh\necho "$@" >> "${log}"\n${guard}exec "${realGit}" "$@"\n`);
+  chmodSync(join(bin, "git"), 0o755);
+  return { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, log, cleanup: () => rmSync(bin, { recursive: true, force: true }) };
+}
+// Runs backlog-readme.mjs in-process with the writer's test seam failing write `n`.
+function generateFailingAt(root, n) {
+  const code = `import { testSeams } from ${JSON.stringify(localOutputUrl)};
+testSeams.beforeWrite = (_path, i) => { if (i === ${n}) throw new Error("forced failure"); };
+process.argv = [process.argv[0], ${JSON.stringify(readmeScript)}, "--target", ${JSON.stringify(root)}];
+await import(${JSON.stringify(pathToFileURL(readmeScript).href)});`;
+  return spawnSync(process.execPath, ["--input-type=module", "-e", code], { encoding: "utf8" });
+}
+
+test("local generate writes four files under .generated/ and leaves README byte-identical", () => {
+  const c = localRepo();
+  try {
+    const readme = readFileSync(c.readme, "utf8");
+    const r = generate(c);
+    assert.equal(r.status, 0, r.stderr);
+    for (const n of GEN) assert.ok(existsSync(join(c.gen, n)), n);
+    assert.equal(readFileSync(c.readme, "utf8"), readme);
+    assert.equal(existsSync(join(c.root, "trellis", "backlog.json")), false, "no committed backlog.json");
+    assert.match(readFileSync(join(c.gen, "index.md"), "utf8"), /\[DEMO0001\]\(\.\.\/active\/DEMO0001\.md\)/);
+    assert.match(r.stdout, /Backlog OK: 1 active, 0 completed, 0 removed\. Next id: DEMO0002/);
+    assert.equal(JSON.parse(readFileSync(join(c.gen, "backlog.json"), "utf8")).nextId, "DEMO0002");
+  } finally { c.cleanup(); }
+});
+
+test("local check passes with no .generated/ folder and fails on a README marker line", () => {
+  const c = localRepo();
+  try {
+    assert.equal(existsSync(c.gen), false);
+    const ok = checkCmd(c);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stdout, /Backlog check OK/);
+    writeFileSync(c.readme, "# Backlog\n\n<!-- BEGIN GENERATED:MILESTONES -->\n<!-- END GENERATED:MILESTONES -->\n");
+    const bad = checkCmd(c);
+    assert.equal(bad.status, 1);
+    assert.match(bad.stderr, /trellis\/README\.md: holds the generated marker line <!-- BEGIN GENERATED:MILESTONES -->/);
+    assert.match(bad.stderr, /END GENERATED:MILESTONES/);
+  } finally { c.cleanup(); }
+});
+
+test("local check never runs git: it passes outside a work tree and with a bad .generated", { skip: process.platform === "win32" }, () => {
+  const plain = localRepo({ git: false, ignore: false });
+  try { assert.equal(checkCmd(plain).status, 0); } finally { plain.cleanup(); }
+  const c = localRepo({ ignore: false });
+  const shim = shimPath(c, null);
+  try {
+    symlinkSync(join(c.root, "nowhere"), c.gen);
+    const r = checkCmd(c, { env: shim.env });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(shim.log), false, "git was never invoked");
+    // The same shim does see git when generate runs, so the assertion can fail.
+    rmSync(c.gen);
+    assert.equal(generate(c, { env: shim.env }).status, 2);
+    assert.equal(existsSync(shim.log), true);
+  } finally { shim.cleanup(); c.cleanup(); }
+});
+
+test("committed-mode generate and check are unchanged by the local branch", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    const g = run(root, ["generate"]);
+    assert.equal(g.status, 0, g.stderr);
+    assert.match(g.stdout, /Next id: DEMO0001/);
+    assert.equal(existsSync(join(root, "trellis", ".generated")), false);
+    assert.match(readFileSync(join(root, "trellis", "README.md"), "utf8"), /BEGIN GENERATED:MILESTONES/);
+    assert.match(run(root, ["check"]).stdout, /Backlog check OK/);
+    writeFileSync(join(root, "trellis", "backlog.json"), "{}\n");
+    const stale = run(root, ["check"]);
+    assert.equal(stale.status, 1);
+    assert.match(stale.stderr, /trellis\/backlog\.json is stale/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("local generate refuses a leftover marker, an unignored output and a tracked output, writing nothing", () => {
+  const marker = localRepo();
+  try {
+    writeFileSync(marker.readme, "# Backlog\n<!-- BEGIN GENERATED:COMPLETED -->\n");
+    const before = snapshot(marker.root);
+    const r = generate(marker);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /holds the generated marker line/);
+    assert.deepEqual(snapshot(marker.root), before);
+  } finally { marker.cleanup(); }
+
+  const unignored = localRepo({ ignore: false });
+  try {
+    const before = snapshot(unignored.root);
+    const r = generate(unignored);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /not ignored by git[^]*trellis\/\.generated\//);
+    assert.deepEqual(snapshot(unignored.root), before);
+  } finally { unignored.cleanup(); }
+
+  const tracked = localRepo();
+  try {
+    mkdirSync(tracked.gen);
+    writeFileSync(join(tracked.gen, "index.md"), "# Backlog\n");
+    execFileSync("git", ["-C", tracked.root, "add", "-f", "trellis/.generated/index.md"]);
+    const before = snapshot(tracked.root);
+    const r = generate(tracked);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /index\.md is tracked/);
+    assert.deepEqual(snapshot(tracked.root), before);
+  } finally { tracked.cleanup(); }
+});
+
+for (const [mode, cfg] of [["scan", {}], ["ledger", { idAllocation: "ledger" }]]) {
+  ledgerTest(`local generate refuses a bad .generated or output path before any write (${mode})`, { skip: process.platform === "win32" }, () => {
+    const c = localRepo({ cfg });
+    try {
+      if (mode === "ledger") assert.equal(run(c.root, ["claim", "--seed"]).status, 0);
+      const tip = refTip(c.root);
+      const elsewhere = join(c.root, "elsewhere");
+      mkdirSync(elsewhere);
+      const cases = [
+        ["symlinked .generated", () => symlinkSync(elsewhere, c.gen), () => rmSync(c.gen)],
+        ["file at .generated", () => writeFileSync(c.gen, "x\n"), () => rmSync(c.gen)],
+        ["symlinked output", () => { mkdirSync(c.gen); symlinkSync(join(c.root, "nowhere"), join(c.gen, "backlog.json")); }, () => rmSync(c.gen, { recursive: true })],
+        ["directory output", () => { mkdirSync(c.gen); mkdirSync(join(c.gen, "completed.md")); }, () => rmSync(c.gen, { recursive: true })],
+      ];
+      for (const [name, setup, undo] of cases) {
+        setup();
+        const before = snapshot(c.root);
+        const r = generate(c);
+        assert.equal(r.status, 2, `${name}: ${r.stderr}`);
+        assert.deepEqual(snapshot(c.root), before, name);
+        assert.equal(refTip(c.root), tip);
+        undo();
+      }
+      assert.deepEqual(readdirSync(elsewhere), [], "nothing was written through a link");
+    } finally { c.cleanup(); }
+  });
+}
+
+test("local generate succeeds outside a git work tree", () => {
+  const c = localRepo({ git: false, ignore: false });
+  try {
+    const r = generate(c);
+    assert.equal(r.status, 0, r.stderr);
+    for (const n of GEN) assert.ok(existsSync(join(c.gen, n)), n);
+  } finally { c.cleanup(); }
+});
+
+ledgerTest("local ledger generate writes the preview with the ref present and null without it", () => {
+  const c = localRepo({ cfg: { idAllocation: "ledger" } });
+  try {
+    const nextId = () => JSON.parse(readFileSync(join(c.gen, "backlog.json"), "utf8")).nextId;
+    let r = generate(c);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(nextId(), null);
+    assert.match(r.stdout, /claim --seed/);
+    assert.equal(run(c.root, ["claim", "--seed"]).status, 0);
+    r = generate(c);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(nextId(), "DEMO0002", "the preview follows the ref, past the existing item");
+    assert.doesNotMatch(r.stdout, /Next id:/);
+  } finally { c.cleanup(); }
+});
+
+test("the local check prints errors in order for a malformed item and a stray marker", () => {
+  const c = localRepo();
+  try {
+    writeFileSync(join(c.root, "trellis", "active", "DEMO0001.md"), ITEM("DEMO0001").replace("milestone: Alpha", "milestone: Nope"));
+    writeFileSync(c.readme, "# Backlog\n<!-- END GENERATED:REMOVED -->\n");
+    const r = checkCmd(c);
+    assert.equal(r.status, 1);
+    const lines = r.stderr.trim().split("\n");
+    assert.equal(lines[0], "Backlog validation failed:");
+    assert.match(lines[1], /^  - active\/DEMO0001\.md: milestone must be one of Alpha$/);
+    assert.match(lines[2], /^  - trellis\/README\.md: holds the generated marker line <!-- END GENERATED:REMOVED -->/);
+    assert.equal(lines.length, 3);
+  } finally { c.cleanup(); }
+});
+
+test("a forced write failure in local generate leaves no partial set and no empty .generated/", { skip: process.platform === "win32" }, () => {
+  for (const n of [0, 2, 3]) {
+    const c = localRepo();
+    try {
+      const before = snapshot(c.root);
+      const r = generateFailingAt(c.root, n);
+      assert.equal(r.status, 1, r.stderr);
+      assert.match(r.stderr, /forced failure/);
+      assert.deepEqual(snapshot(c.root), before, `failure at write ${n}`);
+    } finally { c.cleanup(); }
+  }
+  // A folder that already holds older outputs gets them back.
+  const c = localRepo();
+  try {
+    assert.equal(generate(c).status, 0);
+    writeFileSync(join(c.root, "trellis", "active", "DEMO0002.md"), ITEM("DEMO0002"));
+    const before = snapshot(c.root);
+    const r = generateFailingAt(c.root, 3);
+    assert.equal(r.status, 1, r.stderr);
+    assert.deepEqual(snapshot(c.root), before);
+  } finally { c.cleanup(); }
+});
+
+ledgerTest("a forced git discovery error makes local generate refuse with files and the ledger tip unchanged", { skip: process.platform === "win32" }, () => {
+  const c = localRepo({ cfg: { idAllocation: "ledger" } });
+  const shim = shimPath(c, "--show-prefix", '    echo "fatal: detected dubious ownership in repository" >&2\n    exit 128');
+  try {
+    assert.equal(run(c.root, ["claim", "--seed"]).status, 0);
+    const tip = refTip(c.root);
+    const before = snapshot(c.root);
+    const r = generate(c, { env: shim.env });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /dubious ownership/);
+    assert.deepEqual(snapshot(c.root), before);
+    assert.equal(refTip(c.root), tip);
+  } finally { shim.cleanup(); c.cleanup(); }
+});
+
+test("local generate with GIT_LITERAL_PATHSPECS set still recognizes an ignored output", () => {
+  const c = localRepo();
+  try {
+    const r = generate(c, { env: { ...process.env, GIT_LITERAL_PATHSPECS: "1" } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(existsSync(join(c.gen, "backlog.json")));
+  } finally { c.cleanup(); }
+});
+
+test("a scan-mode generate in a worktree subdirectory runs the ignore and tracking checks despite an inherited ceiling", () => {
+  const c = localRepo({ git: false, ignore: false });
+  try {
+    // The target is a subdirectory of the repo; the parent repo is its inherited ceiling.
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), "trellis-ceiling-")));
+    execFileSync("git", ["-C", parent, "init", "-q", ...initRefFormat, "-b", "main"]);
+    const sub = join(parent, "sub");
+    renameSync(c.root, sub);
+    const env = { ...process.env, GIT_CEILING_DIRECTORIES: parent };
+    try {
+      const refused = run(sub, ["generate"], { env });
+      assert.equal(refused.status, 2, refused.stderr);
+      assert.match(refused.stderr, /not ignored by git/);
+      writeFileSync(join(sub, ".gitignore"), "trellis/.generated/\n");
+      const ok = run(sub, ["generate"], { env });
+      assert.equal(ok.status, 0, ok.stderr);
+      execFileSync("git", ["-C", parent, "add", "-f", "sub/trellis/.generated/index.md"]);
+      const tracked = run(sub, ["generate"], { env });
+      assert.equal(tracked.status, 2, tracked.stderr);
+      assert.match(tracked.stderr, /is tracked/);
+    } finally { rmSync(parent, { recursive: true, force: true }); }
+  } finally { rmSync(c.root, { recursive: true, force: true }); }
+});
