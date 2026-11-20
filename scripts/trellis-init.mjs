@@ -15,7 +15,7 @@ import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
-import { applyImport, assertNotLedgerMode, ImportRefused } from "../src/import.mjs";
+import { applyImport, assertNotLedgerMode, assertNoLeftoverMarkers, ImportRefused } from "../src/import.mjs";
 import { loadConfig } from "../src/backlog.mjs";
 import { LedgerError, refuseSymlinkedArtifacts, artifactPaths } from "../src/ledger.mjs";
 import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
@@ -274,8 +274,11 @@ if ("retireSource" in opts) {
 // are refused before anything is scaffolded, by reading the existing config first.
 if (opts.force || opts.import) {
   try {
-    if (opts.import) assertNotLedgerMode(targetRoot, "init --import");
-    else assertNotLedgerMode(targetRoot, "init --force", "it would overwrite the config that holds the ledger settings");
+    if (opts.import) {
+      assertNotLedgerMode(targetRoot, "init --import");
+      // A local-mode target with a leftover marker is refused before init scaffolds anything.
+      assertNoLeftoverMarkers(targetRoot, "init --import");
+    } else assertNotLedgerMode(targetRoot, "init --force", "it would overwrite the config that holds the ledger settings");
   } catch (e) {
     if (!(e instanceof ImportRefused)) throw e;
     console.error(`error: ${e.message}`);
@@ -318,7 +321,14 @@ if (opts.import) {
     console.log("Re-run without --dry-run to scaffold and import, or run `npx @taprootio/trellis import --dry-run` on the initialized repo to preview the import plan.");
     process.exit(0);
   }
-  const { summary: imp } = applyImport(targetRoot, importSource, mapping, { dryRun: false, preserveIds: opts.preserveIds, idFloor: opts.idFloor });
+  let imp;
+  try {
+    ({ summary: imp } = applyImport(targetRoot, importSource, mapping, { dryRun: false, preserveIds: opts.preserveIds, idFloor: opts.idFloor }));
+  } catch (e) {
+    if (!(e instanceof ImportRefused)) throw e;
+    console.error(`error: ${e.message}`);
+    process.exit(2);
+  }
   reportImport(targetRoot, imp);
   process.exit(imp.errors.length ? 1 : 0);
 }

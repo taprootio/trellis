@@ -39,8 +39,8 @@
 // to the item's source id (plus an optional `. : - – —` and whitespace) is dropped from
 // the stored title (TRL0029); it is set on the numeric-prefix profiles, off elsewhere.
 
-import { readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
-import { join, relative, dirname, isAbsolute } from "node:path";
+import { readFileSync, readdirSync, writeFileSync, existsSync, rmSync, statSync, openSync, writeSync, closeSync } from "node:fs";
+import { join, relative, dirname, isAbsolute, sep } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   loadConfig,
@@ -52,8 +52,13 @@ import {
   parseFrontMatter,
   paths,
   composeFile,
+  artifactSet,
+  isLocalMode,
+  markerLineErrors,
+  GENERATED_DIR,
   CONFIG_DIR,
 } from "./backlog.mjs";
+import { OutputRefused, makeDirs, outputPreflight, previewNextId, removeCreatedDirs, writeArtifactFiles } from "./local-output.mjs";
 
 // A typed refusal for a ledger-mode target (TRL0037). It is thrown, not put in
 // `summary.errors`, so each caller can map it to exit 2 / `invalid_request`.
@@ -89,6 +94,44 @@ export function assertNotLedgerMode(targetRoot, what, why = LEDGER_IMPORT_WHY) {
   if (cfg && cfg.idAllocation === "ledger") {
     throw new ImportRefused(`${what} is not supported when idAllocation is "ledger": ${why}. Nothing was written.`);
   }
+}
+
+// Reads the target's config raw and parses it. Null when it is missing or not JSON,
+// since the later steps report those their own way; an unreadable one is refused.
+function readRawConfig(targetRoot, what) {
+  let text;
+  try {
+    text = readFileSync(join(targetRoot, CONFIG_DIR, "backlog.config.json"), "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw new ImportRefused(`${what} cannot check ${CONFIG_DIR}/backlog.config.json (${e.code || e.message}). Nothing was written.`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+// Sibling of assertNotLedgerMode for `init --force`: it would replace a local-mode
+// config with a committed-mode one and overwrite the author-owned README and indexes (TRL0038).
+export function assertNotLocalMode(targetRoot, what, why) {
+  const cfg = readRawConfig(targetRoot, what);
+  if (cfg && cfg.generatedArtifacts === "local") {
+    throw new ImportRefused(`${what} is not supported when generatedArtifacts is "local": ${why}. Nothing was written.`);
+  }
+}
+
+// Refuses a local-mode target that still holds a generated marker line in an
+// author-owned file, so an import or scaffold cannot report success while `check`
+// fails. Reads files only. A target without a usable local config passes.
+export function assertNoLeftoverMarkers(targetRoot, what) {
+  const raw = readRawConfig(targetRoot, what);
+  if (!raw || raw.generatedArtifacts !== "local") return;
+  const { cfg, errors } = loadConfig(targetRoot);
+  if (errors.length) return;
+  const markers = markerLineErrors(targetRoot, cfg);
+  if (markers.length) throw new ImportRefused(`${what} refused: ${markers.join("; ")}. Nothing was written.`);
 }
 
 // Target subdir for each status; statuses are always processed in this fixed order
@@ -264,7 +307,12 @@ function buildBody(raw, newId, title) {
 // Matched by PATH, not basename, so a real task that merely happens to be named
 // `active/index.md` still imports.
 const GENERATED_ARTIFACTS = new Set(["README.md", "completed/index.md", "removed/index.md"]);
-const isGeneratedArtifact = (rel) => GENERATED_ARTIFACTS.has(rel.split(/[/\\]/).join("/"));
+// A `.generated/` folder (local mode, TRL0038) holds only generated tables, so nothing
+// under one is an item either.
+const isGeneratedArtifact = (rel) => {
+  const parts = rel.split(/[/\\]/);
+  return GENERATED_ARTIFACTS.has(parts.join("/")) || parts.includes(GENERATED_DIR);
+};
 
 function listFiles(dir, re) {
   if (!existsSync(dir)) return null; // null = dir absent (a warning), [] = present-but-empty
@@ -343,7 +391,9 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   // The target must already be a Trellis repo — import emits items + regenerates,
   // it does not scaffold (that's `trellis init`, or the `init --import` on-ramp
   // that scaffolds first, then calls this).
-  if (!existsSync(p.readme) || !existsSync(p.completedIndex) || !existsSync(p.removedIndex)) {
+  // In local mode the index files are author-owned and optional, so a loadable config
+  // and roster (checked through readBacklog below) is all it needs.
+  if (!isLocalMode(cfg) && (!existsSync(p.readme) || !existsSync(p.completedIndex) || !existsSync(p.removedIndex))) {
     return { ...empty(), cfg, root, errors: ["target is not an initialized Trellis backlog (missing generated indexes); run `npx @taprootio/trellis init` first"] };
   }
   const data = readBacklog(targetRoot, cfg);
@@ -626,9 +676,29 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   return { cfg, root, items, idMap, counts, provenance, warnings, errors, preserved, reassigned, idFloor };
 }
 
-// The four generated-artifact paths, repo-relative under the backlog root.
-function generatedRels(root) {
-  return [`${root}/README.md`, `${root}/completed/index.md`, `${root}/removed/index.md`, `${root}/backlog.json`];
+// The generated-artifact paths for the config's mode, repo-relative with `/`.
+const generatedRels = (targetRoot, cfg) => artifactSet(targetRoot, cfg).generated.map((e) => e.rel.split(sep).join("/"));
+
+// Test seam: runs after an item file is created and recorded, before its contents are written.
+export const testSeams = { afterItemCreate: null };
+
+// Local mode only: refuse before planning when a marker is left in an author-owned
+// file (a dry run checks just that), or, for a real run, when an output path is
+// unignored, tracked or not a regular file. Becomes ImportRefused (exit 2).
+function refuseLocalOutputs(targetRoot, dryRun) {
+  const { cfg, errors } = loadConfig(targetRoot);
+  if (errors.length || !isLocalMode(cfg)) return;
+  try {
+    if (dryRun) {
+      const markers = markerLineErrors(targetRoot, cfg);
+      if (markers.length) throw new OutputRefused(markers.join("\n"));
+    } else {
+      outputPreflight(targetRoot, cfg);
+    }
+  } catch (e) {
+    if (e instanceof OutputRefused) throw new ImportRefused(`import refused: ${e.message}\nNothing was written.`);
+    throw e;
+  }
 }
 
 // ---------------------------------------------------------------- apply
@@ -638,6 +708,7 @@ function generatedRels(root) {
 // `dryRun` returns the plan without writing. The source tree is never written.
 export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, gitDate, preserveIds = false, idFloor } = {}) {
   assertNotLedgerMode(targetRoot, "import");
+  refuseLocalOutputs(targetRoot, dryRun);
   const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, provenance: null, root: null, preserved: 0, reassigned: [], idFloor: null, warnings: [], errors: [] };
   const plan = planImport(targetRoot, sourceRoot, mapping, { gitDate, preserveIds, idFloor });
   summary.idMap = plan.idMap;
@@ -653,25 +724,34 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
   if (dryRun) {
     summary.imported = plan.items.map((i) => i.newId);
     summary.created = plan.items.map((i) => i.targetRel);
-    summary.generated = generatedRels(plan.root);
+    summary.generated = generatedRels(targetRoot, plan.cfg);
     return { summary };
   }
 
   const p = paths(targetRoot, plan.cfg);
-  const artifacts = [p.readme, p.completedIndex, p.removedIndex, p.backlogJson];
+  const local = isLocalMode(plan.cfg);
+  const artifacts = artifactSet(targetRoot, plan.cfg).generated.map((e) => e.path);
   const priorArtifacts = artifacts.map((path) => ({ path, before: existsSync(path) ? readFileSync(path, "utf8") : null }));
   // Persisting nextIdFloor mutates the config; snapshot it for rollback.
   const priorConfig = plan.idFloor != null ? readFileSync(p.config, "utf8") : null;
   const written = [];
+  const createdDirs = []; // folders this run made, removed again (when empty) on failure
   try {
     for (const it of plan.items) {
       const abs = join(targetRoot, it.targetRel);
       // A preserved id could match an existing item; a pre-existing target file means a
       // corrupt plan (preservation checks the target's ids first), so refuse to clobber.
       if (existsSync(abs)) throw new Error(`refusing to overwrite existing ${it.targetRel}`);
-      mkdirSync(dirname(abs), { recursive: true });
-      writeFileSync(abs, composeFile(it.fm, it.body));
+      makeDirs(dirname(abs), createdDirs);
+      // Create (`wx`), record, then write: a failure between the two still rolls back the file.
+      const fd = openSync(abs, "wx");
       written.push(abs);
+      try {
+        if (testSeams.afterItemCreate) testSeams.afterItemCreate(abs);
+        writeSync(fd, composeFile(it.fm, it.body));
+      } finally {
+        closeSync(fd);
+      }
     }
     // Record the new-id floor before regenerating so backlog.json's nextId (and every
     // future organic id) begins above the imported band; plan.cfg already carries it.
@@ -682,9 +762,11 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
     }
     const data = readBacklog(targetRoot, plan.cfg);
     if (data.errors.length) throw new Error(`imported backlog is invalid: ${data.errors.join("; ")}`);
-    const { files, errors } = generateArtifacts(targetRoot, plan.cfg, data);
+    // Local mode runs in scan mode only, so the override is `undefined` (the scan value).
+    const { files, errors } = generateArtifacts(targetRoot, plan.cfg, data, { nextIdOverride: local ? previewNextId(targetRoot, plan.cfg) : undefined });
     if (errors.length) throw new Error(`generate failed: ${errors.join("; ")}`);
-    for (const f of files) writeFileSync(f.path, f.content);
+    if (local) writeArtifactFiles(files);
+    else for (const f of files) writeFileSync(f.path, f.content);
 
     summary.imported = plan.items.map((i) => i.newId);
     summary.created = plan.items.map((i) => i.targetRel);
@@ -696,6 +778,7 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
       try { a.before === null ? rmSync(a.path, { force: true }) : writeFileSync(a.path, a.before); } catch { /* best-effort */ }
     }
     if (priorConfig != null) { try { writeFileSync(p.config, priorConfig); } catch { /* best-effort */ } }
+    removeCreatedDirs(createdDirs);
     summary.errors.push(e.message);
     return { summary };
   }
