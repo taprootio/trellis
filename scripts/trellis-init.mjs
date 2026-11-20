@@ -16,6 +16,8 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
 import { applyImport, assertNotLedgerMode, ImportRefused } from "../src/import.mjs";
+import { loadConfig } from "../src/backlog.mjs";
+import { LedgerError, refuseSymlinkedArtifacts, artifactPaths } from "../src/ledger.mjs";
 import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
 
 const HELP = `trellis init — scaffold the Trellis backlog into a repo
@@ -278,6 +280,21 @@ if (opts.force || opts.import) {
     if (!(e instanceof ImportRefused)) throw e;
     console.error(`error: ${e.message}`);
     process.exit(2);
+  }
+}
+
+// Scaffolding rewrites the generated files, so an existing ledger-mode config with a
+// symlinked one is refused first, with nothing written.
+{
+  const { cfg, errors } = loadConfig(targetRoot);
+  if (!errors.length && cfg.idAllocation === "ledger") {
+    try {
+      refuseSymlinkedArtifacts(artifactPaths(targetRoot, cfg));
+    } catch (e) {
+      if (!(e instanceof LedgerError)) throw e;
+      console.error(`error: ${e.message}`);
+      process.exit(2);
+    }
   }
 }
 

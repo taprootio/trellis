@@ -16,10 +16,10 @@
 
 import {
   readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, openSync, closeSync, renameSync, copyFileSync,
-  lstatSync, statSync, readlinkSync, realpathSync, fchmodSync, unlinkSync,
+  statSync, fchmodSync, unlinkSync,
 } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { join, relative, dirname, basename, isAbsolute, sep } from "node:path";
+import { join, relative, dirname, basename, isAbsolute } from "node:path";
 import {
   loadConfig,
   readBacklog,
@@ -36,7 +36,7 @@ import {
 import { applyImport, ImportRefused } from "./import.mjs";
 import { loadProfile } from "./profiles.mjs";
 import { deriveTaskHistory, deriveAllHistory, HistoryError } from "./history.mjs";
-import { LedgerError, claim, preview, checkLayout, refuseGitDirTargets } from "./ledger.mjs";
+import { LedgerError, claim, preview, checkLayout, refuseSymlinkedArtifacts, artifactPaths } from "./ledger.mjs";
 
 // A domain error the transport maps to an MCP tool error (isError result) rather
 // than a protocol failure. `code` is a short slug for programmatic handling.
@@ -245,32 +245,6 @@ function writeArtifacts(repoRoot, cfg, data, hooks = {}) {
   }
 }
 
-// Follows a symlinked artifact to where its bytes live, so the link survives the
-// replace. Resolution is native (the OS follows each link before applying `..`),
-// because a lexical path.resolve would collapse `..` across a symlinked folder.
-// A dangling link resolves to its not-yet-existing target inside a real folder.
-const native = (p) => realpathSync.native(p);
-function resolveDestination(path) {
-  let cur = path;
-  for (let i = 0; i < 40; i++) {
-    let st;
-    try { st = lstatSync(cur); } catch (e) {
-      if (e.code === "ENOENT") return join(native(dirname(cur)), basename(cur));
-      throw e;
-    }
-    if (!st.isSymbolicLink()) return join(native(dirname(cur)), basename(cur));
-    try { return native(cur); } catch (e) { if (e.code !== "ENOENT") throw e; }
-    const target = readlinkSync(cur);
-    // A trailing separator names a directory, so there is no file to write through to.
-    if (sep === "/" ? target.endsWith("/") : /[\\/]$/.test(target)) {
-      throw new TrellisError(`${path} is a symlink to a directory path (${target}); refusing to write through it`, "generate_failed");
-    }
-    const raw = isAbsolute(target) ? target : `${native(dirname(cur))}/${target}`;
-    cur = join(native(dirname(raw)), basename(raw));
-  }
-  throw new TrellisError(`too many symlinks resolving ${path}`, "generate_failed");
-}
-
 // Creates a staging or backup file that did not exist, so a path an attacker or an
 // earlier run left behind (even a symlink) is never written through.
 function reserveStage(dest, ext, mode) {
@@ -309,10 +283,10 @@ export function stageFile(dest, ext, content, mode) {
 // warning: the item and its generated entries are already consistent.
 // Test seams: `hooks.afterArtifactRename(path, n)` and `hooks.removeBackup(path)`.
 function writeArtifactsStaged(repoRoot, files, next, hooks) {
-  ledgerCall(() => refuseGitDirTargets(repoRoot, files.map((f) => f.path)));
+  ledgerCall(() => refuseSymlinkedArtifacts(files.map((f) => f.path)));
   const plan = [];
   for (const f of files) {
-    const dest = resolveDestination(f.path);
+    const dest = f.path;
     const exists = existsSync(dest);
     if ((exists ? readFileSync(dest, "utf8") : null) !== f.content) plan.push({ f, dest, exists, temp: null, backup: null });
   }
@@ -478,14 +452,8 @@ export function createTask(repoRoot, args = {}, hooks = {}) {
     if (!cfg.milestones.includes(milestone)) throw new TrellisError(`milestone must be one of ${cfg.milestones.join(", ")}`, "invalid_request");
     if (!cfg.priorities.includes(priority)) throw new TrellisError(`priority must be one of ${cfg.priorities.join(", ")}`, "invalid_request");
   }
-  // A destination the write would refuse (a link to a directory path) must fail
-  // before the claim too.
-  if (ledgerMode) {
-    const g = paths(repoRoot, cfg);
-    const targets = [g.readme, g.completedIndex, g.removedIndex, g.backlogJson];
-    for (const f of targets) resolveDestination(f);
-    ledgerCall(() => refuseGitDirTargets(repoRoot, targets));
-  }
+  // A symlinked artifact is refused by the write, so it must fail before the claim too.
+  if (ledgerMode) ledgerCall(() => refuseSymlinkedArtifacts(artifactPaths(repoRoot, cfg)));
   // Ledger mode claims the id, and never falls back to the scan: a fresh clone
   // would hand out an id another worktree holds. The claim is never undone.
   const id = ledgerMode ? ledgerCall(() => claim(repoRoot, cfg, { title })).id : nextId(data.ids, cfg);
@@ -541,6 +509,8 @@ export function moveTask(repoRoot, args = {}) {
 
   const { cfg } = loadClean(repoRoot);
   const id = assertId(args.id, cfg); // validate the id format before building any path
+  // Ledger mode refuses symlinked artifacts before the move touches any file.
+  if (isLedgerMode(cfg)) ledgerCall(() => refuseSymlinkedArtifacts(artifactPaths(repoRoot, cfg)));
   const p = paths(repoRoot, cfg);
   const src = join(p.active, `${id}.md`);
   if (!existsSync(src)) {

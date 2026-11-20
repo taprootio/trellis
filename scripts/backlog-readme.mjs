@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { relative } from "node:path";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
-import { LedgerError, preview, refuseGitDirTargets } from "../src/ledger.mjs";
+import { LedgerError, preview, refuseSymlinkedArtifacts } from "../src/ledger.mjs";
 import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 
 const HELP = `trellis generate/check — validate and regenerate Trellis artifacts
@@ -82,7 +82,7 @@ if (isCheck) {
 } else {
   if (cfg.idAllocation === "ledger") {
     try {
-      refuseGitDirTargets(repoRoot, files.map((f) => f.path));
+      refuseSymlinkedArtifacts(files.map((f) => f.path));
     } catch (e) {
       if (!(e instanceof LedgerError)) throw e;
       console.error(e.message);

@@ -542,7 +542,7 @@ test("import tool surfaces a refused import as an error and writes nothing", () 
 const REF = "refs/trellis/ids";
 function ledgerRepo({ seeded = true, cfg: over = {} } = {}) {
   const root = realpathSync(freshRepo());
-  execFileSync("git", ["-C", root, "init", "-q", "-b", "main"]);
+  execFileSync("git", ["-C", root, "init", "-q", "--ref-format=files", "-b", "main"]);
   const cfgPath = join(root, "trellis", "backlog.config.json");
   const cfg = { ...JSON.parse(readFileSync(cfgPath, "utf8")), idAllocation: "ledger", ...over };
   writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
@@ -645,46 +645,43 @@ test("a backup cleanup failure after the commit point is a warning, not a failur
   } finally { c.cleanup(); }
 });
 
-test("a symlinked artifact keeps its link, and a link with no target yet gets one that rollback removes", () => {
-  const c = ledgerRepo();
-  try {
-    const real = join(c.root, "real");
-    mkdirSync(real);
-    const link = join(c.root, "trellis", "backlog.json");
-    renameSync(link, join(real, "backlog.json"));
-    symlinkSync(join(real, "backlog.json"), link);
-    createTask(c.root, VALID);
-    assert.ok(lstatSync(link).isSymbolicLink(), "the link survives");
-    assert.match(readFileSync(join(real, "backlog.json"), "utf8"), /DEMO0001/);
-    assertCheckClean(c.root);
+for (const dangling of [false, true]) {
+  test(`ledger mode refuses a symlinked backlog.json (${dangling ? "dangling" : "live"}) in create_task, move_task and regenerate, changing nothing`, { skip: process.platform === "win32" }, () => {
+    const c = ledgerRepo();
+    try {
+      createTask(c.root, VALID);
+      const link = join(c.root, "trellis", "backlog.json");
+      const real = join(c.root, "real.json");
+      if (!dangling) renameSync(link, real); else rmSync(link);
+      symlinkSync(real, link);
+      const before = refTip(c.root);
+      const bytes = artifactBytes(c.root);
+      throwsTrellis(() => createTask(c.root, VALID), "invalid_request");
+      throwsTrellis(() => moveTask(c.root, { id: "DEMO0001", to: "completed", date: "2026-06-26" }), "invalid_request");
+      throwsTrellis(() => regenerateOp(c.root), "invalid_request");
+      assert.equal(refTip(c.root), before, "no id was claimed");
+      assert.ok(lstatSync(link).isSymbolicLink(), "the link is untouched");
+      assert.equal(existsSync(join(c.root, "trellis", "active", "DEMO0001.md")), true, "the item did not move");
+      assert.deepEqual(artifactBytes(c.root), bytes);
+      assert.deepEqual(leftovers(c.root), []);
+    } finally { c.cleanup(); }
+  });
+}
 
-    // A dangling link: the target is created, and a failed write removes it again.
-    rmSync(join(real, "backlog.json"));
-    assert.throws(() => createTask(c.root, VALID, { afterArtifactRename: (p) => { if (p.endsWith("backlog.json")) throw new Error("boom"); } }), /boom/);
-    assert.ok(lstatSync(link).isSymbolicLink());
-    assert.equal(existsSync(join(real, "backlog.json")), false);
-    createTask(c.root, VALID);
-    assert.equal(existsSync(join(real, "backlog.json")), true, "a new target is created at the link's destination");
-  } finally { c.cleanup(); }
+test("ledger mode refuses a symlinked README.md and completed index the same way", { skip: process.platform === "win32" }, () => {
+  for (const rel of ["README.md", join("completed", "index.md")]) {
+    const c = ledgerRepo();
+    try {
+      const link = join(c.root, "trellis", rel);
+      const real = join(c.root, "real.md");
+      renameSync(link, real);
+      symlinkSync(real, link);
+      const before = refTip(c.root);
+      throwsTrellis(() => createTask(c.root, VALID), "invalid_request");
+      assert.equal(refTip(c.root), before);
+    } finally { c.cleanup(); }
+  }
 });
-
-test("a symlink target with a symlinked folder and `..` is resolved natively", () => {
-  const c = ledgerRepo();
-  try {
-    // trellis/linkdir -> real/deep, so `linkdir/../shared.json` means real/shared.json.
-    const deep = join(c.root, "real", "deep");
-    mkdirSync(deep, { recursive: true });
-    symlinkSync(deep, join(c.root, "trellis", "linkdir"));
-    const link = join(c.root, "trellis", "backlog.json");
-    rmSync(link);
-    symlinkSync("linkdir/../shared.json", link);
-    createTask(c.root, VALID);
-    assert.ok(lstatSync(link).isSymbolicLink());
-    assert.match(readFileSync(join(c.root, "real", "shared.json"), "utf8"), /DEMO0001/);
-    assert.equal(existsSync(join(c.root, "trellis", "shared.json")), false, "not resolved lexically");
-  } finally { c.cleanup(); }
-});
-
 test("staging never writes through a symlink planted at a staging name", () => {
   const c = ledgerRepo();
   try {
@@ -886,20 +883,6 @@ test("import in ledger mode throws invalid_request, and the registered tool retu
 
 // ------------------------------------------------- external review round 2
 
-test("a dangling artifact symlink whose target ends in a separator is refused before any write", { skip: process.platform === "win32" }, () => {
-  const c = ledgerRepo();
-  try {
-    const link = join(c.root, "trellis", "backlog.json");
-    rmSync(link);
-    symlinkSync("newdir/", link);
-    const before = refTip(c.root);
-    throwsTrellis(() => createTask(c.root, VALID), "generate_failed");
-    assert.equal(refTip(c.root), before);
-    assert.equal(existsSync(join(c.root, "trellis", "newdir")), false);
-    assert.deepEqual(leftovers(c.root), []);
-  } finally { c.cleanup(); }
-});
-
 test("stageFile removes its reserved file when the write fails", () => {
   const c = ledgerRepo();
   try {
@@ -909,14 +892,3 @@ test("stageFile removes its reserved file when the write fails", () => {
   } finally { c.cleanup(); }
 });
 
-test("create_task refuses a generated artifact that links into the git dir, before claiming", { skip: process.platform === "win32" }, () => {
-  const c = ledgerRepo();
-  try {
-    const before = refTip(c.root);
-    const link = join(c.root, "trellis", "backlog.json");
-    rmSync(link, { force: true });
-    symlinkSync(join(c.root, ".git", "refs", "trellis", "ids"), link);
-    throwsTrellis(() => createTask(c.root, VALID), "invalid_request");
-    assert.equal(refTip(c.root), before);
-  } finally { c.cleanup(); }
-});

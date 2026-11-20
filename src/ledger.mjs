@@ -9,10 +9,10 @@
 // Like src/history.mjs, this is kept out of the core (src/backlog.mjs) so that
 // `check` never depends on git or on local state (SPEC §8.3).
 
-import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, sep } from "node:path";
+import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { join, sep } from "node:path";
 import { spawnSync } from "node:child_process";
-import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, PLAIN_PREFIX_RE, parseFrontMatter } from "./backlog.mjs";
+import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, PLAIN_PREFIX_RE, parseFrontMatter, paths } from "./backlog.mjs";
 
 // A typed failure the CLI maps to an exit code and the MCP adapter maps to a
 // TrellisError. Exit 2 is "refused, nothing written"; exit 1 is a real failure
@@ -260,9 +260,15 @@ export function readLedger(repoRoot, cfg) {
   const size = runGit(["cat-file", "-s", m[1]], { cwd: repoRoot });
   if (size.status !== 0) return { unusable: `${LEDGER_FILE} cannot be read` };
   if (Number(size.stdout) >= MAX_LEDGER_BYTES) return { unusable: `${LEDGER_FILE} is too large to read` };
-  const blob = runGit(["cat-file", "blob", m[1]], { cwd: repoRoot });
+  const blob = runGit(["cat-file", "blob", m[1]], { cwd: repoRoot, raw: true });
   if (blob.status !== 0) return { unusable: `${LEDGER_FILE} cannot be read` };
-  const parsed = parseClaims(blob.stdout, cfg);
+  let text;
+  try {
+    text = strictUtf8.decode(blob.stdout);
+  } catch {
+    return { unusable: `${LEDGER_FILE} is not valid UTF-8` };
+  }
+  const parsed = parseClaims(text, cfg);
   if (parsed.reason) return { unusable: parsed.reason };
   return { tip, rows: parsed.rows, text: parsed.text };
 }
@@ -292,10 +298,35 @@ function decodeGit(buf, what) {
 const HEADS = "refs/heads/";
 const stripHeads = (ref) => (ref.startsWith(HEADS) ? ref.slice(HEADS.length) : "-");
 
+// `git worktree list` silently drops a registration it cannot read, which could hide
+// a reserved id. So the registry and each gitdir file must be readable first.
+function checkWorktreeRegistry(repoRoot) {
+  const r = runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: repoRoot });
+  if (r.status !== 0) return;
+  const dir = join(r.stdout.replace(/\n$/, ""), "worktrees");
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch (e) {
+    if (e.code === "ENOENT" || e.code === "ENOTDIR") return;
+    throw refuse(`cannot read ${dir}: ${e.message}; the id ledger cannot list every worktree`, "unsupported_layout");
+  }
+  for (const name of names) {
+    const file = join(dir, name, "gitdir");
+    try {
+      readFileSync(file);
+    } catch (e) {
+      if (e.code === "ENOENT" || e.code === "ENOTDIR") continue;
+      throw refuse(`cannot read ${file}: ${e.message}; the id ledger cannot list every worktree`, "unsupported_layout");
+    }
+  }
+}
+
 // Every worktree of the clone that can be read. Prunable and missing ones are
 // skipped so a stale lane cannot block a claim; one that cannot be inspected
 // (permissions) refuses, since dropping it could hide a reserved id.
 function listWorktrees(repoRoot) {
+  checkWorktreeRegistry(repoRoot);
   const out = git(repoRoot, ["worktree", "list", "--porcelain", "-z"], { raw: true }).stdout;
   const list = [];
   let cur = null;
@@ -318,16 +349,16 @@ function listWorktrees(repoRoot) {
   const kept = [];
   for (const w of list) {
     if (w.bare) continue;
-    // Git also marks a worktree prunable when it cannot reach it, so a prunable one
-    // is skipped only once stat confirms it is gone.
-    let present = true;
+    // Git also marks a worktree prunable when it cannot reach it, so a listed path
+    // is skipped only when lstat says it is gone; a prunable one that still exists
+    // is kept, and the later checks refuse it if it cannot be read.
     try {
-      statSync(w.path);
+      lstatSync(w.path);
     } catch (e) {
-      if (e.code !== "ENOENT" && e.code !== "ENOTDIR") throw refuse(`cannot inspect the worktree ${w.path}: ${e.message}`, "unsupported_layout");
-      present = false;
+      if (e.code === "ENOENT" || e.code === "ENOTDIR") continue;
+      throw refuse(`cannot inspect the worktree ${w.path}: ${e.message}`, "unsupported_layout");
     }
-    if (present && !w.prunable) kept.push(w);
+    kept.push(w);
   }
   return kept;
 }
@@ -356,7 +387,8 @@ function branchOf(repoRoot) {
   const r = runGit(["symbolic-ref", "-q", "HEAD"], { cwd: repoRoot, raw: true });
   if (r.status !== 0) return "-";
   const name = stripHeads(decodeGit(r.stdout, "the branch name").replace(/\n$/, ""));
-  return name && !unsafeText(name) ? name : "-";
+  if (unsafeText(name)) throw refuse("the current branch name has a control or line-separator character; the id ledger cannot record it", "invalid_request");
+  return name || "-";
 }
 
 // ------------------------------------------------------------------ scan
@@ -520,41 +552,28 @@ function computeNext(cfg, ledgerRows, clone) {
   return cfg.idPrefix + String(n).padStart(cfg.idWidth, "0");
 }
 
-// Where a write to `path` would land: symlinks are followed, even dangling ones.
-function landingPath(path) {
-  let cur = path;
-  for (let i = 0; i < 40; i++) {
+// Ledger mode writes generated artifacts only as regular files. A symlink there,
+// even a dangling one, could carry a write outside the checkout (into the ledger
+// ref, for one), so every ledger-mode writer refuses before it claims or writes.
+export function refuseSymlinkedArtifacts(artifactPaths) {
+  for (const path of artifactPaths) {
     let st;
     try {
-      st = lstatSync(cur);
+      st = lstatSync(path);
     } catch (e) {
-      if (e.code !== "ENOENT") throw e;
-      return join(realpathSync.native(dirname(cur)), basename(cur));
+      if (e.code === "ENOENT" || e.code === "ENOTDIR") continue;
+      throw refuse(`cannot inspect ${path}: ${e.message}`, "unsupported_layout");
     }
-    if (!st.isSymbolicLink()) return join(realpathSync.native(dirname(cur)), basename(cur));
-    try { return realpathSync.native(cur); } catch (e) { if (e.code !== "ENOENT") throw e; }
-    const target = readlinkSync(cur);
-    const raw = isAbsolute(target) ? target : join(realpathSync.native(dirname(cur)), target);
-    cur = join(realpathSync.native(dirname(raw)), basename(raw));
+    if (st.isSymbolicLink()) {
+      throw refuse(`${path} is a symlink; ledger mode does not write through symlinked generated files. Replace it with a regular file`, "invalid_request");
+    }
   }
-  throw refuse(`too many symlinks resolving ${path}`, "unsupported_layout");
 }
 
-// Refuses a generated artifact whose write would land inside the checkout's git dir
-// or the common git dir, where a link could overwrite the ledger ref.
-export function refuseGitDirTargets(repoRoot, paths) {
-  const dirs = [];
-  for (const flag of ["--absolute-git-dir", "--git-common-dir"]) {
-    const r = runGit(["rev-parse", "--path-format=absolute", flag], { cwd: repoRoot });
-    if (r.status !== 0) return; // not a git checkout, so there is no ledger to overwrite
-    dirs.push(realpathSync.native(r.stdout.replace(/\n$/, "")));
-  }
-  for (const path of paths) {
-    const dest = landingPath(path);
-    if (dirs.some((d) => dest === d || dest.startsWith(d + sep))) {
-      throw refuse(`${path} resolves into the git directory (${dest}); refusing to write generated files there`, "unsupported_layout");
-    }
-  }
+// The four generated artifacts of a config, per `paths()`.
+export function artifactPaths(repoRoot, cfg) {
+  const p = paths(repoRoot, cfg);
+  return [p.readme, p.completedIndex, p.removedIndex, p.backlogJson];
 }
 
 // Throws the layout refusals without allocating, so a caller can fail before it
@@ -693,7 +712,7 @@ export function seed(repoRoot, cfg, { through: through_ } = {}) {
   const date = today();
   const rows = [...found.keys()].sort().map((id) => {
     const wt = found.get(id);
-    return { id, date, kind: "seed", branch: wt.branch, title: seedTitle(wt.path, cfg, id) };
+    return { id, date, kind: "seed", branch: unsafeText(wt.branch) ? "-" : wt.branch, title: seedTitle(wt.path, cfg, id) };
   });
   if (through_ != null) rows.push({ id: through_, date, kind: "through", branch: "-", title: "-" });
 

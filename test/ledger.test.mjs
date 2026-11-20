@@ -12,7 +12,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync, spawn } from "node:child_process";
 import {
-  LedgerError, claim, through, seed, list, preview, readLedger, scanIds, ledgerIdMatcher, gitVersionSupported,
+  LedgerError, claim, through, seed, list, preview, readLedger, scanIds, ledgerIdMatcher, gitVersionSupported, refuseSymlinkedArtifacts,
 } from "../src/ledger.mjs";
 
 const LEDGER_URL = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "ledger.mjs")).href;
@@ -30,7 +30,7 @@ function makeClone(cfgOverrides = {}) {
   const dir = tmp("ledger");
   const root = join(dir, "main");
   mkdirSync(root);
-  git(root, "init", "-q", "-b", "main");
+  git(root, "init", "-q", "--ref-format=files", "-b", "main");
   git(root, "config", "user.name", "Tester");
   git(root, "config", "user.email", "tester@example.com");
   writeFileSync(join(root, "README.md"), "x\n");
@@ -810,7 +810,7 @@ test("a served root whose path ends in a space is not refused", () => {
   try {
     const root = join(dir, "spaced ");
     mkdirSync(root);
-    git(root, "init", "-q", "-b", "main");
+    git(root, "init", "-q", "--ref-format=files", "-b", "main");
     git(root, "config", "user.name", "Tester");
     git(root, "config", "user.email", "tester@example.com");
     writeFileSync(join(root, "README.md"), "x\n");
@@ -934,7 +934,7 @@ test("a separate git dir is refused, since git lists the metadata directory as t
   try {
     const root = join(dir, "work");
     mkdirSync(root);
-    git(root, "init", "-q", "-b", "main", "--separate-git-dir", join(dir, "meta"));
+    git(root, "init", "-q", "--ref-format=files", "-b", "main", "--separate-git-dir", join(dir, "meta"));
     git(root, "config", "user.name", "Tester");
     git(root, "config", "user.email", "tester@example.com");
     writeFileSync(join(root, "README.md"), "x\n");
@@ -992,5 +992,81 @@ test("titles reject Unicode line separators, and seed titles are cleaned the sam
     const rows = list(root, cfg).rows;
     assert.equal(rows[0].title, "one two");
     assert.equal(claim(root, cfg, { title: "next" }).id, "DEMO0006");
+  });
+});
+
+// ------------------------------------------------ external review round 4
+
+const unprivileged = process.platform === "win32" || process.getuid?.() === 0;
+
+test("a prunable worktree whose path still exists refuses allocation, and a gone one is skipped", { skip: unprivileged }, () => {
+  withClone(({ root, cfg, lane }) => {
+    const path = lane("lane");
+    seed(root, cfg);
+    const before = tip(root);
+    chmodSync(path, 0o000);
+    try {
+      const listing = git(root, "worktree", "list", "--porcelain");
+      assert.match(listing, /prunable/, "git marks the unreadable checkout prunable");
+      assertRefused(() => claim(root, cfg, { title: "x" }), "unsupported_layout");
+    } finally { chmodSync(path, 0o755); }
+    assert.equal(tip(root), before);
+    rmSync(path, { recursive: true, force: true });
+    assert.equal(claim(root, cfg, { title: "x" }).id, "DEMO0001", "a removed checkout no longer blocks");
+  });
+});
+
+test("an unreadable worktree registry refuses allocation", { skip: unprivileged }, () => {
+  withClone(({ root, cfg, lane }) => {
+    lane("lane");
+    seed(root, cfg);
+    const before = tip(root);
+    const registry = join(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"), "worktrees");
+    for (const target of [join(registry, "lane", "gitdir"), registry]) {
+      chmodSync(target, 0o000);
+      try {
+        assertRefused(() => claim(root, cfg, { title: "x" }), "unsupported_layout");
+      } finally { chmodSync(target, target === registry ? 0o755 : 0o644); }
+    }
+    assert.equal(tip(root), before);
+    assert.equal(claim(root, cfg, { title: "x" }).id, "DEMO0001");
+  });
+});
+
+test("a branch name with a line separator refuses a claim and is recorded as - by a seed", { skip: process.platform === "win32" }, () => {
+  withClone(({ root, cfg, lane }) => {
+    const bad = "a b";
+    const path = join(root, "..", "badlane");
+    git(root, "worktree", "add", "-q", "-b", bad, path);
+    item(path, "active", "DEMO0007");
+    seed(root, cfg);
+    assert.equal(list(root, cfg).rows.find((r) => r.id === "DEMO0007").branch, "-");
+    const before = tip(root);
+    assertRefused(() => claim(path, cfg, { title: "x" }), "invalid_request");
+    assert.equal(tip(root), before);
+  });
+});
+
+test("a claims.tsv that is not valid UTF-8 is an unusable ledger", () => {
+  withClone(({ root, cfg }) => {
+    rawLedger(root, Buffer.concat([Buffer.from(HEADER + "DEMO0001\t2026-11-19\tclaim\tmain\tbad"), Buffer.from([0xff, 0xfe]), Buffer.from("\n")]));
+    const before = tip(root);
+    assert.match(readLedger(root, cfg).unusable, /UTF-8/);
+    assertRefused(() => claim(root, cfg, { title: "x" }), "invalid_ledger");
+    assert.equal(tip(root), before);
+  });
+});
+
+test("refuseSymlinkedArtifacts refuses a symlink, dangling or not, and passes regular and absent files", { skip: process.platform === "win32" }, () => {
+  withClone(({ root }) => {
+    const dir = join(root, "trellis");
+    mkdirSync(dir);
+    writeFileSync(join(dir, "regular.json"), "{}");
+    assert.doesNotThrow(() => refuseSymlinkedArtifacts([join(dir, "regular.json"), join(dir, "absent.json")]));
+    symlinkSync(join(dir, "regular.json"), join(dir, "live.json"));
+    symlinkSync(join(dir, "nowhere"), join(dir, "dangling.json"));
+    for (const name of ["live.json", "dangling.json"]) {
+      assertRefused(() => refuseSymlinkedArtifacts([join(dir, name)]), "invalid_request");
+    }
   });
 });

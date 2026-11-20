@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, realpathSync, symlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, realpathSync, symlinkSync, renameSync, lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -150,7 +150,7 @@ function claimRepo(cfgOverrides = {}) {
   const root = join(dir, "main");
   mkdirSync(root);
   const git = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-  git(root, "init", "-q", "-b", "main");
+  git(root, "init", "-q", "--ref-format=files", "-b", "main");
   git(root, "config", "user.name", "Tester");
   git(root, "config", "user.email", "tester@example.com");
   applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
@@ -345,16 +345,25 @@ test("generate in scan mode still prints Next id", () => {
   } finally { c.cleanup(); }
 });
 
-test("generate in ledger mode refuses an artifact that links into the git dir", { skip: process.platform === "win32" }, () => {
-  const c = claimRepo();
-  try {
-    assert.equal(run(c.root, ["claim", "--seed"]).status, 0);
-    const before = refTip(c.root);
-    const link = join(c.root, "trellis/backlog.json");
-    rmSync(link, { force: true });
-    symlinkSync(join(c.root, ".git/refs/trellis/ids"), link);
-    const r = run(c.root, ["generate"]);
-    assert.equal(r.status, 2, r.stderr);
-    assert.equal(refTip(c.root), before);
-  } finally { c.cleanup(); }
-});
+for (const dangling of [false, true]) {
+  test(`generate in ledger mode refuses a symlinked backlog.json (${dangling ? "dangling" : "live"}) and init does too`, { skip: process.platform === "win32" }, () => {
+    const c = claimRepo();
+    try {
+      assert.equal(run(c.root, ["claim", "--seed"]).status, 0);
+      const before = refTip(c.root);
+      const link = join(c.root, "trellis/backlog.json");
+      const real = join(c.root, "real.json");
+      if (dangling) rmSync(link); else renameSync(link, real);
+      symlinkSync(real, link);
+      const r = run(c.root, ["generate"]);
+      assert.equal(r.status, 2, r.stderr);
+      assert.match(r.stderr, /backlog\.json/);
+      const i = run(dirname(c.root), ["init", c.root]);
+      assert.equal(i.status, 2, i.stderr);
+      assert.match(i.stderr, /backlog\.json/);
+      assert.equal(refTip(c.root), before);
+      assert.ok(lstatSync(link).isSymbolicLink());
+      assert.equal(existsSync(real), !dangling, "nothing was written through the link");
+    } finally { c.cleanup(); }
+  });
+}
