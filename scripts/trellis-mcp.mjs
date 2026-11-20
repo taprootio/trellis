@@ -87,7 +87,7 @@ export const TOOLS = {
     },
   },
   create_task: {
-    description: "Create an active task: assigns the next id, writes the item file, then regenerates and validates. In ledger mode the id is claimed from the local id ledger (never from a scan, so a missing ledger is an error naming `trellis claim --seed`); if a later write fails the item and generated files roll back but the claimed id stays claimed.",
+    description: "Create an active task: assigns the next id, writes the item file, then regenerates and validates (in local mode, into .generated/, after the same output checks as regenerate). In ledger mode the id is claimed from the local id ledger (never from a scan, so a missing ledger is an error naming `trellis claim --seed`); if a later write fails the item and generated files roll back but the claimed id stays claimed.",
     inputSchema: {
       ...repoRootArg,
       title: z.string().describe("one-line title"),
@@ -115,11 +115,11 @@ export const TOOLS = {
     },
   },
   validate: {
-    description: "Validate the backlog (config, items, markers); read-only. Returns { ok, errors, warnings }.",
+    description: "Validate the backlog (config, items, markers); read-only. Returns { ok, errors, warnings }. With generatedArtifacts \"local\" it validates config, roster and items and scans the committed README and index files for leftover generated markers; no generated file is compared.",
     inputSchema: { ...repoRootArg },
   },
   regenerate: {
-    description: "Rewrite any stale generated artifact. Returns { changed, nextId, counts }. In ledger mode the files on disk keep the scan nextId, and the returned nextId is the ledger preview (null with a note when there is no usable ledger).",
+    description: "Rewrite any stale generated artifact. Returns { changed, nextId, counts }. In ledger mode the files on disk keep the scan nextId, and the returned nextId is the ledger preview (null with a note when there is no usable ledger). With generatedArtifacts \"local\" it writes only <tasksDir>/.generated/ (its backlog.json carries the ledger preview in ledger mode) and refuses before writing on a leftover marker or an output that git does not ignore or tracks.",
     inputSchema: { ...repoRootArg },
   },
   import: {

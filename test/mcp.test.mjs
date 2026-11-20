@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { ledgerTest, initRefFormat } from "./git-support.mjs";
 import assert from "node:assert/strict";
 import {
-  mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync, symlinkSync, renameSync, lstatSync, writeSync, realpathSync,
+  mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync, symlinkSync, renameSync, lstatSync, writeSync, realpathSync, chmodSync,
 } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -22,6 +22,7 @@ import {
   listTasks, getTask, nextIdOp, claimIdOp, createTask, moveTask, validateOp, regenerateOp, importOp, stageFile, TrellisError,
 } from "../src/mcp.mjs";
 import { seed, claim, through, list as ledgerList } from "../src/ledger.mjs";
+import { testSeams as writerSeams } from "../src/local-output.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtures = join(sourceRoot, "test", "fixtures");
@@ -945,4 +946,258 @@ ledgerTest("ledger mode: a config with a fractional effort is a config error, so
     assert.equal(refTip(c.root), t, "no id was claimed");
     assert.deepEqual(artifactBytes(c.root), before);
   } finally { c.cleanup(); }
+});
+
+// ------------------------------------------ local generated artifacts (TRL0038)
+const GEN_FILES = ["index.md", "completed.md", "removed.md", "backlog.json"];
+
+// A local-mode repo: the scaffold with a marker-free README and index files, no
+// committed backlog.json, a git work tree and the ignore rule. `ledger` adds a
+// seeded ledger. `inGit: false` leaves it outside any work tree.
+function localMcpRepo({ ledger = false, seeded = true, inGit = true, ignore = true } = {}) {
+  const root = realpathSync(freshRepo());
+  const t = join(root, "trellis");
+  const cfgPath = join(t, "backlog.config.json");
+  const raw = { ...JSON.parse(readFileSync(cfgPath, "utf8")), generatedArtifacts: "local", ...(ledger ? { idAllocation: "ledger" } : {}) };
+  writeFileSync(cfgPath, JSON.stringify(raw, null, 2) + "\n");
+  writeFileSync(join(t, "README.md"), "# Backlog\n\nAuthored prose.\n");
+  writeFileSync(join(t, "completed", "index.md"), "# Completed\n");
+  writeFileSync(join(t, "removed", "index.md"), "# Removed\n");
+  rmSync(join(t, "backlog.json"), { force: true });
+  if (inGit) execFileSync("git", ["-C", root, "init", "-q", ...initRefFormat, "-b", "main"]);
+  if (ignore) writeFileSync(join(root, ".gitignore"), "trellis/.generated/\n");
+  const cfg = loadConfig(root).cfg;
+  if (ledger && seeded) seed(root, cfg);
+  return { root, cfg, gen: join(t, ".generated"), readme: join(t, "README.md"), cleanup: () => rmSync(root, { recursive: true, force: true }) };
+}
+// The whole tree (path and bytes), minus .git, so "wrote nothing" is checked in full.
+function snapshotTree(root) {
+  const out = {};
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === ".git") continue;
+      const p = join(dir, e.name);
+      if (e.isDirectory()) { out[p.slice(root.length)] = "<dir>"; walk(p); }
+      else out[p.slice(root.length)] = lstatSync(p).isSymbolicLink() ? "<link>" : readFileSync(p, "utf8");
+    }
+  };
+  walk(root);
+  return out;
+}
+const hasItem = (root, id = "DEMO0001") => existsSync(join(root, "trellis", "active", `${id}.md`));
+// Runs `fn` with a `git` first on PATH that fails any command containing `when`.
+function withGitShim(when, fn) {
+  const bin = realpathSync(mkdtempSync(join(tmpdir(), "trellis-mcp-shim-")));
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  writeFileSync(join(bin, "git"), `#!/bin/sh\nfor a in "$@"; do\n  if [ "$a" = "${when}" ]; then\n    echo "fatal: detected dubious ownership in repository" >&2\n    exit 128\n  fi\ndone\nexec "${realGit}" "$@"\n`);
+  chmodSync(join(bin, "git"), 0o755);
+  const old = process.env.PATH;
+  process.env.PATH = `${bin}:${old}`;
+  try { return fn(); } finally { process.env.PATH = old; rmSync(bin, { recursive: true, force: true }); }
+}
+const MARKER = "<!-- BEGIN GENERATED:MILESTONES -->";
+const MODE_CASES = [["scan", false], ["ledger", true]];
+
+test("local regenerate writes only .generated/, create_task and move_task keep it current", () => {
+  const c = localMcpRepo();
+  try {
+    const readme = readFileSync(c.readme, "utf8");
+    const out = regenerateOp(c.root);
+    assert.deepEqual(out.changed.map((p) => p.replace(/\\/g, "/")).sort(), GEN_FILES.map((n) => `trellis/.generated/${n}`).sort());
+    assert.equal(out.nextId, "DEMO0001");
+    assert.equal(createTask(c.root, VALID).created.id, "DEMO0001");
+    assert.match(readFileSync(join(c.gen, "index.md"), "utf8"), /\[DEMO0001\]\(\.\.\/active\/DEMO0001\.md\)/);
+    assert.equal(moveTask(c.root, { id: "DEMO0001", to: "completed", date: "2026-06-26" }).moved.status, "completed");
+    assert.match(readFileSync(join(c.gen, "completed.md"), "utf8"), /\[DEMO0001\]\(\.\.\/completed\/tasks\/DEMO0001\.md\)/);
+    assert.equal(readFileSync(c.readme, "utf8"), readme, "README is never written");
+    assert.equal(existsSync(join(c.root, "trellis", "backlog.json")), false);
+    assert.equal(validateOp(c.root).ok, true);
+  } finally { c.cleanup(); }
+});
+
+ledgerTest("local ledger regenerate writes the ledger preview into .generated/backlog.json", () => {
+  const c = localMcpRepo({ ledger: true });
+  try {
+    claim(c.root, c.cfg, { title: "Open claim" });
+    const out = regenerateOp(c.root);
+    assert.equal(out.nextId, "DEMO0002");
+    assert.equal(JSON.parse(readFileSync(join(c.gen, "backlog.json"), "utf8")).nextId, "DEMO0002");
+    assert.equal(createTask(c.root, VALID).created.id, "DEMO0002");
+    assert.equal(JSON.parse(readFileSync(join(c.gen, "backlog.json"), "utf8")).nextId, "DEMO0003", "the preview follows the claim");
+  } finally { c.cleanup(); }
+  const gone = localMcpRepo({ ledger: true, seeded: false });
+  try {
+    regenerateOp(gone.root);
+    assert.equal(JSON.parse(readFileSync(join(gone.gen, "backlog.json"), "utf8")).nextId, null);
+  } finally { gone.cleanup(); }
+});
+
+test("validate reports the same ordered errors as check in local mode, including a stray marker", () => {
+  const c = localMcpRepo();
+  try {
+    assert.deepEqual(validateOp(c.root), { ok: true, errors: [], warnings: [] });
+    writeFileSync(join(c.root, "trellis", "active", "DEMO0001.md"), "---\nid: DEMO0001\ntitle: T\nstatus: active\nmilestone: Nope\npriority: High\neffort: 3\ndepends_on: []\nsummary: S.\n---\n");
+    writeFileSync(c.readme, `# Backlog\n${MARKER}\n`);
+    const out = validateOp(c.root);
+    assert.equal(out.ok, false);
+    assert.equal(out.errors.length, 2);
+    assert.match(out.errors[0], /^active\/DEMO0001\.md: milestone must be one of/);
+    assert.match(out.errors[1], /^trellis\/README\.md: holds the generated marker line <!-- BEGIN GENERATED:MILESTONES -->/);
+    // The CLI check prints the same errors in the same order.
+    const r = spawnSync(process.execPath, [join(sourceRoot, "scripts", "trellis.mjs"), "check"], { cwd: c.root, encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.deepEqual(r.stderr.trim().split("\n").slice(1).map((l) => l.replace(/^ {2}- /, "")), out.errors);
+  } finally { c.cleanup(); }
+});
+
+for (const [mode, ledger] of MODE_CASES) {
+  ledgerTest(`regenerate, create_task and move_task refuse a bad .generated or output before any write or claim (${mode})`, { skip: process.platform === "win32" }, () => {
+    const c = localMcpRepo({ ledger });
+    try {
+      createTask(c.root, VALID); // DEMO0001, so move_task has something to move
+      const elsewhere = join(c.root, "elsewhere");
+      mkdirSync(elsewhere);
+      const cases = [
+        ["symlinked .generated", () => { rmSync(c.gen, { recursive: true }); symlinkSync(elsewhere, c.gen); }],
+        ["file at .generated", () => { rmSync(c.gen, { recursive: true }); writeFileSync(c.gen, "x\n"); }],
+        ["symlinked output", () => { rmSync(join(c.gen, "backlog.json")); symlinkSync(join(c.root, "nowhere"), join(c.gen, "backlog.json")); }],
+        ["directory output", () => { rmSync(join(c.gen, "completed.md")); mkdirSync(join(c.gen, "completed.md")); }],
+      ];
+      for (const [name, setup] of cases) {
+        setup();
+        const tip = ledger ? refTip(c.root) : null;
+        const before = snapshotTree(c.root);
+        throwsTrellis(() => regenerateOp(c.root), "invalid_request");
+        throwsTrellis(() => createTask(c.root, VALID), "invalid_request");
+        throwsTrellis(() => moveTask(c.root, { id: "DEMO0001", to: "completed", date: "2026-06-26" }), "invalid_request");
+        assert.deepEqual(snapshotTree(c.root), before, name);
+        if (ledger) assert.equal(refTip(c.root), tip, `${name}: no id was claimed`);
+        // Put the folder back for the next case.
+        rmSync(c.gen, { recursive: true, force: true });
+        regenerateOp(c.root);
+      }
+      assert.deepEqual(readdirSync(elsewhere), []);
+    } finally { c.cleanup(); }
+  });
+}
+
+for (const [mode, ledger] of MODE_CASES) {
+  ledgerTest(`create_task refuses a leftover marker, an unignored output and a tracked output with no claim and no item (${mode})`, () => {
+    const marker = localMcpRepo({ ledger });
+    try {
+      writeFileSync(marker.readme, `# Backlog\n${MARKER}\n`);
+      const tip = ledger ? refTip(marker.root) : null;
+      const before = snapshotTree(marker.root);
+      throwsTrellis(() => createTask(marker.root, VALID), "invalid_request");
+      assert.equal(hasItem(marker.root), false);
+      assert.deepEqual(snapshotTree(marker.root), before);
+      if (ledger) assert.equal(refTip(marker.root), tip);
+      // regenerate refuses on the stray marker too.
+      throwsTrellis(() => regenerateOp(marker.root), "invalid_request");
+      assert.deepEqual(snapshotTree(marker.root), before);
+    } finally { marker.cleanup(); }
+
+    const open = localMcpRepo({ ledger, ignore: false });
+    try {
+      const tip = ledger ? refTip(open.root) : null;
+      const before = snapshotTree(open.root);
+      assert.throws(() => createTask(open.root, VALID), (e) => e instanceof TrellisError && e.code === "invalid_request" && /not ignored by git[^]*trellis\/\.generated\//.test(e.message));
+      throwsTrellis(() => regenerateOp(open.root), "invalid_request");
+      assert.equal(hasItem(open.root), false);
+      assert.deepEqual(snapshotTree(open.root), before);
+      if (ledger) assert.equal(refTip(open.root), tip);
+    } finally { open.cleanup(); }
+  });
+
+  ledgerTest(`move_task refuses an unignored output, and all three writers refuse a tracked output (${mode})`, () => {
+    const c = localMcpRepo({ ledger });
+    try {
+      createTask(c.root, VALID);
+      // Tracked: force-add one output.
+      execFileSync("git", ["-C", c.root, "add", "-f", "trellis/.generated/index.md"]);
+      const tip = ledger ? refTip(c.root) : null;
+      const before = snapshotTree(c.root);
+      for (const call of [() => regenerateOp(c.root), () => createTask(c.root, VALID), () => moveTask(c.root, { id: "DEMO0001", to: "completed", date: "2026-06-26" })]) {
+        assert.throws(call, (e) => e instanceof TrellisError && e.code === "invalid_request" && /index\.md is tracked/.test(e.message));
+      }
+      assert.deepEqual(snapshotTree(c.root), before);
+      if (ledger) assert.equal(refTip(c.root), tip);
+      execFileSync("git", ["-C", c.root, "rm", "-q", "--cached", "trellis/.generated/index.md"]);
+      // Unignored: drop the rule.
+      rmSync(join(c.root, ".gitignore"));
+      assert.throws(() => moveTask(c.root, { id: "DEMO0001", to: "completed", date: "2026-06-26" }), (e) => e instanceof TrellisError && /not ignored by git/.test(e.message));
+      assert.equal(hasItem(c.root), true, "the item did not move");
+    } finally { c.cleanup(); }
+  });
+}
+
+test("regenerate, create_task and move_task succeed outside a git work tree", () => {
+  const c = localMcpRepo({ inGit: false, ignore: false });
+  try {
+    assert.equal(regenerateOp(c.root).changed.length, 4);
+    assert.equal(createTask(c.root, VALID).created.id, "DEMO0001");
+    assert.equal(moveTask(c.root, { id: "DEMO0001", to: "removed", reason: "Not needed.", date: "2026-06-26" }).moved.status, "removed");
+    assert.equal(validateOp(c.root).ok, true);
+  } finally { c.cleanup(); }
+});
+
+for (const [mode, ledger] of MODE_CASES) {
+  ledgerTest(`a forced git discovery error makes all three writers refuse with files and the ledger tip unchanged (${mode})`, { skip: process.platform === "win32" }, () => {
+    const c = localMcpRepo({ ledger });
+    try {
+      createTask(c.root, VALID);
+      const tip = ledger ? refTip(c.root) : null;
+      const before = snapshotTree(c.root);
+      withGitShim("--show-prefix", () => {
+        // Only the new preflight's discovery fails, so the earlier ledger layout guard cannot satisfy this.
+        for (const call of [() => regenerateOp(c.root), () => createTask(c.root, VALID), () => moveTask(c.root, { id: "DEMO0001", to: "completed", date: "2026-06-26" })]) {
+          assert.throws(call, (e) => e instanceof TrellisError && e.code === "invalid_request" && /git could not inspect[^]*dubious ownership/.test(e.message));
+        }
+      });
+      assert.deepEqual(snapshotTree(c.root), before);
+      if (ledger) assert.equal(refTip(c.root), tip);
+    } finally { c.cleanup(); }
+  });
+}
+
+ledgerTest("a forced mid-write failure in ledger mode leaves no new artifact and no new .generated/", () => {
+  for (const n of [0, 2, 3]) {
+    const c = localMcpRepo({ ledger: true });
+    try {
+      assert.equal(existsSync(c.gen), false);
+      assert.throws(() => createTask(c.root, VALID, { afterArtifactRename: (_p, i) => { if (i === n) throw new Error("boom"); } }), /boom/);
+      assert.equal(existsSync(c.gen), false, `a rollback after artifact ${n} removes the empty .generated/`);
+      assert.equal(hasItem(c.root), false);
+      assert.deepEqual(ledgerList(c.root, c.cfg).rows.map((r) => r.id), ["DEMO0001"], "the claim stays");
+    } finally { c.cleanup(); }
+  }
+  // An existing folder is kept, with its outputs restored.
+  const c = localMcpRepo({ ledger: true });
+  try {
+    regenerateOp(c.root);
+    const before = GEN_FILES.map((n) => readFileSync(join(c.gen, n), "utf8"));
+    assert.throws(() => createTask(c.root, VALID, { afterArtifactRename: (_p, i) => { if (i === 1) throw new Error("boom"); } }), /boom/);
+    assert.deepEqual(GEN_FILES.map((n) => readFileSync(join(c.gen, n), "utf8")), before);
+    assert.deepEqual(readdirSync(c.gen).sort(), [...GEN_FILES].sort(), "no staging leftovers");
+  } finally { c.cleanup(); }
+});
+
+test("a forced mid-write failure in scan mode restores outputs and removes new ones and the new .generated/", () => {
+  const c = localMcpRepo();
+  try {
+    for (const n of [0, 2, 3]) {
+      writerSeams.beforeWrite = (_p, i) => { if (i === n) throw new Error("boom"); };
+      const before = snapshotTree(c.root);
+      assert.throws(() => regenerateOp(c.root), /boom/);
+      assert.deepEqual(snapshotTree(c.root), before, `failure at write ${n}`);
+      assert.equal(existsSync(c.gen), false);
+    }
+    writerSeams.beforeWrite = null;
+    createTask(c.root, VALID);
+    writeFileSync(join(c.root, "trellis", "active", "DEMO0002.md"), readFileSync(join(c.root, "trellis", "active", "DEMO0001.md"), "utf8").replace(/DEMO0001/g, "DEMO0002"));
+    const before = snapshotTree(c.root);
+    writerSeams.beforeWrite = (_p, i) => { if (i === 3) throw new Error("boom"); };
+    assert.throws(() => regenerateOp(c.root), /boom/);
+    assert.deepEqual(snapshotTree(c.root), before, "changed outputs are restored");
+  } finally { writerSeams.beforeWrite = null; c.cleanup(); }
 });

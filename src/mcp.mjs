@@ -33,10 +33,13 @@ import {
   paths,
   composeFile,
   activeItemErrors,
+  isLocalMode,
+  validateLocal,
 } from "./backlog.mjs";
 import { applyImport, ImportRefused } from "./import.mjs";
 import { loadProfile } from "./profiles.mjs";
 import { deriveTaskHistory, deriveAllHistory, HistoryError } from "./history.mjs";
+import { outputPreflight, previewNextId, writeArtifactFiles, makeDirs, removeCreatedDirs } from "./local-output.mjs";
 import { LedgerError, unsafeText, claim, preview, checkLayout, refuseSymlinkedArtifacts, artifactPaths } from "./ledger.mjs";
 
 // A domain error the transport maps to an MCP tool error (isError result) rather
@@ -215,37 +218,32 @@ function assertId(id, cfg) {
 }
 
 // ---------------------------------------------------- regenerate (shared)
+// Refuses a bad output before a claim or a write: in local mode a leftover marker,
+// a bad `.generated/` or output path, and (inside a git work tree) an output that
+// is unignored or tracked; in ledger mode a symlinked or non-regular artifact.
+function guardOutputs(repoRoot, cfg) {
+  ledgerCall(() => {
+    outputPreflight(repoRoot, cfg);
+    if (isLedgerMode(cfg)) refuseSymlinkedArtifacts(artifactPaths(repoRoot, cfg));
+  });
+}
+
 // Write any stale artifact; return the repo-relative paths that changed. Pure
-// w.r.t. the item files — only the four generated artifacts are touched.
+// w.r.t. the item files — only the generated artifacts are touched (the four
+// committed files, or the four under `.generated/` in local mode).
 // `hooks` are test seams (see writeArtifactsStaged).
 function writeArtifacts(repoRoot, cfg, data, hooks = {}) {
   // Refuse a bad artifact before anything is rendered.
   if (isLedgerMode(cfg)) ledgerCall(() => refuseSymlinkedArtifacts(artifactPaths(repoRoot, cfg)));
-  const { files, nextId: next, errors } = generateArtifacts(repoRoot, cfg, data);
+  // Local mode publishes the ledger preview in its uncommitted backlog.json.
+  const nextIdOverride = previewNextId(repoRoot, cfg);
+  const { files, nextId: next, errors } = generateArtifacts(repoRoot, cfg, data, { nextIdOverride });
   if (errors.length) throw new TrellisError(`generate failed: ${errors.join("; ")}`, "generate_failed");
   if (isLedgerMode(cfg)) return writeArtifactsStaged(repoRoot, files, next, hooks);
-  // Snapshot prior bytes first so a mid-loop write failure (ENOSPC/EACCES) restores
-  // every artifact — honouring the Risk's "never left … with stale generated files."
-  const prior = files.map((f) => ({ path: f.path, before: existsSync(f.path) ? readFileSync(f.path, "utf8") : null }));
-  const done = [];
-  try {
-    const changed = [];
-    for (const f of files) {
-      const { before } = prior.find((p) => p.path === f.path);
-      if (before !== f.content) {
-        writeFileSync(f.path, f.content);
-        done.push(f.path);
-        changed.push(relative(repoRoot, f.path));
-      }
-    }
-    return { changed, nextId: next };
-  } catch (e) {
-    for (const p of prior) {
-      if (!done.includes(p.path)) continue;
-      try { p.before === null ? rmSync(p.path, { force: true }) : writeFileSync(p.path, p.before); } catch { /* best-effort restore */ }
-    }
-    throw e;
-  }
+  // The shared writer snapshots prior bytes, so a mid-loop write failure (ENOSPC/EACCES)
+  // restores every artifact — honouring the Risk's "never left … with stale generated files."
+  const changed = writeArtifactFiles(files).map((path) => relative(repoRoot, path));
+  return { changed, nextId: next };
 }
 
 // Creates a staging or backup file that did not exist, so a path an attacker or an
@@ -294,7 +292,11 @@ function writeArtifactsStaged(repoRoot, files, next, hooks) {
     if ((exists ? readFileSync(dest, "utf8") : null) !== f.content) plan.push({ f, dest, exists, temp: null, backup: null });
   }
   const installed = [];
+  // Local mode stages into `.generated/`, which may not exist yet; a rollback
+  // removes it again when this call made it and it is empty.
+  const created = [];
   try {
+    for (const dir of new Set(files.map((f) => dirname(f.path)))) makeDirs(dir, created);
     for (const e of plan) {
       const mode = e.exists ? statSync(e.dest).mode & 0o7777 : 0o666 & ~process.umask();
       e.temp = stageFile(e.dest, "tmp", e.f.content, mode);
@@ -322,6 +324,7 @@ function writeArtifactsStaged(repoRoot, files, next, hooks) {
         if (leftover) { try { rmSync(leftover, { force: true }); } catch { /* best-effort */ } }
       }
     }
+    removeCreatedDirs(created);
     if (kept.length) {
       throw new TrellisError(`${err.message}; could not restore every artifact, backups kept at: ${kept.join(", ")}`, "generate_failed");
     }
@@ -383,6 +386,11 @@ export function nextIdOp(repoRoot) {
 export function validateOp(repoRoot) {
   const { cfg, warnings, errors: cfgErrors } = loadConfig(repoRoot);
   if (cfgErrors.length) return { ok: false, errors: cfgErrors, warnings };
+  // Local mode shares one validator with the CLI `check`, so they cannot disagree.
+  if (isLocalMode(cfg)) {
+    const { errors } = validateLocal(repoRoot, cfg);
+    return { ok: errors.length === 0, errors, warnings };
+  }
   const data = readBacklog(repoRoot, cfg);
   const gen = generateArtifacts(repoRoot, cfg, data); // computes only; the CLI writes
   const errors = [...data.errors, ...gen.errors];
@@ -393,9 +401,10 @@ export function validateOp(repoRoot) {
 // than generating from bad input.
 export function regenerateOp(repoRoot) {
   const { cfg, data } = loadClean(repoRoot);
+  guardOutputs(repoRoot, cfg);
   const { changed, nextId: next, warnings } = writeArtifacts(repoRoot, cfg, data);
   const counts = backlogObject(cfg, data).counts;
-  // The files on disk keep the scan value; only the reply carries the ledger preview.
+  // In committed mode the files on disk keep the scan value; only the reply carries the ledger preview.
   const pv = ledgerPreview(repoRoot, cfg);
   if (pv) return { changed, nextId: pv.nextId, note: pv.note, counts, ...(warnings && warnings.length ? { warnings } : {}) };
   return { changed, nextId: next, counts };
@@ -470,8 +479,9 @@ export function createTask(repoRoot, args = {}, hooks = {}) {
     const problems = parsed ? [...parseErrors, ...activeItemErrors(cfg, data, { ...parsed, _file: `${probe}.md` })] : parseErrors;
     if (problems.length) throw new TrellisError(`the new item would not validate: ${problems.join("; ")}`, "invalid_request");
   }
-  // A symlinked artifact is refused by the write, so it must fail before the claim too.
-  if (ledgerMode) ledgerCall(() => refuseSymlinkedArtifacts(artifactPaths(repoRoot, cfg)));
+  // A bad output (a symlink, or in local mode a leftover marker or an unignored or
+  // tracked output) is refused by the write, so it must fail before the claim too.
+  guardOutputs(repoRoot, cfg);
   // Ledger mode claims the id, and never falls back to the scan: a fresh clone
   // would hand out an id another worktree holds. The claim is never undone.
   const id = ledgerMode ? ledgerCall(() => claim(repoRoot, cfg, { title })).id : nextId(data.ids, cfg);
@@ -527,8 +537,8 @@ export function moveTask(repoRoot, args = {}, hooks = {}) {
 
   const { cfg } = loadClean(repoRoot);
   const id = assertId(args.id, cfg); // validate the id format before building any path
-  // Ledger mode refuses symlinked artifacts before the move touches any file.
-  if (isLedgerMode(cfg)) ledgerCall(() => refuseSymlinkedArtifacts(artifactPaths(repoRoot, cfg)));
+  // A bad output is refused before the move touches any file.
+  guardOutputs(repoRoot, cfg);
   const p = paths(repoRoot, cfg);
   const src = join(p.active, `${id}.md`);
   if (!existsSync(src)) {
