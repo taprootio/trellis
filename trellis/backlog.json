@@ -159,7 +159,7 @@
       ],
       "owner": "jereme",
       "collaborators": [],
-      "summary": "Add an opt-in mode in which the generated index, completed and removed tables and backlog.json are written to an ignored folder instead of being committed, so parallel branches stop conflicting on them and `check` only validates the item files."
+      "summary": "Add an opt-in mode in which the generated index, completed and removed tables and backlog.json are written to an ignored folder instead of being committed, so parallel branches stop conflicting on them; local `check` validates config, roster and items, scans for leftover markers, and skips freshness comparisons."
     },
     {
       "id": "TRL0039",
