@@ -41,6 +41,25 @@ and import in one step on a fresh repo, use
 profiles, and the full getting-started guide are in
 [`docs/import.md`](docs/import.md).
 
+## Claim task ids
+
+Parallel worktrees that scan for the highest id can claim the same one. Set
+`"idAllocation": "ledger"` in `trellis/backlog.config.json` and every worktree of a
+clone hands out ids from one local git ref (`refs/trellis/ids`) instead. The ledger
+is local only: nothing is pushed.
+
+```
+npx @taprootio/trellis claim --seed                  # create the ledger from the ids in every worktree
+npx @taprootio/trellis claim --title "Short title"   # claim the next id and print it
+npx @taprootio/trellis claim --list                  # print the tip and every ledger line
+npx @taprootio/trellis claim --through <ID>          # reserve every id up to <ID>
+```
+
+In ledger mode `trellis generate` no longer prints a next id, and MCP
+`create_task` claims through the ledger. Import is unsupported there (see
+[`docs/import.md`](docs/import.md)). The format, cutover and recovery rules are in
+SPEC §3.1.
+
 ## Track task history
 
 `trellis history` reconstructs a per-task change log from git — who changed an
@@ -67,7 +86,7 @@ regenerate, and read the history of tasks in a repo:
 npx @taprootio/trellis mcp --repo <path>   # serves over stdio; defaults to cwd
 ```
 
-Tools: `list_tasks`, `get_task`, `next_id`, `create_task`, `move_task`,
+Tools: `list_tasks`, `get_task`, `next_id`, `claim_id`, `create_task`, `move_task`,
 `validate`, `regenerate`, `import`, `history` — each reuses the same core as the
 CLI, so results carry the `backlog.json` shape (except `import`, which returns an
 import summary, and `history`, which returns git-derived change entries). Mutating
