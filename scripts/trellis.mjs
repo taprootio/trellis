@@ -20,6 +20,7 @@ Commands:
   import     import an existing backlog into a Trellis repo
   generate   validate and rewrite generated backlog artifacts
   check      validate and fail if generated artifacts are stale
+  claim      claim task ids from the local id ledger
   history    derive per-task history from git
   mcp        serve Trellis operations over MCP stdio
   pr-title   lint a PR title from PR_TITLE
@@ -32,6 +33,7 @@ const COMMANDS = {
   import: ["trellis-import.mjs"],
   generate: ["backlog-readme.mjs"],
   check: ["backlog-readme.mjs", "--check"],
+  claim: ["trellis-claim.mjs"],
   history: ["trellis-history.mjs"],
   mcp: ["trellis-mcp.mjs"],
   "pr-title": ["pr-title-lint.mjs"],

@@ -11,6 +11,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { relative } from "node:path";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
+import { preview } from "../src/ledger.mjs";
 import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 
 const HELP = `trellis generate/check — validate and regenerate Trellis artifacts
@@ -80,5 +81,7 @@ if (isCheck) {
   console.log("Backlog check OK.");
 } else {
   for (const f of files) writeFileSync(f.path, f.content);
-  console.log(`Backlog OK: ${data.active.length} active, ${data.completed.length} completed, ${data.removed.length} removed. Next id: ${nextId}`);
+  // In ledger mode ids come from `trellis claim`, so the scan value is not the next id.
+  const idNote = cfg.idAllocation === "ledger" ? preview(repoRoot, cfg).note : `Next id: ${nextId}`;
+  console.log(`Backlog OK: ${data.active.length} active, ${data.completed.length} completed, ${data.removed.length} removed. ${idNote}`);
 }
