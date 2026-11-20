@@ -95,6 +95,36 @@ export function paths(repoRoot, cfg) {
   };
 }
 
+// ------------------------------------------------------- artifact set (TRL0038)
+// `generatedArtifacts` is "committed" (default) or "local". In local mode the
+// generated files live in an ignored folder under the backlog root and the
+// committed README and index files are author-owned.
+export const GENERATED_DIR = ".generated";
+export const isLocalMode = (cfg) => cfg.generatedArtifacts === "local";
+
+// The one mode-aware list of artifact paths. `generated` are the files the
+// generator writes; `authorOwned` (local mode only) are files that `check` scans
+// for leftover generated markers. No other code spells an artifact path.
+export function artifactSet(repoRoot, cfg) {
+  const p = paths(repoRoot, cfg);
+  const entry = (key, path) => ({ key, path, rel: relative(repoRoot, path) });
+  if (!isLocalMode(cfg)) {
+    return {
+      mode: "committed",
+      dir: null,
+      generated: [entry("readme", p.readme), entry("completed", p.completedIndex), entry("removed", p.removedIndex), entry("backlog", p.backlogJson)],
+      authorOwned: [],
+    };
+  }
+  const dir = join(p.tasks, GENERATED_DIR);
+  return {
+    mode: "local",
+    dir,
+    generated: [entry("index", join(dir, "index.md")), entry("completed", join(dir, "completed.md")), entry("removed", join(dir, "removed.md")), entry("backlog", join(dir, "backlog.json"))],
+    authorOwned: [entry("readme", p.readme), entry("completedIndex", p.completedIndex), entry("removedIndex", p.removedIndex)],
+  };
+}
+
 // ----------------------------------------------------------------- config
 export function loadConfig(repoRoot) {
   const warnings = [];
@@ -120,6 +150,10 @@ export function loadConfig(repoRoot) {
     }
   }
   validateIdAllocation(cfg, errors);
+  // A present key must be valid, so an explicit null is an error, not a default (TRL0038).
+  if (Object.hasOwn(cfg, "generatedArtifacts") && cfg.generatedArtifacts !== "committed" && cfg.generatedArtifacts !== "local") {
+    errors.push('config: `generatedArtifacts` must be "committed" or "local" when present');
+  }
   if (!Array.isArray(cfg.milestones) || cfg.milestones.length === 0) errors.push("config: `milestones` must be a non-empty array");
   if (!Array.isArray(cfg.priorities) || cfg.priorities.length === 0) errors.push("config: `priorities` must be a non-empty array");
   const effortValues = Array.isArray(cfg.effort) ? cfg.effort : cfg.effort && cfg.effort.values;
@@ -683,27 +717,32 @@ function fillMarkers(text, [begin, end], body, where, errors, literal = false) {
   return text.replace(re, literal ? () => filled : filled);
 }
 
-function activeTable(items, cfg) {
+// Link bases for the table builders. Committed files sit beside their items'
+// folders; local files sit in `.generated/`, one level down (TRL0038).
+const COMMITTED_LINKS = { active: "active/", completed: "tasks/", removed: "" };
+const LOCAL_LINKS = { active: "../active/", completed: "../completed/tasks/", removed: "../removed/" };
+
+function activeTable(items, cfg, base = COMMITTED_LINKS.active) {
   const rank = Object.fromEntries(cfg.priorities.map((p, i) => [p, i]));
   const rows = items.slice()
     .sort((a, b) => (rank[a.priority] - rank[b.priority]) || a.id.localeCompare(b.id))
-    .map((it) => `| [${it.id}](active/${it._file}) | ${cell(it.title)} | ${cell(it.owner ?? "")} | ${it.priority} | ${cell(effortCell(it, cfg))} |`);
+    .map((it) => `| [${it.id}](${base}${it._file}) | ${cell(it.title)} | ${cell(it.owner ?? "")} | ${it.priority} | ${cell(effortCell(it, cfg))} |`);
   return ["| ID | Title | Owner | Priority | Effort |", "| --- | --- | --- | --- | --- |", ...rows].join("\n");
 }
 
-function completedTable(items) {
+function completedTable(items, base = COMMITTED_LINKS.completed) {
   if (!items.length) return "_No completed items yet._";
   const rows = items.slice()
     .sort((a, b) => String(b.completed_on ?? "").localeCompare(String(a.completed_on ?? "")) || a.id.localeCompare(b.id))
-    .map((it) => `| [${it.id}](tasks/${it.id}.md) | ${cell(it.title)} | ${cell(it.summary)} | ${cell(it.completed_on)} |`);
+    .map((it) => `| [${it.id}](${base}${it.id}.md) | ${cell(it.title)} | ${cell(it.summary)} | ${cell(it.completed_on)} |`);
   return ["| ID | Title | Summary | Completed |", "| --- | --- | --- | --- |", ...rows].join("\n");
 }
 
-function removedTable(items) {
+function removedTable(items, base = COMMITTED_LINKS.removed) {
   if (!items.length) return "_No removed items yet._";
   const rows = items.slice()
     .sort((a, b) => String(b.removed_on ?? "").localeCompare(String(a.removed_on ?? "")) || a.id.localeCompare(b.id))
-    .map((it) => `| [${it.id}](${it.id}.md) | ${cell(it.title)} | ${cell(it.summary)} | ${cell(it.removed_on)} | ${cell(it.removed_reason)} |`);
+    .map((it) => `| [${it.id}](${base}${it.id}.md) | ${cell(it.title)} | ${cell(it.summary)} | ${cell(it.removed_on)} | ${cell(it.removed_reason)} |`);
   return ["| ID | Title | Summary | Removed | Reason |", "| --- | --- | --- | --- | --- |", ...rows].join("\n");
 }
 
@@ -744,6 +783,8 @@ export function buildBacklogJson(cfg, data, { nextIdOverride } = {}) {
   return JSON.stringify(backlog, null, 2) + "\n";
 }
 
+const LOCAL_BLURB = "_Generated by `trellis generate` and ignored by git. Do not edit._";
+
 // Compute each generated artifact's path + new content. Pure except for reading
 // the current files (needed to replace content between their markers).
 export function generateArtifacts(repoRoot, cfg, data, { nextIdOverride } = {}) {
@@ -752,11 +793,30 @@ export function generateArtifacts(repoRoot, cfg, data, { nextIdOverride } = {}) 
   const next = nextIdOverride === undefined ? nextId(data.ids, cfg) : nextIdOverride;
   const literal = cfg.idAllocation === "ledger";
 
-  let block = "";
-  for (const ms of cfg.milestones) {
-    const items = data.active.filter((a) => a.milestone === ms);
-    if (items.length) block += `\n### ${ms}\n\n${activeTable(items, cfg)}\n`;
+  const milestoneBlock = (base) => {
+    let out = "";
+    for (const ms of cfg.milestones) {
+      const items = data.active.filter((a) => a.milestone === ms);
+      if (items.length) out += `\n### ${ms}\n\n${activeTable(items, cfg, base)}\n`;
+    }
+    return out;
+  };
+
+  // Local mode reads no file: each output is wholly generated, so it is a pure
+  // function of the items and needs no markers (TRL0038).
+  if (isLocalMode(cfg)) {
+    const [index, completed, removed, backlog] = artifactSet(repoRoot, cfg).generated.map((e) => e.path);
+    const head = (title) => `# ${title}\n\n${LOCAL_BLURB}\n`;
+    const files = [
+      { path: index, content: head("Backlog") + milestoneBlock(LOCAL_LINKS.active) },
+      { path: completed, content: `${head("Completed tasks")}\n${completedTable(data.completed, LOCAL_LINKS.completed)}\n` },
+      { path: removed, content: `${head("Removed tasks")}\n${removedTable(data.removed, LOCAL_LINKS.removed)}\n` },
+      { path: backlog, content: buildBacklogJson(cfg, data, { nextIdOverride }) },
+    ];
+    return { files, nextId: next, errors };
   }
+
+  const block = milestoneBlock(COMMITTED_LINKS.active);
   // The README publishes only the milestone tables; the next id lives in
   // backlog.json (SPEC §8.1/§8.2), so `next` below feeds only that artifact and
   // this function's return value (CLI/MCP callers), not the README body.
@@ -775,4 +835,54 @@ export function generateArtifacts(repoRoot, cfg, data, { nextIdOverride } = {}) 
     { path: p.backlogJson, content: buildBacklogJson(cfg, data, { nextIdOverride }) },
   ];
   return { files, nextId: next, errors };
+}
+
+// ------------------------------------------- local-mode validation (TRL0038)
+// The six generated-marker comments. In local mode no committed file may hold one
+// on a line of its own: that is a half-finished switch from committed mode.
+const MARKER_LINES = new Set(Object.values(MARKERS).flat());
+
+// Errors for each author-owned file (README and the two index files) that holds a
+// marker line, ignoring trailing spaces, tabs and `\r`. Text that merely mentions
+// a marker is fine. An absent file is skipped; git is never consulted.
+export function markerLineErrors(repoRoot, cfg) {
+  const errors = [];
+  for (const f of artifactSet(repoRoot, cfg).authorOwned) {
+    let text;
+    try {
+      text = readFileSync(f.path, "utf8");
+    } catch (e) {
+      if (e.code !== "ENOENT" && e.code !== "ENOTDIR") errors.push(`${f.rel}: cannot read (${e.message})`);
+      continue;
+    }
+    const seen = new Set();
+    for (const line of text.split("\n")) {
+      const t = line.replace(/[ \t\r]+$/, "");
+      if (MARKER_LINES.has(t) && !seen.has(t)) {
+        seen.add(t);
+        errors.push(`${f.rel}: holds the generated marker line ${t}, but \`generatedArtifacts\` is "local"; remove the generated block and its markers (the index is generated into ${GENERATED_DIR}/)`);
+      }
+    }
+  }
+  return errors;
+}
+
+// What `check` compares for the mode: committed mode returns the generator's own
+// errors and the files to compare; local mode returns the marker errors and no
+// files, since nothing generated is committed.
+export function checkGenerated(repoRoot, cfg, data) {
+  if (!isLocalMode(cfg)) {
+    const { files, errors } = generateArtifacts(repoRoot, cfg, data);
+    return { errors, files };
+  }
+  return { errors: markerLineErrors(repoRoot, cfg), files: [] };
+}
+
+// The one local-mode validation entry point, shared by CLI `check` and MCP
+// `validate` so they cannot disagree. The caller has already loaded the config, so
+// its errors come first; then the roster and items (readBacklog), then markers,
+// with no early exit on item errors.
+export function validateLocal(repoRoot, cfg) {
+  const data = readBacklog(repoRoot, cfg);
+  return { data, errors: [...data.errors, ...checkGenerated(repoRoot, cfg, data).errors] };
 }

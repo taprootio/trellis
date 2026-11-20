@@ -22,6 +22,10 @@ import {
   parseFrontMatter,
   paths,
   branchNameProblem,
+  artifactSet,
+  checkGenerated,
+  validateLocal,
+  markerLineErrors,
 } from "../src/backlog.mjs";
 
 const FISH = {
@@ -733,5 +737,226 @@ test("nextIdOverride: undefined computes the scan value, null and strings are em
     assert.equal(file(plain), file(generateArtifacts(root, cfg, data, { nextIdOverride: undefined })));
     // Only backlog.json carries the next id.
     assert.deepEqual(plain.files.filter((f) => !f.path.endsWith("backlog.json")), nulled.files.filter((f) => !f.path.endsWith("backlog.json")));
+  });
+});
+
+// ------------------------------------------ local generated artifacts (TRL0038)
+
+const LOCAL_CFG = { ...ARRAY_CFG, specVersion: "2.5", milestones: ["Alpha", "Beta"], generatedArtifacts: "local" };
+const ITEMS = {
+  active: [
+    { id: "DEMO0001", title: "First | pipe", effort: 3 },
+    { id: "DEMO0002", title: "Second", effort: 5, milestone: "Beta", priority: "Low", depends_on: ["DEMO0001"] },
+  ],
+  completed: [{ id: "DEMO0003", title: "Done", effort: 2, summary: "Did it.", completed_on: "2026-01-02" }],
+  removed: [{ id: "DEMO0004", title: "Gone", effort: 1, summary: "Dropped.", removed_on: "2026-01-03", removed_reason: "No longer needed." }],
+};
+
+// A local-mode repo: the committed README and index files are plain author text.
+function makeLocalRepo(config = LOCAL_CFG, items = ITEMS) {
+  const root = makeRepo(config, items);
+  const tasks = join(root, "trellis");
+  writeFileSync(join(tasks, "README.md"), "# Backlog\n\nAuthored prose.\n");
+  writeFileSync(join(tasks, "completed", "index.md"), "# Completed\n\nAuthored notes.\n");
+  writeFileSync(join(tasks, "removed", "index.md"), "# Removed\n");
+  return root;
+}
+const withLocalRepo = (fn, config, items) => {
+  const root = makeLocalRepo(config, items);
+  try { return fn(root); } finally { rmSync(root, { recursive: true, force: true }); }
+};
+
+test("generatedArtifacts: only committed or local is accepted, and null is not", () => {
+  for (const good of ["committed", "local"]) {
+    withRepo({ ...ARRAY_CFG, generatedArtifacts: good }, {}, (root) => assert.deepEqual(loadConfig(root).errors, []));
+  }
+  withRepo(ARRAY_CFG, {}, (root) => assert.deepEqual(loadConfig(root).errors, []));
+  for (const bad of ["Local", "", null, true, 1, ["local"]]) {
+    withRepo({ ...ARRAY_CFG, generatedArtifacts: bad }, {}, (root) => {
+      assert.match(loadConfig(root).errors.join("\n"), /`generatedArtifacts` must be "committed" or "local"/, JSON.stringify(bad));
+    });
+  }
+});
+
+test("committed output is byte-identical to the pinned fixture", () => {
+  const cfg = { ...ARRAY_CFG, milestones: ["Alpha", "Beta"], effort: [1, 2, 3, 5] };
+  withRepo(cfg, ITEMS, (root) => {
+    const loaded = loadConfig(root).cfg;
+    const { files, errors } = generateArtifacts(root, loaded, readBacklog(root, loaded));
+    assert.deepEqual(errors, []);
+    const rel = (f) => f.path.slice(root.length + 1);
+    assert.deepEqual(files.map(rel), ["trellis/README.md", "trellis/completed/index.md", "trellis/removed/index.md", "trellis/backlog.json"]);
+    assert.equal(files[0].content, `# Backlog
+
+<!-- BEGIN GENERATED:MILESTONES -->
+
+### Alpha
+
+| ID | Title | Owner | Priority | Effort |
+| --- | --- | --- | --- | --- |
+| [DEMO0001](active/DEMO0001.md) | First \\| pipe |  | High | 3 |
+
+### Beta
+
+| ID | Title | Owner | Priority | Effort |
+| --- | --- | --- | --- | --- |
+| [DEMO0002](active/DEMO0002.md) | Second |  | Low | 5 |
+
+<!-- END GENERATED:MILESTONES -->
+`);
+    assert.equal(files[1].content, `# Completed
+
+<!-- BEGIN GENERATED:COMPLETED -->
+| ID | Title | Summary | Completed |
+| --- | --- | --- | --- |
+| [DEMO0003](tasks/DEMO0003.md) | Done | Did it. | 2026-01-02 |
+<!-- END GENERATED:COMPLETED -->
+`);
+    assert.equal(files[2].content, `# Removed
+
+<!-- BEGIN GENERATED:REMOVED -->
+| ID | Title | Summary | Removed | Reason |
+| --- | --- | --- | --- | --- |
+| [DEMO0004](DEMO0004.md) | Gone | Dropped. | 2026-01-03 | No longer needed. |
+<!-- END GENERATED:REMOVED -->
+`);
+    const json = JSON.parse(files[3].content);
+    assert.equal(json.nextId, "DEMO0005");
+    assert.deepEqual(json.counts, { active: 2, completed: 1, removed: 1 });
+    assert.equal(files[3].content, buildBacklogJson(loaded, readBacklog(root, loaded)));
+  });
+});
+
+test("artifactSet names the four files per mode and the author-owned files in local mode", () => {
+  withRepo(ARRAY_CFG, {}, (root) => {
+    const set = artifactSet(root, loadConfig(root).cfg);
+    assert.equal(set.mode, "committed");
+    assert.deepEqual(set.generated.map((e) => e.rel), ["trellis/README.md", "trellis/completed/index.md", "trellis/removed/index.md", "trellis/backlog.json"]);
+    assert.deepEqual(set.authorOwned, []);
+  });
+  withLocalRepo((root) => {
+    const set = artifactSet(root, loadConfig(root).cfg);
+    assert.equal(set.mode, "local");
+    assert.deepEqual(set.generated.map((e) => e.rel), [
+      "trellis/.generated/index.md", "trellis/.generated/completed.md", "trellis/.generated/removed.md", "trellis/.generated/backlog.json",
+    ]);
+    assert.deepEqual(set.authorOwned.map((e) => e.rel), ["trellis/README.md", "trellis/completed/index.md", "trellis/removed/index.md"]);
+    assert.equal(set.dir, join(root, "trellis", ".generated"));
+  });
+});
+
+test("local output has four files under .generated/ with headings and links that resolve", () => {
+  withLocalRepo((root) => {
+    const { cfg, errors: cfgErrors } = loadConfig(root);
+    assert.deepEqual(cfgErrors, []);
+    const { files, errors } = generateArtifacts(root, cfg, readBacklog(root, cfg));
+    assert.deepEqual(errors, []);
+    const dir = join(root, "trellis", ".generated");
+    assert.deepEqual(files.map((f) => f.path), ["index.md", "completed.md", "removed.md", "backlog.json"].map((n) => join(dir, n)));
+    const byName = Object.fromEntries(files.map((f) => [f.path.slice(dir.length + 1), f.content]));
+    assert.match(byName["index.md"], /^# Backlog\n/);
+    assert.match(byName["completed.md"], /^# Completed tasks\n/);
+    assert.match(byName["removed.md"], /^# Removed tasks\n/);
+    assert.match(byName["index.md"], /### Alpha/);
+    assert.match(byName["index.md"], /### Beta/);
+    // No generated Markdown file carries a marker, and every link resolves from .generated/.
+    let links = 0;
+    for (const name of ["index.md", "completed.md", "removed.md"]) {
+      assert.doesNotMatch(byName[name], /GENERATED:/, name);
+      for (const m of byName[name].matchAll(/\]\((\.\.\/[^)]+)\)/g)) {
+        links++;
+        assert.ok(existsSync(join(dir, m[1])), `${name} links to ${m[1]}`);
+      }
+    }
+    assert.equal(links, 4);
+    assert.equal(byName["index.md"].includes("](active/"), false, "no committed-style link");
+  });
+});
+
+test("local generation reads no file and ignores a missing README", () => {
+  withLocalRepo((root) => {
+    rmSync(join(root, "trellis", "README.md"));
+    rmSync(join(root, "trellis", "completed", "index.md"));
+    rmSync(join(root, "trellis", "removed", "index.md"));
+    const { cfg } = loadConfig(root);
+    const { errors } = generateArtifacts(root, cfg, readBacklog(root, cfg));
+    assert.deepEqual(errors, []);
+  });
+});
+
+test("local backlog.json holds a given nextIdOverride, null included", () => {
+  withLocalRepo((root) => {
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    const json = (opts) => JSON.parse(generateArtifacts(root, cfg, data, opts).files.find((f) => f.path.endsWith("backlog.json")).content);
+    assert.equal(json().nextId, "DEMO0005");
+    assert.equal(json({ nextIdOverride: null }).nextId, null);
+    assert.equal(json({ nextIdOverride: "DEMO0042" }).nextId, "DEMO0042");
+    assert.equal(generateArtifacts(root, cfg, data, { nextIdOverride: null }).nextId, null);
+  });
+});
+
+const SIX_MARKERS = [
+  "<!-- BEGIN GENERATED:MILESTONES -->", "<!-- END GENERATED:MILESTONES -->",
+  "<!-- BEGIN GENERATED:COMPLETED -->", "<!-- END GENERATED:COMPLETED -->",
+  "<!-- BEGIN GENERATED:REMOVED -->", "<!-- END GENERATED:REMOVED -->",
+];
+
+test("the marker scan fails on each of the six marker lines, in any author-owned file", () => {
+  withLocalRepo((root) => {
+    const { cfg } = loadConfig(root);
+    const files = [join(root, "trellis", "README.md"), join(root, "trellis", "completed", "index.md"), join(root, "trellis", "removed", "index.md")];
+    assert.deepEqual(markerLineErrors(root, cfg), []);
+    SIX_MARKERS.forEach((marker, i) => {
+      const file = files[i % 3];
+      const original = readFileSync(file, "utf8");
+      for (const tail of ["", " ", "\t", "\r"]) {
+        writeFileSync(file, `${original}\n${marker}${tail}\nmore\n`);
+        const errors = markerLineErrors(root, cfg);
+        assert.equal(errors.length, 1, `${marker} + ${JSON.stringify(tail)}`);
+        assert.ok(errors[0].includes(marker));
+        assert.ok(errors[0].startsWith(file.slice(root.length + 1)), "names the file");
+      }
+      writeFileSync(file, original);
+    });
+  });
+});
+
+test("the marker scan passes on prose that names a marker", () => {
+  withLocalRepo((root) => {
+    const { cfg } = loadConfig(root);
+    writeFileSync(join(root, "trellis", "README.md"), [
+      "# Backlog", "", "Do not leave <!-- BEGIN GENERATED:MILESTONES --> in this file.", "    <!-- END GENERATED:MILESTONES -->", "`<!-- BEGIN GENERATED:COMPLETED -->`", "",
+    ].join("\n"));
+    assert.deepEqual(markerLineErrors(root, cfg), []);
+  });
+});
+
+test("checkGenerated returns no files in local mode and the compare set in committed mode", () => {
+  withLocalRepo((root) => {
+    const { cfg } = loadConfig(root);
+    const out = checkGenerated(root, cfg, readBacklog(root, cfg));
+    assert.deepEqual(out, { errors: [], files: [] });
+  });
+  withRepo(ARRAY_CFG, {}, (root) => {
+    const { cfg } = loadConfig(root);
+    const out = checkGenerated(root, cfg, readBacklog(root, cfg));
+    assert.deepEqual(out.errors, []);
+    assert.equal(out.files.length, 4);
+  });
+});
+
+test("the local validation entry point orders roster, item and marker errors with no early exit", () => {
+  withLocalRepo((root) => {
+    // A malformed item and a stray marker, plus a malformed roster.
+    writeFileSync(join(root, "trellis", "active", "DEMO0001.md"), fm({ id: "DEMO0001", title: "T", status: "active", depends_on: [], summary: "S.", milestone: "Nope", priority: "High", effort: 3 }));
+    writeFileSync(join(root, "trellis", "README.md"), `# Backlog\n\n${SIX_MARKERS[0]}\n`);
+    writeFileSync(join(root, "trellis", "team.json"), JSON.stringify({ members: "x" }));
+    const { cfg } = loadConfig(root);
+    const { errors } = validateLocal(root, cfg);
+    assert.equal(errors.length, 3, errors.join("\n"));
+    assert.match(errors[0], /team\.json/);
+    assert.match(errors[1], /active\/DEMO0001\.md: milestone must be one of/);
+    assert.match(errors[2], /README\.md: holds the generated marker line/);
   });
 });

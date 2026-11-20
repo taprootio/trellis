@@ -12,7 +12,7 @@
 import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
-import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, PLAIN_PREFIX_RE, branchNameProblem, parseFrontMatter, paths } from "./backlog.mjs";
+import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, PLAIN_PREFIX_RE, artifactSet, branchNameProblem, parseFrontMatter } from "./backlog.mjs";
 
 // A typed failure the CLI maps to an exit code and the MCP adapter maps to a
 // TrellisError. Exit 2 is "refused, nothing written"; exit 1 is a real failure
@@ -647,10 +647,9 @@ export function refuseSymlinkedArtifacts(artifactPaths) {
   }
 }
 
-// The four generated artifacts of a config, per `paths()`.
+// The four generated artifacts of a config, from the mode-aware artifact set.
 export function artifactPaths(repoRoot, cfg) {
-  const p = paths(repoRoot, cfg);
-  return [p.readme, p.completedIndex, p.removedIndex, p.backlogJson];
+  return artifactSet(repoRoot, cfg).generated.map((e) => e.path);
 }
 
 // Throws the layout refusals without allocating, so a caller can fail before it
