@@ -13,7 +13,7 @@
 // the TRL0006 Risk made concrete: a prompt for repo A carries A's playbooks and
 // vocabulary; for repo B, B's.
 
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { loadConfig, paths, scanIdPattern } from "./backlog.mjs";
 import { TrellisError } from "./mcp.mjs";
