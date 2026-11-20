@@ -75,12 +75,34 @@ function stripBlock(text, [begin, end]) {
   return text.slice(0, from) + text.slice(to);
 }
 
+// Start offsets of the lines of `text` that sit inside a fenced code block (``` or ~~~),
+// fence lines included. A stock-text copy in an example must never be edited (TRL0038).
+function fencedLineStarts(text) {
+  const inside = new Set();
+  let fence = null;
+  let at = 0;
+  for (const line of text.split("\n")) {
+    const m = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      inside.add(at);
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length && line.trim() === m[1]) fence = null;
+    } else if (m) {
+      inside.add(at);
+      fence = m[1];
+    }
+    at += line.length + 1;
+  }
+  return inside;
+}
+
 // The index of the first copy of `needle` that fills whole lines of `text` (it starts a
-// line and ends one), or -1. A customized copy earlier in the text is not a match.
+// line and ends one) outside fenced code, or -1. A customized copy earlier in the text
+// is not a match.
 function findWholeLines(text, needle) {
+  const fenced = fencedLineStarts(text);
   for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + 1)) {
     const after = text[i + needle.length];
-    if ((i === 0 || text[i - 1] === "\n") && (after === undefined || after === "\n")) return i;
+    if ((i === 0 || text[i - 1] === "\n") && (after === undefined || after === "\n") && !fenced.has(i)) return i;
   }
   return -1;
 }

@@ -15,7 +15,7 @@ import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
-import { applyImport, assertNotLedgerMode, assertNotLocalMode, assertNoLeftoverMarkers, assertSourceNotLocalOutput, ImportRefused } from "../src/import.mjs";
+import { applyImport, importFailureLines, assertNotLedgerMode, assertNotLocalMode, assertNoLeftoverMarkers, assertSourceNotLocalOutput, ImportRefused } from "../src/import.mjs";
 import { loadConfig } from "../src/backlog.mjs";
 import { switchToLocal } from "../src/switch-local.mjs";
 import { LedgerError, refuseSymlinkedArtifacts, artifactPaths } from "../src/ledger.mjs";
@@ -203,9 +203,7 @@ function retireFlagErrors(opts) {
 // review before committing.
 function reportImport(targetRoot, summary) {
   if (summary.errors.length) {
-    const wrote = summary.created.length || summary.generated.length;
-    console.error(wrote ? `Import into ${targetRoot} did not complete:` : `Refused to import into ${targetRoot} — wrote nothing:`);
-    for (const e of summary.errors) console.error(`  - ${e}`);
+    for (const line of importFailureLines(`Import into ${targetRoot}`, targetRoot, summary)) console.error(line);
     for (const w of summary.warnings) console.warn(`  warning: ${w}`);
     return;
   }

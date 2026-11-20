@@ -778,6 +778,15 @@ function resolveFuture(path) {
 }
 
 const identityOf = (path) => { try { const st = statSync(path); return `${st.dev}:${st.ino}`; } catch { return null; } };
+// Identities of `path` and each of its existing ancestors.
+function existingChain(path) {
+  const ids = new Set();
+  for (let at = resolve(path); ; at = dirname(at)) {
+    const id = identityOf(at);
+    if (id) ids.add(id);
+    if (dirname(at) === at) return ids;
+  }
+}
 const posixRel = (from, to) => relative(from, to).split(sep).join("/");
 
 // Local mode only: a mapped source file that is one of the target's own outputs would be
@@ -794,10 +803,14 @@ export function assertSourceNotLocalOutput(targetRoot, sourceRoot, mapping, what
   const genReal = resolveFuture(set.dir);
   const genId = identityOf(set.dir);
   const overlaps = (a, b) => { const r = relative(a, b); return r === "" || (r !== ".." && !r.startsWith(`..${sep}`) && !isAbsolute(r)); };
-  for (const d of [".", ...Object.values(mapping.sources).filter(Boolean).flatMap((spec) => spec.dirs)]) {
+  // Existing folders on the way up to the target's `.generated`, by device and inode: a
+  // case-folding volume can spell the same folder two ways (round 10).
+  const genChain = existingChain(set.dir);
+  for (const d of [".", ...STATUS_ORDER.map((s) => mapping.sources[s]).filter(Boolean).flatMap((spec) => spec.dirs)]) {
     const dir = d === "." ? sourceRoot : join(sourceRoot, d);
     const real = resolveFuture(dir);
-    if (overlaps(real, genReal) || overlaps(genReal, real) || (genId && genId === identityOf(dir))) {
+    const dirId = identityOf(dir);
+    if (overlaps(real, genReal) || overlaps(genReal, real) || (genId && genId === dirId) || (dirId && genChain.has(dirId)) || (genId && existingChain(dir).has(genId))) {
       throw new ImportRefused(`${what} refused: the source folder ${d === "." ? "(the source root)" : d} overlaps the target's generated folder ${posixRel(targetRoot, set.dir)}. Map a different source. Nothing was written.`);
     }
   }
@@ -810,6 +823,21 @@ export function assertSourceNotLocalOutput(targetRoot, sourceRoot, mapping, what
     const hit = outputs.get(resolveFuture(src.file)) || ids.get(identity(src.file));
     if (hit) throw new ImportRefused(`${what} refused: the mapped source file ${src.rel} is the target's generated output ${hit.split(sep).join("/")}. Map a different source. Nothing was written.`);
   }
+}
+
+// The failure banner both import reporters print: "did not complete" when anything was
+// written or a rollback left files behind, else "wrote nothing", then the errors and any
+// files the rollback could not restore.
+export function importFailureLines(label, targetRoot, summary) {
+  const left = summary.rollback || [];
+  const wrote = summary.created.length || summary.generated.length || left.length;
+  const lines = [wrote ? `${label} did not complete:` : `Refused to import into ${targetRoot} — wrote nothing:`];
+  for (const e of summary.errors) lines.push(`  - ${e}`);
+  if (left.length) {
+    lines.push("  rollback was incomplete; these files need attention:");
+    for (const r of left) lines.push(`    - ${r}`);
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------- apply

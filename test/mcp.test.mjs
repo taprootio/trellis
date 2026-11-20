@@ -1057,8 +1057,8 @@ test("validate reports the same ordered errors as check in local mode, including
     const out = validateOp(c.root);
     assert.equal(out.ok, false);
     assert.equal(out.errors.length, 2);
-    assert.match(out.errors[0], /^active\/DEMO0001\.md: milestone must be one of/);
-    assert.match(out.errors[1], /^trellis\/README\.md: holds the generated marker line <!-- BEGIN GENERATED:MILESTONES -->/);
+    assert.match(out.errors[0].replace(/\\/g, "/"), /^active\/DEMO0001\.md: milestone must be one of/);
+    assert.match(out.errors[1].replace(/\\/g, "/"), /^trellis\/README\.md: holds the generated marker line <!-- BEGIN GENERATED:MILESTONES -->/);
     // The CLI check prints the same errors in the same order.
     const r = spawnSync(process.execPath, [join(sourceRoot, "scripts", "trellis.mjs"), "check"], { cwd: c.root, encoding: "utf8" });
     assert.equal(r.status, 1);

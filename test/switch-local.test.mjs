@@ -261,6 +261,26 @@ test("a customized last line of the artifact bullet makes the switch warn and le
   } finally { f.cleanup(); }
 });
 
+test("a stock-text copy inside a fenced code block never matches: the customized real bullet warns and AGENTS.md stays", () => {
+  const f = fixture();
+  try {
+    const path = join(f.root, "AGENTS.md");
+    const stock = artifactBullet(f.dir, "committed");
+    const text = readFileSync(path, "utf8");
+    assert.ok(text.includes(stock));
+    const custom = text.replace(stock, `${stock.slice(0, -1)} (see the wiki).`);
+    const end = custom.indexOf("<!-- END TRELLIS");
+    const withFence = end === -1 ? null : custom.slice(0, end) + "```md\n" + stock + "\n- next bullet\n```\n" + custom.slice(end);
+    assert.ok(withFence, "the block has an end marker");
+    writeFileSync(path, withFence);
+    f.commit();
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(path, "utf8"), withFence);
+    assert.match(r.stderr, /AGENTS\.md: the generated-files bullet/);
+  } finally { f.cleanup(); }
+});
+
 test("an artifact bullet with text appended after its final period warns and leaves AGENTS.md alone", () => {
   const f = fixture();
   try {

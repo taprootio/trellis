@@ -13,7 +13,7 @@
 // dependency-free.
 
 import { resolve } from "node:path";
-import { applyImport, ImportRefused } from "../src/import.mjs";
+import { applyImport, importFailureLines, ImportRefused } from "../src/import.mjs";
 import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 import { loadProfile, loadMappingFile, listProfiles } from "../src/profiles.mjs";
 
@@ -93,13 +93,7 @@ function parseArgs(argv) {
 
 function report(targetRoot, summary, dryRun) {
   if (summary.errors.length) {
-    const wrote = summary.created.length || summary.generated.length || (summary.rollback || []).length;
-    console.error(wrote ? `Import of ${targetRoot} did not complete:` : `Refused to import into ${targetRoot} — wrote nothing:`);
-    for (const e of summary.errors) console.error(`  - ${e}`);
-    if ((summary.rollback || []).length) {
-      console.error("  rollback was incomplete; these files need attention:");
-      for (const r of summary.rollback) console.error(`    - ${r}`);
-    }
+    for (const line of importFailureLines(`Import of ${targetRoot}`, targetRoot, summary)) console.error(line);
     // Even on refusal, the id map + warnings help the user fix the mapping — e.g.
     // see which source ids collided behind an ambiguous depends_on.
     if (summary.idMap.length) {

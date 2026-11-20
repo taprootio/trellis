@@ -469,7 +469,7 @@ test("local check passes with no .generated/ folder and fails on a README marker
     writeFileSync(c.readme, "# Backlog\n\n<!-- BEGIN GENERATED:MILESTONES -->\n<!-- END GENERATED:MILESTONES -->\n");
     const bad = checkCmd(c);
     assert.equal(bad.status, 1);
-    assert.match(bad.stderr, /trellis\/README\.md: holds the generated marker line <!-- BEGIN GENERATED:MILESTONES -->/);
+    assert.match(bad.stderr.replace(/\\/g, "/"), /trellis\/README\.md: holds the generated marker line <!-- BEGIN GENERATED:MILESTONES -->/);
     assert.match(bad.stderr, /END GENERATED:MILESTONES/);
   } finally { c.cleanup(); }
 });
@@ -601,7 +601,7 @@ test("the local check prints errors in order for a malformed item and a stray ma
     writeFileSync(c.readme, "# Backlog\n<!-- END GENERATED:REMOVED -->\n");
     const r = checkCmd(c);
     assert.equal(r.status, 1);
-    const lines = r.stderr.trim().split("\n");
+    const lines = r.stderr.replace(/\\/g, "/").trim().split("\n");
     assert.equal(lines[0], "Backlog validation failed:");
     assert.match(lines[1], /^  - active\/DEMO0001\.md: milestone must be one of Alpha$/);
     assert.match(lines[2], /^  - trellis\/README\.md: holds the generated marker line <!-- END GENERATED:REMOVED -->/);

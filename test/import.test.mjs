@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
-import { planImport, applyImport, ImportRefused } from "../src/import.mjs";
+import { planImport, applyImport, importFailureLines, ImportRefused } from "../src/import.mjs";
 import { loadProfile, listProfiles } from "../src/profiles.mjs";
 import { loadConfig, readBacklog, generateArtifacts, parseFrontMatter, nextId, validateLocal, localHead, LOCAL_TITLES } from "../src/backlog.mjs";
 import { testSeams as outputSeams } from "../src/local-output.mjs";
@@ -1097,7 +1097,7 @@ test("local import writes .generated/ through the shared writer, no committed in
     const { summary } = withSeams(() => applyImport(root, legacySrc, mapping, { dryRun: false }));
     assert.deepEqual(summary.errors, []);
     assert.equal(writes, 4, "all four outputs go through writeArtifactFiles");
-    assert.deepEqual(summary.generated.sort(), ["index.md", "completed.md", "removed.md", "backlog.json"].map((n) => `trellis/.generated/${n}`).sort());
+    assert.deepEqual(summary.generated.map((p) => p.replace(/\\/g, "/")).sort(), ["index.md", "completed.md", "removed.md", "backlog.json"].map((n) => `trellis/.generated/${n}`).sort());
     for (const n of ["index.md", "completed.md", "removed.md", "backlog.json"]) assert.ok(existsSync(join(root, "trellis", ".generated", n)), n);
     for (const f of ["README.md", "backlog.json", "completed/index.md", "removed/index.md"]) assert.equal(existsSync(join(root, "trellis", f)), false, f);
     const { cfg } = loadConfig(root);
@@ -1567,4 +1567,47 @@ test("a clean rollback leaves the summary's rollback list empty", () => {
     const { summary } = withSeams(() => applyImport(root, legacySrc, mapping));
     assert.deepEqual(summary.rollback, []);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ------------------------------------------------------ review round 10 (TRL0038)
+test("a source root spelled in another case that holds the target's .generated is refused on a case-insensitive volume", (t) => {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "trellis-case-")));
+  try {
+    mkdirSync(join(parent, "case-probe"));
+    if (!existsSync(join(parent, "CASE-PROBE"))) { t.skip("the volume is case-sensitive"); return; }
+    const root = join(parent, "trellis");
+    mkdirSync(root);
+    const { summary } = applyScaffold(root, { prefix: "TAP" }, {}, projectRoot);
+    assert.deepEqual(summary.errors, []);
+    const cfgPath = join(root, "trellis", "backlog.config.json");
+    writeFileSync(cfgPath, JSON.stringify({ ...JSON.parse(readFileSync(cfgPath, "utf8")), generatedArtifacts: "local" }, null, 2) + "\n");
+    for (const f of ["README.md", "backlog.json", "completed/index.md", "removed/index.md"]) rmSync(join(root, "trellis", f), { force: true });
+    git(root, "init", "-q", ...initRefFormat, "-b", "main");
+    writeFileSync(join(root, ".gitignore"), "trellis/.generated/\n");
+    const gen = join(root, "trellis", ".generated");
+    mkdirSync(gen);
+    writeFileSync(join(gen, "backlog.json"), JSON.stringify({ prefix: "TAP", milestones: [], nextId: null, counts: { active: 0, completed: 0, removed: 0 }, tasks: [] }));
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["."], file: "*.md" } } };
+    const before = tree(root);
+    assert.throws(() => applyImport(root, join(parent, "TRELLIS"), at), (e) => e instanceof ImportRefused && /generated folder/.test(e.message));
+    assert.deepEqual(tree(root), before);
+  } finally { rmSync(parent, { recursive: true, force: true }); }
+});
+
+test("a mapping with an extra sources key imports in local mode, the key ignored", () => {
+  const root = localTarget();
+  try {
+    const at = { ...mapping, sources: { ...mapping.sources, note: { file: "*.md" } } };
+    const { summary } = withSeams(() => applyImport(root, legacySrc, at, { dryRun: false }));
+    assert.deepEqual(summary.errors, []);
+    assert.ok(summary.imported.length > 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the import failure banner says the import did not complete and lists the rollback leftovers", () => {
+  const base = { created: [], generated: [], errors: ["boom"], rollback: [] };
+  assert.match(importFailureLines("Import into /t", "/t", base)[0], /wrote nothing/);
+  const lines = importFailureLines("Import into /t", "/t", { ...base, rollback: ["trellis/active/TAP0001.md"] });
+  assert.match(lines[0], /did not complete/);
+  assert.ok(lines.some((l) => l.includes("trellis/active/TAP0001.md")));
 });
