@@ -289,6 +289,20 @@ test("an artifact bullet followed by a continuation line warns and leaves AGENTS
   } finally { f.cleanup(); }
 });
 
+test("an artifact bullet followed by a blank line and an indented paragraph warns and leaves AGENTS.md alone", () => {
+  const f = fixture();
+  try {
+    const path = join(f.root, "AGENTS.md");
+    writeFileSync(path, readFileSync(path, "utf8").replace("`BEGIN/END GENERATED` markers.\n", "`BEGIN/END GENERATED` markers.\n\n  Ask the owner first.\n"));
+    f.commit();
+    const before = readFileSync(path, "utf8");
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(path, "utf8"), before);
+    assert.match(r.stderr, /AGENTS\.md: the generated-files bullet/);
+  } finally { f.cleanup(); }
+});
+
 test("many tracked files under the tasks folder do not change the outcome", () => {
   const f = fixture();
   try {

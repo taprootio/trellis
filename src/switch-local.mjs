@@ -239,8 +239,11 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
       const at = findWholeLines(block, committed);
       // The copy must end its list item: a continuation line after it means the user
       // extended the bullet, so it is not Trellis's own text any more.
-      const nextLine = at === -1 ? "" : block.slice(at + committed.length + 1).split("\n")[0];
-      const endsItem = at !== -1 && (block.length <= at + committed.length + 1 || nextLine.trim() === "" || /^[-*] /.test(nextLine));
+      // After a blank line, an indented next line is a continuation paragraph of the same item.
+      const following = at === -1 ? [] : block.slice(at + committed.length + 1).split("\n");
+      const nextLine = following[0] ?? "";
+      const nextText = following.find((l) => l.trim() !== "") ?? "";
+      const endsItem = at !== -1 && (block.length <= at + committed.length + 1 || (nextLine.trim() === "" ? !/^\s/.test(nextText) : /^[-*] /.test(nextLine)));
       if (at !== -1 && endsItem) {
         requireClean("AGENTS.md", "holds the Trellis block the switch updates");
         edits.push({ path: agentsPath, rel: "AGENTS.md", before: text, after: text.slice(0, bi) + block.slice(0, at) + local + block.slice(at + committed.length) + text.slice(ei), why: "updated the generated-files bullet" });

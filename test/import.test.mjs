@@ -1510,3 +1510,61 @@ test("a mapping aimed at the target's .generated folder is refused before anythi
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ------------------------------------------------------- review round 9 (TRL0038)
+test("a target folder named ..planning is not a parent traversal: a mapped source root holding it is refused", () => {
+  const root = localTarget();
+  try {
+    const cfgPath = join(root, "trellis", "backlog.config.json");
+    writeFileSync(cfgPath, JSON.stringify({ ...JSON.parse(readFileSync(cfgPath, "utf8")), tasksDir: "..planning" }, null, 2) + "\n");
+    writeFileSync(join(root, ".gitignore"), "..planning/.generated/\n");
+    for (const d of ["active", "completed", "removed"]) mkdirSync(join(root, "..planning", d), { recursive: true });
+    mkdirSync(join(root, "..planning", ".generated"));
+    const full = { id: "TAP0001", title: "T", status: "active", milestone: "Alpha", priority: "High", effort: 3, depends_on: [], owner: null, collaborators: [], summary: "S" };
+    writeFileSync(join(root, "..planning", ".generated", "backlog.json"), JSON.stringify({ prefix: "TAP", milestones: [], nextId: null, counts: { active: 1, completed: 0, removed: 0 }, tasks: [full] }));
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["."], file: "*.md" } } };
+    const before = tree(root);
+    assert.throws(() => applyImport(root, root, at), (e) => e instanceof ImportRefused && /generated folder/.test(e.message));
+    assert.deepEqual(tree(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a foreign export whose completed or removed tasks lack the close fields imports as an ordinary file", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-genjson5-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.json" } } };
+    const task = (status, extra) => ({ id: "X0001", title: "T", status, milestone: "Alpha", priority: "High", effort: 3, depends_on: [], owner: null, collaborators: [], summary: "S", ...extra });
+    const wrap = (status, extra) => JSON.stringify({ prefix: "X", milestones: [], nextId: "X0002", counts: { active: 0, completed: 0, removed: 0, [status]: 1 }, tasks: [task(status, extra)] });
+    for (const body of [wrap("completed", {}), wrap("removed", {}), wrap("removed", { removed_on: "2026-01-01" }), wrap("completed", { completed_on: 5 })]) {
+      writeFileSync(join(src, ".generated", "backlog.json"), body);
+      assert.equal(planImport(root, src, at, {}).counts.total, 1, `imported: ${body}`);
+    }
+    for (const body of [wrap("completed", { completed_on: "2026-01-01" }), wrap("removed", { removed_on: "2026-01-01", removed_reason: "Gone." })]) {
+      writeFileSync(join(src, ".generated", "backlog.json"), body);
+      assert.equal(planImport(root, src, at, {}).counts.total, 0, `skipped: ${body}`);
+    }
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an incomplete import rollback is carried into the summary", { skip: process.platform === "win32" || (process.getuid && process.getuid() === 0) }, () => {
+  const root = localTarget();
+  const gen = join(root, "trellis", ".generated");
+  try {
+    // Locks .generated/ before write 1, so the file written at 0 cannot be removed again.
+    outputSeams.beforeWrite = (_p, i) => { if (i === 1) { chmodSync(gen, 0o555); throw new Error("forced failure"); } };
+    const { summary } = withSeams(() => applyImport(root, legacySrc, mapping));
+    assert.match(summary.errors.join(), /forced failure/);
+    assert.ok(summary.rollback.length > 0 && summary.rollback.some((r) => /index\.md/.test(r)), summary.rollback.join("; "));
+  } finally { if (existsSync(gen)) chmodSync(gen, 0o755); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a clean rollback leaves the summary's rollback list empty", () => {
+  const root = localTarget();
+  try {
+    importSeams.afterItemCreate = () => { throw new Error("forced failure"); };
+    const { summary } = withSeams(() => applyImport(root, legacySrc, mapping));
+    assert.deepEqual(summary.rollback, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

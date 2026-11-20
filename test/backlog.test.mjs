@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync, chmodSync } from "node:fs";
 import { spawnSync, execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   loadConfig,
@@ -796,7 +796,7 @@ test("committed output is byte-identical to the pinned fixture", () => {
     const loaded = loadConfig(root).cfg;
     const { files, errors } = generateArtifacts(root, loaded, readBacklog(root, loaded));
     assert.deepEqual(errors, []);
-    const rel = (f) => f.path.slice(root.length + 1);
+    const rel = (f) => f.path.slice(root.length + 1).split(sep).join("/");
     assert.deepEqual(files.map(rel), ["trellis/README.md", "trellis/completed/index.md", "trellis/removed/index.md", "trellis/backlog.json"]);
     assert.equal(files[0].content, `# Backlog
 
@@ -843,16 +843,16 @@ test("artifactSet names the four files per mode and the author-owned files in lo
   withRepo(ARRAY_CFG, {}, (root) => {
     const set = artifactSet(root, loadConfig(root).cfg);
     assert.equal(set.mode, "committed");
-    assert.deepEqual(set.generated.map((e) => e.rel), ["trellis/README.md", "trellis/completed/index.md", "trellis/removed/index.md", "trellis/backlog.json"]);
+    assert.deepEqual(set.generated.map((e) => e.rel.split(sep).join("/")), ["trellis/README.md", "trellis/completed/index.md", "trellis/removed/index.md", "trellis/backlog.json"]);
     assert.deepEqual(set.authorOwned, []);
   });
   withLocalRepo((root) => {
     const set = artifactSet(root, loadConfig(root).cfg);
     assert.equal(set.mode, "local");
-    assert.deepEqual(set.generated.map((e) => e.rel), [
+    assert.deepEqual(set.generated.map((e) => e.rel.split(sep).join("/")), [
       "trellis/.generated/index.md", "trellis/.generated/completed.md", "trellis/.generated/removed.md", "trellis/.generated/backlog.json",
     ]);
-    assert.deepEqual(set.authorOwned.map((e) => e.rel), ["trellis/README.md", "trellis/completed/index.md", "trellis/removed/index.md"]);
+    assert.deepEqual(set.authorOwned.map((e) => e.rel.split(sep).join("/")), ["trellis/README.md", "trellis/completed/index.md", "trellis/removed/index.md"]);
     assert.equal(set.dir, join(root, "trellis", ".generated"));
   });
 });

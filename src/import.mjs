@@ -337,8 +337,11 @@ const TASK_KEY_TYPES = {
   effort: (v) => v === null || typeof v === "number" || typeof v === "string",
   depends_on: stringList, collaborators: stringList,
 };
+// Closed items also carry their close fields (SPEC §8.2).
+const CLOSE_KEYS = { completed: ["completed_on"], removed: ["removed_on", "removed_reason"] };
 function hasTaskShape(t) {
-  return !!t && typeof t === "object" && !Array.isArray(t) && Object.entries(TASK_KEY_TYPES).every(([k, ok]) => Object.hasOwn(t, k) && ok(t[k]));
+  return !!t && typeof t === "object" && !Array.isArray(t) && Object.entries(TASK_KEY_TYPES).every(([k, ok]) => Object.hasOwn(t, k) && ok(t[k]))
+    && (CLOSE_KEYS[t.status] || []).every((k) => typeof t[k] === "string");
 }
 function hasBacklogShape(abs) {
   try {
@@ -790,7 +793,7 @@ export function assertSourceNotLocalOutput(targetRoot, sourceRoot, mapping, what
   // read the outputs the import rewrites, whatever its glob matches (round 8).
   const genReal = resolveFuture(set.dir);
   const genId = identityOf(set.dir);
-  const overlaps = (a, b) => { const r = relative(a, b); return r === "" || (!r.startsWith("..") && !isAbsolute(r)); };
+  const overlaps = (a, b) => { const r = relative(a, b); return r === "" || (r !== ".." && !r.startsWith(`..${sep}`) && !isAbsolute(r)); };
   for (const d of [".", ...Object.values(mapping.sources).filter(Boolean).flatMap((spec) => spec.dirs)]) {
     const dir = d === "." ? sourceRoot : join(sourceRoot, d);
     const real = resolveFuture(dir);
@@ -818,7 +821,7 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
   assertNotLedgerMode(targetRoot, "import");
   refuseLocalOutputs(targetRoot, dryRun);
   if (!dryRun) assertSourceNotLocalOutput(targetRoot, sourceRoot, mapping);
-  const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, provenance: null, root: null, preserved: 0, reassigned: [], idFloor: null, warnings: [], errors: [] };
+  const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, provenance: null, root: null, preserved: 0, reassigned: [], idFloor: null, rollback: [], warnings: [], errors: [] };
   const plan = planImport(targetRoot, sourceRoot, mapping, { gitDate, preserveIds, idFloor });
   summary.idMap = plan.idMap;
   summary.counts = plan.counts;
@@ -884,11 +887,15 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
     summary.generated = files.map((f) => relative(targetRoot, f.path));
     return { summary };
   } catch (e) {
-    for (const abs of written) { try { rmSync(abs, { force: true }); } catch { /* best-effort */ } }
+    // Anything the rollback cannot undo is reported, never hidden behind "wrote nothing".
+    const left = summary.rollback;
+    if (e.kept) left.push(...e.kept.map((k) => `kept backup: ${k}`));
+    if (e.failed) left.push(...e.failed);
+    for (const abs of written) { try { rmSync(abs, { force: true }); } catch (re) { left.push(`could not remove ${abs}: ${re.message}`); } }
     for (const a of priorArtifacts) {
-      try { a.before === null ? rmSync(a.path, { force: true }) : writeFileSync(a.path, a.before); } catch { /* best-effort */ }
+      try { a.before === null ? rmSync(a.path, { force: true }) : writeFileSync(a.path, a.before); } catch (re) { left.push(`could not restore ${a.path}: ${re.message}`); }
     }
-    if (priorConfig != null) { try { writeFileSync(p.config, priorConfig); } catch { /* best-effort */ } }
+    if (priorConfig != null) { try { writeFileSync(p.config, priorConfig); } catch (re) { left.push(`could not restore ${p.config}: ${re.message}`); } }
     removeCreatedDirs(createdDirs);
     summary.errors.push(e.message);
     return { summary };

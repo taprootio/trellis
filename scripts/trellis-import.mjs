@@ -93,9 +93,13 @@ function parseArgs(argv) {
 
 function report(targetRoot, summary, dryRun) {
   if (summary.errors.length) {
-    const wrote = summary.created.length || summary.generated.length;
+    const wrote = summary.created.length || summary.generated.length || (summary.rollback || []).length;
     console.error(wrote ? `Import of ${targetRoot} did not complete:` : `Refused to import into ${targetRoot} — wrote nothing:`);
     for (const e of summary.errors) console.error(`  - ${e}`);
+    if ((summary.rollback || []).length) {
+      console.error("  rollback was incomplete; these files need attention:");
+      for (const r of summary.rollback) console.error(`    - ${r}`);
+    }
     // Even on refusal, the id map + warnings help the user fix the mapping — e.g.
     // see which source ids collided behind an ambiguous depends_on.
     if (summary.idMap.length) {
