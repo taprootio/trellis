@@ -108,6 +108,8 @@ MCP **resources** (`trellis://…`) and the equivalent Markdown playbooks (TRL00
 see `src/prompts.mjs`), so any MCP-aware tool (Claude, Cursor, Windsurf, Codex,
 Cline, Zed) runs the same loop. Those prompts and playbooks are product features
 for repos that use Trellis; Trellis's own contributors use the shipped
-good-agent skills instead. Prompts and resources read the repo's own files
+good-agent skills instead, including `open-pr` to draft and open pull
+requests (it adds the release decision and review record that `pr-draft`
+and the PR template leave out). Prompts and resources read the repo's own files
 live and serve the server's repo (`--repo` / cwd); a shared server that keys them
 by `repoRoot` is TRL0019.
