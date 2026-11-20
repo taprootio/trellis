@@ -286,8 +286,10 @@ custom **effort scale** for display.
   render without reading the config. Three cases differ: an identity scale emits no
   display fields; a closed item whose historical `effort` no longer resolves under
   the current scale keeps its original value and type as written (a retired number
-  such as `8` stays the number 8, a retired label stays a string), with no display
-  fields; and a qualifying closed item under `legacy` (§5.1) whose `effort`
+  such as `8` stays the number 8, a retired label stays a string), and a qualifying
+  `legacy` item (§5.1) emits no display fields for it, because only qualifying items
+  have a stored `_effort*` key cleared (a stored display key on any other item is
+  passed through as today); and a qualifying closed item under `legacy` (§5.1) whose `effort`
   is missing or blank has no number, so `backlog.json` carries `null` and no label,
   emoji or image (§8.2).
 
@@ -583,9 +585,13 @@ the local id ledger (§3.1), and the optional `generatedArtifacts` config key wi
 local generated artifacts (§8.5), and the optional `legacy` config key, which lets
 closed items from before adoption omit the descriptive metadata (§5.1). Repos that
 omit them behave as in 2.4. One compatibility exception: the generator now inserts
-table text literally. A committed scan-mode index generated from a title containing
-`$'`, `$&` or `$1` held corrupt bytes, so it may now fail `check` until regenerated,
-even without `legacy`. Upgrading repos rerun `trellis generate`.
+table text literally. The old scan-mode replacement string expanded `$$` (to `$`),
+`$&`, `` $` `` and `$'` (the old pattern had no capture groups, so `$1` stayed
+literal). A committed scan-mode index built from a title holding one of those held
+corrupt bytes, so it may now fail `check` until regenerated, even without `legacy`.
+Upgrading repos rerun `trellis generate`. If an old `$&`, `` $` `` or `$'` expansion
+nested a second generated marker pair inside the block, first restore one clean
+marker pair, keeping the authored text, and then rerun `trellis generate`.
 
 ## 10. CI and branch protection
 

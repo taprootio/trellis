@@ -1107,6 +1107,9 @@ test("a qualifying item mixing blank and populated fields keeps the populated on
     assert.deepEqual(data.errors, []);
     const t = JSON.parse(buildBacklogJson(cfg, data)).tasks[0];
     assert.deepEqual([t.summary, t.milestone, t.priority, t.effort], ["Kept.", null, "High", null]);
+    const { files } = generateArtifacts(root, cfg, data);
+    const done = files.find((f) => f.path === paths(root, cfg).completedIndex).content;
+    assert.match(done, /\| \[TAP0002\]\(tasks\/TAP0002\.md\) \| T \| Kept\. \| 2026-06-01 \|/);
   } finally { cleanup(root); }
 });
 
