@@ -11,7 +11,7 @@
 // takes an explicit targetRoot and holds no process-wide state, so the CLI and a
 // future MCP tool (TRL0004) can share it.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join, relative, isAbsolute, sep } from "node:path";
 import { execFileSync } from "node:child_process";
 import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, GENERATED_DIR, ledgerMarkerRe, loadConfig, loadRoster, readBacklog, generateArtifacts, attachEffortScale, artifactSet, isLocalMode } from "./backlog.mjs";
@@ -42,6 +42,38 @@ export const DEFAULTS = {
 
 // Marked block appended to (or used to create) AGENTS.md.
 export const AGENTS_MARKERS = ["<!-- BEGIN TRELLIS -->", "<!-- END TRELLIS -->"];
+
+// Codex reads at most this many bytes of AGENTS.md; good-agent's `codex/size-budget`
+// rule fails above it (TRL0040).
+export const AGENTS_BYTE_LIMIT = 32768;
+
+// Each starts its own output line, so tests and tools match a token, never prose.
+export const INIT_TOKENS = {
+  blockNotUpdated: "[trellis:block-not-updated]",
+  carryOver: "[trellis:carry-over]",
+  preview: "[trellis:preview]",
+  size: "[trellis:size]",
+};
+
+// The warning printed wherever init prints a block for the owner to place by hand. With
+// `bytesNeeded` it also says how big AGENTS.md would become.
+export function carryOverWarning({ bytesNeeded } = {}) {
+  const size = bytesNeeded === undefined ? "" : ` AGENTS.md would be ${bytesNeeded} bytes; the limit is ${AGENTS_BYTE_LIMIT}.`;
+  return `${INIT_TOKENS.carryOver} Carry over the Loop contract values this repo already uses (branch-naming, gates, attribution) when you place the block.${size}`;
+}
+
+// A repo that already runs good-agent has these files. Each counts only as a regular
+// file, so a directory at the path is not a marker. Returns the matched path or null.
+const GOOD_AGENT_MARKERS = ["good-agent.config.json", ".agents/skills/work-task/SKILL.md"];
+export function detectGoodAgent(targetRoot) {
+  return GOOD_AGENT_MARKERS.find((rel) => {
+    try {
+      return statSync(join(targetRoot, rel)).isFile();
+    } catch {
+      return false;
+    }
+  }) ?? null;
+}
 
 // Process files copied verbatim from the Trellis install (sourceRoot). Their
 // value is the loop, not the exact command names; the AGENTS block below carries
@@ -360,6 +392,15 @@ export function artifactBullet(root, mode = "committed", variant = "full") {
   **generated** — never hand-edit between the \`BEGIN/END GENERATED\` markers.`;
 }
 
+// The Loop contract table, shared by the full and the compact block.
+const loopTable = (idExample) => `| seam point | this repo's value |
+| --- | --- |
+| \`regenerate\` | \`npx @taprootio/trellis generate\` |
+| \`check\` | \`npx @taprootio/trellis check\` |
+| \`branch-naming\` | \`<initials>/<id-lowercase>/<slug>\` (e.g. \`ab/${idExample}/short-slug\`) |
+| \`gates\` | \`npx @taprootio/trellis check\` (plus this repo's tests/lint) |
+| \`attribution\` | none — no \`Co-Authored-By:\` trailers or "Generated with …" footers |`;
+
 // The ledger-mode claim line (TRL0037), shared by both blocks. The full block makes it
 // its own bullet; the compact block uses it as a sentence.
 const CLAIM_LINE = 'Claim ids with `npx @taprootio/trellis claim --title "<one line>"`; never pick the next number by hand.';
@@ -405,14 +446,30 @@ ${protectedBranch}
 
 ${loopLead}
 
-| seam point | this repo's value |
-| --- | --- |
-| \`regenerate\` | \`npx @taprootio/trellis generate\` |
-| \`check\` | \`npx @taprootio/trellis check\` |
-| \`branch-naming\` | \`<initials>/<id-lowercase>/<slug>\` (e.g. \`ab/${idExample}/short-slug\`) |
-| \`gates\` | \`npx @taprootio/trellis check\` (plus this repo's tests/lint) |
-| \`attribution\` | none — no \`Co-Authored-By:\` trailers or "Generated with …" footers |
+${loopTable(idExample)}
 ${has("playbooks") ? "\nSee `trellis/playbooks/` for the work-a-task and code-review loops.\n" : ""}${end}
+`;
+}
+
+// The short block for a repo that already runs good-agent: the loops live in its skills,
+// so the block only names them, the claim line (ledger mode), the generated files and the
+// Loop contract (TRL0040). The artifact bullet ends its item with a blank line so
+// `--switch-to-local` can recognize and rewrite it.
+export function compactBlock(o, root = DEFAULT_TASKS_DIR, mode = "committed", { ledger = false } = {}) {
+  const [begin, end] = AGENTS_MARKERS;
+  const idExample = `${o.prefix.toLowerCase()}${String(1).padStart(o.idWidth, "0")}`;
+  return `${begin}
+## Backlog (Trellis)
+
+Backlog items live in \`${root}/\`; the config is \`trellis/backlog.config.json\`.
+Task work follows good-agent's \`write-task\`, \`work-task\` and \`review-loop\` skills.
+
+${ledger ? `- ${CLAIM_LINE}\n` : ""}${artifactBullet(root, mode, "compact")}
+
+### Loop contract
+
+${loopTable(idExample)}
+${end}
 `;
 }
 
@@ -523,7 +580,14 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   const keptCfg = keepCfg ? existing.cfg : null;
 
   const actions = [];
-  const omitted = Object.keys(SKIP_PARTS).filter((p) => (opts.skip || []).includes(p));
+  // Good-agent already ships the loops, so detection leaves the playbooks out unless
+  // `--with-playbooks` asks for them. An explicit `--skip playbooks` is reported as such.
+  const explicit = opts.skip || [];
+  const detected = detectGoodAgent(targetRoot);
+  const withPlaybooks = !!opts.withPlaybooks;
+  const byDetection = !!detected && !withPlaybooks;
+  const playbooksOmittedBy = explicit.includes("playbooks") ? "skip" : byDetection ? "detection" : null;
+  const omitted = Object.keys(SKIP_PARTS).filter((p) => explicit.includes(p) || (p === "playbooks" && byDetection));
   const omit = new Set(omitted.flatMap((p) => SKIP_PARTS[p]));
   const { files, warnings } = templateFiles(o, sourceRoot, root, local, omit);
   if (keepCfg && suppliedConflicts(opts, o)) {
@@ -548,14 +612,24 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   // AGENTS.md: create if absent, append the block if present without it, else skip.
   // `--skip agents` leaves it out entirely.
   const agentsAbs = join(targetRoot, "AGENTS.md");
-  const block = agentsBlock(o, root, local ? "local" : "committed", { ledger: !!keptCfg && keptCfg.idAllocation === "ledger", skip: omitted });
+  const parts = { ledger: !!keptCfg && keptCfg.idAllocation === "ledger", skip: omitted };
+  const mode = local ? "local" : "committed";
+  const block = byDetection ? compactBlock(o, root, mode, parts) : agentsBlock(o, root, mode, parts);
   if (omit.has("AGENTS.md")) {
     // No action: nothing is created, appended or printed for AGENTS.md.
   } else if (!existsSync(agentsAbs)) {
     actions.push({ rel: "AGENTS.md", content: `# AGENTS\n\n${block}`, action: "create" });
   } else {
     const cur = readFileSync(agentsAbs, "utf8");
-    if (cur.includes(AGENTS_MARKERS[0])) {
+    const [begin, end] = AGENTS_MARKERS;
+    const bi = cur.indexOf(begin);
+    // The END marker must follow the begin marker, or the block cannot be measured.
+    const ei = bi === -1 ? -1 : cur.indexOf(end, bi);
+    if (bi !== -1 && ei !== -1 && detected && withPlaybooks) {
+      // Never rewrite an existing block: print the full block for the owner to place.
+      const bytesNeeded = Buffer.byteLength(cur.slice(0, bi) + block.trimEnd() + cur.slice(ei + end.length));
+      actions.push({ rel: "AGENTS.md", content: "", action: "print", reason: "existing-block", block, bytesNeeded });
+    } else if (bi !== -1) {
       actions.push({ rel: "AGENTS.md", content: "", action: "skip" });
     } else {
       const sep = cur.endsWith("\n") ? "\n" : "\n\n";
@@ -568,7 +642,7 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   // from `errors` (it never blocks).
   const reconcile = scanReconcile(targetRoot, { root, importSource: importSourceRel(targetRoot, opts.import), excludeAgents: omit.has("AGENTS.md") });
 
-  return { options: o, resolved, actions, warnings, root, reconcile, local, cfg: keptCfg, omitted };
+  return { options: o, resolved, actions, warnings, root, reconcile, local, cfg: keptCfg, omitted, detected, playbooksOmittedBy };
 }
 
 // ---------------------------------------------------------------- apply
@@ -580,7 +654,7 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false, deferGene
   // `errors` is fatal (the run did not produce a --check-green scaffold);
   // `warnings` is benign (e.g. a missing copy source). The CLI keys its exit code
   // and "Refused" banner off `errors`, never off `warnings`.
-  const summary = { created: [], skipped: [], appended: [], generated: [], omitted: [], reconcile: [], warnings: [], errors: [] };
+  const summary = { created: [], skipped: [], appended: [], generated: [], omitted: [], printed: [], detected: null, playbooksOmittedBy: null, reconcile: [], warnings: [], errors: [] };
 
   // An unknown part name is refused before anything is planned or written.
   const skipErrors = parseSkip(opts.skip || []).errors;
@@ -592,8 +666,10 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false, deferGene
   // planScaffold only reads, so the target stays untouched through every check
   // below — a rejected run leaves nothing behind. It also resolves the options
   // (no need to resolve again here).
-  const { options, resolved, actions, warnings, root, reconcile, local, cfg: keptCfg, omitted } = planScaffold(targetRoot, opts, sourceRoot);
+  const { options, resolved, actions, warnings, root, reconcile, local, cfg: keptCfg, omitted, detected, playbooksOmittedBy } = planScaffold(targetRoot, opts, sourceRoot);
   summary.omitted = omitted;
+  summary.detected = detected;
+  summary.playbooksOmittedBy = playbooksOmittedBy;
   summary.reconcile = reconcile; // advisory, populated even on a refusal (the CLI only prints it on success)
   const GENERATED = generatedFiles(targetRoot, root, local); // artifact rel-paths under the effective backlog root
   summary.root = root; // surfaced so the CLI can point at the actual scaffold root
@@ -632,7 +708,9 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false, deferGene
   // README and the two indexes are written as marker skeletons here, then filled
   // by the core below — so they are reported under `generated`, not created.
   const genSet = new Set(GENERATED);
-  for (const a of actions) {
+  // A print action is reported, never written, so it leaves the write loop below.
+  for (const a of actions.filter((x) => x.action === "print")) summary.printed.push({ reason: a.reason, block: a.block, bytesNeeded: a.bytesNeeded });
+  for (const a of actions.filter((x) => x.action !== "print")) {
     const isGen = genSet.has(a.rel);
     if (a.action === "skip") { if (!isGen) summary.skipped.push(a.rel); continue; }
     if (!dryRun) {

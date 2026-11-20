@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
-import { applyScaffold, planScaffold, shouldPromptVocab, agentsBlock, AGENTS_MARKERS, SKIP_PARTS, DEFAULTS } from "../src/init.mjs";
+import { applyScaffold, planScaffold, shouldPromptVocab, agentsBlock, compactBlock, artifactBullet, AGENTS_BYTE_LIMIT, AGENTS_MARKERS, INIT_TOKENS, SKIP_PARTS, DEFAULTS } from "../src/init.mjs";
 import { assertNotLegacyConfig } from "../src/import.mjs";
 import { testSeams as outputSeams, previewNextId } from "../src/local-output.mjs";
 import { initRefFormat } from "./git-support.mjs";
@@ -1678,4 +1678,260 @@ test("--skip ci writes the pinned skip-variant block", () => {
     assert.match(block, /`main` is protected/);
     assert.match(block, /\| `check` \| `npx @taprootio\/trellis check` \|/);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ------------------- detection, compact block, --with-playbooks (TRL0040)
+const GOOD_AGENT_MARKERS = ["good-agent.config.json", ".agents/skills/work-task/SKILL.md"];
+const PLAYBOOKS = SKIP_PARTS.playbooks;
+const DEMO = { prefix: "DEMO", idWidth: 4, milestones: DEFAULTS.milestones, priorities: DEFAULTS.priorities, effort: DEFAULTS.effort };
+function seedMarker(root, rel = GOOD_AGENT_MARKERS[0]) {
+  mkdirSync(dirname(join(root, rel)), { recursive: true });
+  writeFileSync(join(root, rel), "{}\n");
+}
+// spawnSync, because `runInit` returns no stderr on an exit-0 run.
+const cliRun = (root, args, env = {}) => spawnSync(process.execPath, [initScript, root, ...args], { encoding: "utf8", env: { ...process.env, ...GIT_ENV, ...env } });
+const tokenLine = (text, token) => text.split("\n").find((l) => l.startsWith(token));
+// A detected repo scaffolded once, so its AGENTS.md holds the compact block.
+function detectedRepo() {
+  const root = tempRepo();
+  seedMarker(root);
+  applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+  return root;
+}
+const agentsPath = (root) => join(root, "AGENTS.md");
+
+test("good-agent detection through each marker file skips the playbooks and writes the compact block", () => {
+  for (const marker of GOOD_AGENT_MARKERS) {
+    const root = tempRepo();
+    try {
+      seedMarker(root, marker);
+      const { summary } = applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+      assert.equal(summary.detected, marker);
+      assert.deepEqual(summary.omitted, ["playbooks"]);
+      assert.equal(summary.playbooksOmittedBy, "detection");
+      for (const rel of PLAYBOOKS) assert.equal(existsSync(join(root, rel)), false, rel);
+      assert.equal(markedBlock(readFileSync(agentsPath(root), "utf8")), compactBlock(DEMO));
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("--with-playbooks on a detected repo writes the playbooks and the full block with their pointers", () => {
+  for (const marker of GOOD_AGENT_MARKERS) {
+    const root = tempRepo();
+    try {
+      seedMarker(root, marker);
+      const { summary } = applyScaffold(root, { prefix: "DEMO", withPlaybooks: true }, {}, sourceRoot);
+      assert.equal(summary.detected, marker);
+      assert.deepEqual(summary.omitted, []);
+      assert.equal(summary.playbooksOmittedBy, null);
+      for (const rel of PLAYBOOKS) assert.ok(existsSync(join(root, rel)), rel);
+      assert.equal(markedBlock(readFileSync(agentsPath(root), "utf8")), agentsBlock(DEMO));
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("a directory at a marker path is not detected, and --with-playbooks changes nothing without a marker", () => {
+  const dirRoot = tempRepo();
+  try {
+    mkdirSync(join(dirRoot, "good-agent.config.json"));
+    const { summary } = applyScaffold(dirRoot, { prefix: "DEMO" }, {}, sourceRoot);
+    assert.equal(summary.detected, null);
+    assert.deepEqual(summary.omitted, []);
+    for (const rel of PLAYBOOKS) assert.ok(existsSync(join(dirRoot, rel)), rel);
+  } finally { rmSync(dirRoot, { recursive: true, force: true }); }
+
+  const plain = tempRepo();
+  const flagged = tempRepo();
+  try {
+    applyScaffold(plain, { prefix: "DEMO" }, {}, sourceRoot);
+    const { summary } = applyScaffold(flagged, { prefix: "DEMO", withPlaybooks: true }, {}, sourceRoot);
+    assert.deepEqual(summary.printed, []);
+    assert.deepEqual(snapshotAll(flagged), snapshotAll(plain));
+  } finally { rmSync(plain, { recursive: true, force: true }); rmSync(flagged, { recursive: true, force: true }); }
+});
+
+test("a detected repo with --skip playbooks reports the explicit skip, not the detection", () => {
+  const root = tempRepo();
+  try {
+    seedMarker(root);
+    const { summary } = applyScaffold(root, { prefix: "DEMO", skip: ["playbooks"] }, {}, sourceRoot);
+    assert.equal(summary.detected, GOOD_AGENT_MARKERS[0]);
+    assert.equal(summary.playbooksOmittedBy, "skip");
+    const out = cliRun(root, ["--skip", "playbooks"]);
+    assert.equal(out.status, 0, out.stderr);
+    assert.ok(out.stdout.includes(GOOD_AGENT_MARKERS[0]));
+    assert.ok(out.stdout.includes("--skip playbooks"), "the cause line names the explicit skip");
+    // Detection alone does not name the flag as the cause.
+    const alone = tempRepo();
+    try {
+      seedMarker(alone);
+      assert.ok(!cliRun(alone, []).stdout.includes("--skip playbooks"));
+    } finally { rmSync(alone, { recursive: true, force: true }); }
+    assert.ok(!out.stdout.includes(INIT_TOKENS.blockNotUpdated), "no recovery line for a detected repo");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a repo that is not detected and skips the playbooks is told how to add them", () => {
+  const root = tempRepo();
+  try {
+    const r = cliRun(root, ["--skip", "playbooks"]);
+    assert.equal(r.status, 0, r.stderr);
+    const line = tokenLine(r.stdout.replace(/^ +/gm, ""), INIT_TOKENS.blockNotUpdated);
+    assert.ok(line, "the recovery line is present");
+    assert.ok(line.includes("trellis init --with-playbooks"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the omitted line names a detection-caused playbook omission, with and without --dry-run", () => {
+  const root = tempRepo();
+  try {
+    seedMarker(root);
+    for (const flags of [[], ["--dry-run"]]) {
+      const r = cliRun(root, flags);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /omitted \(1\): playbooks/);
+      assert.ok(r.stdout.includes(GOOD_AGENT_MARKERS[0]));
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the compact block: ledger claim line, local wording, committed markers and a byte ceiling", () => {
+  const localLedger = localInit({ cfg: { idAllocation: "ledger" } });
+  try {
+    seedMarker(localLedger);
+    const block = plannedBlock(localLedger);
+    assert.match(block, CLAIM_RE);
+    assert.ok(block.split("\n").find((l) => CLAIM_RE.test(l)).startsWith("- "));
+    assert.ok(block.includes(artifactBullet("trellis", "local", "compact")));
+    assert.ok(Buffer.byteLength(block) < 1200, `${Buffer.byteLength(block)} bytes`);
+  } finally { rmSync(localLedger, { recursive: true, force: true }); }
+
+  const bullet = artifactBullet("trellis", "committed", "compact");
+  assert.ok(bullet.includes("`BEGIN/END GENERATED`"));
+  assert.ok(bullet.includes("`backlog.json` is generated in full (it has no markers)"));
+  assert.ok(bullet.includes("the `BEGIN GENERATED` / `END GENERATED` markers apply only to the Markdown files"));
+  // The compact bullet ends its list item, so the switch can recognize it.
+  assert.ok(compactBlock(DEMO).includes(`${bullet}\n\n### `));
+  // Scan mode has no claim line.
+  assert.doesNotMatch(compactBlock(DEMO), CLAIM_RE);
+});
+
+test("--with-playbooks on a detected repo with a block leaves AGENTS.md alone and prints the full block", () => {
+  const root = detectedRepo();
+  try {
+    // Multibyte text around the block, so the byte count differs from the character count.
+    const head = "# Café ünï 🌱\n\n";
+    const tail = "\n## Notes — ünïcode\n";
+    writeFileSync(agentsPath(root), head + markedBlock(readFileSync(agentsPath(root), "utf8")) + tail);
+    const before = readFileSync(agentsPath(root));
+    const full = agentsBlock(DEMO);
+
+    const { summary } = applyScaffold(root, { withPlaybooks: true }, {}, sourceRoot);
+    assert.equal(summary.printed.length, 1);
+    const [p] = summary.printed;
+    assert.equal(p.reason, "existing-block");
+    assert.equal(p.block, full);
+    const expected = head + full.trimEnd() + "\n" + tail;
+    assert.equal(p.bytesNeeded, Buffer.byteLength(expected));
+    assert.ok(p.bytesNeeded > expected.length, "bytes, not characters");
+    assert.ok(readFileSync(agentsPath(root)).equals(before), "AGENTS.md is byte-identical");
+    for (const rel of PLAYBOOKS) assert.ok(existsSync(join(root, rel)), rel);
+
+    const r = cliRun(root, ["--with-playbooks"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stdout.includes(full));
+    const line = tokenLine(r.stderr, INIT_TOKENS.carryOver);
+    assert.ok(line, "the carry-over warning is on stderr");
+    assert.ok(line.includes(String(p.bytesNeeded)) && line.includes(String(AGENTS_BYTE_LIMIT)));
+    assert.ok(readFileSync(agentsPath(root)).equals(before));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a dry run of --with-playbooks previews the block and changes nothing", () => {
+  const root = detectedRepo();
+  try {
+    const before = snapshotAll(root);
+    const r = cliRun(root, ["--with-playbooks", "--dry-run"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(tokenLine(r.stdout, INIT_TOKENS.preview), "marked as a preview");
+    assert.ok(r.stdout.includes(agentsBlock(DEMO)));
+    assert.deepEqual(snapshotAll(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("--with-playbooks prints nothing when the repo is not detected", () => {
+  const root = tempRepo();
+  try {
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    const r = cliRun(root, ["--with-playbooks"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!r.stdout.includes(INIT_TOKENS.preview) && !r.stdout.includes("<!-- BEGIN TRELLIS -->"));
+    assert.ok(!r.stderr.includes(INIT_TOKENS.carryOver));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an unterminated BEGIN TRELLIS keeps the skip behavior: nothing printed, no size report", () => {
+  const root = tempRepo();
+  try {
+    seedMarker(root);
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    writeFileSync(agentsPath(root), `# Guide\n\n${AGENTS_MARKERS[0]}\nno end marker here\n`);
+    const before = readFileSync(agentsPath(root));
+    const r = cliRun(root, ["--with-playbooks"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!r.stdout.includes(INIT_TOKENS.preview) && !r.stderr.includes(INIT_TOKENS.carryOver));
+    assert.ok(readFileSync(agentsPath(root)).equals(before));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("--skip agents with --with-playbooks restores the playbooks and touches nothing about AGENTS.md", () => {
+  const root = tempRepo();
+  try {
+    seedMarker(root);
+    applyScaffold(root, { prefix: "DEMO" }, {}, sourceRoot);
+    // An authored backlog heading would be flagged by the reconciliation scan if AGENTS.md were scanned.
+    writeFileSync(agentsPath(root), "# Notes\n\n## Our backlog\n\nOld guidance.\n\n" + markedBlock(readFileSync(agentsPath(root), "utf8")));
+    const before = readFileSync(agentsPath(root));
+    const r = cliRun(root, ["--skip", "agents", "--with-playbooks"]);
+    assert.equal(r.status, 0, r.stderr);
+    for (const rel of PLAYBOOKS) assert.ok(existsSync(join(root, rel)), rel);
+    assert.ok(readFileSync(agentsPath(root)).equals(before));
+    assert.ok(!r.stdout.includes("<!-- BEGIN TRELLIS -->") && !r.stdout.includes(INIT_TOKENS.preview));
+    assert.ok(!r.stderr.includes(INIT_TOKENS.carryOver));
+    assert.doesNotMatch(r.stdout, /reconcile/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a printed block over 64 KiB reaches a pipe whole, through --with-playbooks --dry-run --import", () => {
+  const root = tempRepo();
+  try {
+    seedMarker(root);
+    mkdirSync(join(root, "trellis"), { recursive: true });
+    const cfg = { specVersion: "2.5", idPrefix: "TAP", idWidth: 70000, milestones: DEFAULTS.milestones, priorities: DEFAULTS.priorities, effort: DEFAULTS.effort };
+    writeFileSync(join(root, "trellis", "backlog.config.json"), JSON.stringify(cfg, null, 2) + "\n");
+    writeFileSync(agentsPath(root), `${AGENTS_MARKERS[0]}\nold\n${AGENTS_MARKERS[1]}\n`);
+    const before = snapshotAll(root);
+    const r = cliRun(root, ["--with-playbooks", "--dry-run", "--import", legacySrc, "--profile", "taproot-ai-backlog"]);
+    assert.equal(r.status, 0, r.stderr.slice(0, 500));
+    const full = agentsBlock({ ...DEMO, prefix: "TAP", idWidth: 70000 });
+    assert.ok(full.length > 65536);
+    assert.ok(r.stdout.includes(full), "the whole block arrives");
+    assert.deepEqual(snapshotAll(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an import refused after the scaffold exits 2 without a stack trace", { skip: process.platform === "win32" }, () => {
+  const root = localInit();
+  const bin = realpathSync(mkdtempSync(join(tmpdir(), "trellis-shim-")));
+  try {
+    // git fails its prefix probe only once the scaffold has written its tree, which is
+    // after the scaffold's own preflight and before the import's.
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    writeFileSync(join(bin, "git"), `#!/bin/sh\nfor a in "$@"; do\n  if [ "$a" = "--show-prefix" ] && [ -e "${root}/trellis/active/.gitkeep" ]; then echo "fatal: forced failure" >&2; exit 128; fi\ndone\nexec "${realGit}" "$@"\n`);
+    chmodSync(join(bin, "git"), 0o755);
+    const r = cliRun(root, ["--import", legacySrc, "--profile", "taproot-ai-backlog"], { PATH: `${bin}:${process.env.PATH}` });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /^error: .*forced failure/m);
+    assert.doesNotMatch(r.stderr, /\n\s+at /);
+  } finally { rmSync(bin, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });

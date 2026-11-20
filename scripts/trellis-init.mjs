@@ -14,7 +14,7 @@
 import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
-import { DEFAULTS, SKIP_PARTS, applyScaffold, parseSkip, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
+import { AGENTS_BYTE_LIMIT, DEFAULTS, INIT_TOKENS, SKIP_PARTS, applyScaffold, carryOverWarning, parseSkip, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
 import { applyImport, importFailureLines, assertNotLedgerMode, assertNotLegacyConfig, assertNotLocalMode, assertNoLeftoverMarkers, assertSourceNotLocalOutput, ImportRefused } from "../src/import.mjs";
 import { loadConfig } from "../src/backlog.mjs";
 import { switchToLocal } from "../src/switch-local.mjs";
@@ -153,6 +153,33 @@ async function promptMissing(opts) {
   }
 }
 
+// Says what good-agent detection (or an explicit skip) did to the playbooks, and how to
+// get them back. The recovery line is only for a repo that is not detected.
+function reportDetection(summary) {
+  if (summary.detected) {
+    console.log(`  detected good-agent: ${summary.detected}`);
+    if (summary.playbooksOmittedBy === "detection") console.log("  playbooks left out because of it; add them with `trellis init --with-playbooks` (repeat your other --skip flags)");
+    else if (summary.playbooksOmittedBy === "skip") console.log("  playbooks left out by --skip playbooks");
+  } else if (summary.playbooksOmittedBy === "skip") {
+    console.log(`  ${INIT_TOKENS.blockNotUpdated} To add the playbooks later, run \`trellis init --with-playbooks\` (repeat your other --skip flags); the TRELLIS block is not updated, so add the playbook pointers by hand`);
+  }
+}
+
+// Prints each block init did not write: the block goes to stdout, the warnings to stderr.
+// A dry run says it would print. One shared reporter for both print reasons.
+function reportPrinted(summary, dryRun) {
+  for (const p of summary.printed) {
+    console.log(dryRun ? `${INIT_TOKENS.preview} Would print this block for AGENTS.md (dry run, nothing written):` : "Place this block in AGENTS.md by hand:");
+    process.stdout.write(p.block);
+    if (p.reason === "size") {
+      console.error(`${INIT_TOKENS.size} AGENTS.md would be ${p.bytesNeeded} bytes, over the ${AGENTS_BYTE_LIMIT}-byte limit Codex reads, so it is left unchanged. Trim AGENTS.md, or place the block above by hand.`);
+      console.error(carryOverWarning());
+    } else {
+      console.error(carryOverWarning({ bytesNeeded: p.bytesNeeded }));
+    }
+  }
+}
+
 function report(targetRoot, summary, dryRun) {
   // Fatal errors → never claim success. "Refused" if nothing was written;
   // "did not complete" if some files landed before a fatal generate failure.
@@ -172,6 +199,7 @@ function report(targetRoot, summary, dryRun) {
   line(dryRun ? "regenerate" : "generated", summary.generated);
   line("skipped", summary.skipped);
   line("omitted", summary.omitted);
+  reportDetection(summary);
   // Remaining warnings are benign (e.g. a missing copy source) — the scaffold
   // still completed, so they do not change the exit code.
   for (const w of summary.warnings) console.warn(`  warning: ${w}`);
@@ -182,6 +210,7 @@ function report(targetRoot, summary, dryRun) {
     console.log(`  reconcile (${summary.reconcile.length}) — pre-Trellis backlog guidance to rewrite by hand (init left these untouched):`);
     for (const r of summary.reconcile) console.log(`    - ${r.file}: ${r.note}`);
   }
+  reportPrinted(summary, dryRun);
   if (!dryRun) {
     console.log(`Done. For a fresh backlog, add a task under ${summary.root}/active/, then \`npx @taprootio/trellis generate\`.`);
     console.log(`If you are importing an existing backlog, run \`npx @taprootio/trellis import ...\` before creating any new task so imported ids keep the first available range.`);
@@ -406,8 +435,10 @@ report(targetRoot, summary, dryRun);
 // A failed scaffold (refusal or generate failure) is fatal and blocks any import.
 if (summary.errors.length) process.exit(1);
 
-// --import on-ramp: scaffold, then import an existing backlog in one command.
+// The rest sets `process.exitCode` and lets the script end, so a large printed block
+// is flushed to a pipe. A benign warning (e.g. a missing copy source) exits 0.
 if (opts.import) {
+  // --import on-ramp: scaffold, then import an existing backlog in one command.
   const mapping = importMapping;
   const importSource = isAbsolute(opts.import) ? opts.import : resolve(targetRoot, opts.import);
   if (dryRun) {
@@ -418,19 +449,18 @@ if (opts.import) {
     const via = opts.profile ? `profile ${opts.profile}` : `mapping ${opts.mapping}`;
     console.log(`Would then import from ${importSource} using ${via}.`);
     console.log("Re-run without --dry-run to scaffold and import, or run `npx @taprootio/trellis import --dry-run` on the initialized repo to preview the import plan.");
-    process.exit(0);
+  } else {
+    let imp = null;
+    try {
+      ({ summary: imp } = applyImport(targetRoot, importSource, mapping, { dryRun: false, preserveIds: opts.preserveIds, idFloor: opts.idFloor }));
+    } catch (e) {
+      if (!(e instanceof ImportRefused)) throw e;
+      console.error(`error: ${e.message}`);
+      process.exitCode = 2;
+    }
+    if (imp) {
+      reportImport(targetRoot, imp);
+      process.exitCode = imp.errors.length ? 1 : 0;
+    }
   }
-  let imp;
-  try {
-    ({ summary: imp } = applyImport(targetRoot, importSource, mapping, { dryRun: false, preserveIds: opts.preserveIds, idFloor: opts.idFloor }));
-  } catch (e) {
-    if (!(e instanceof ImportRefused)) throw e;
-    console.error(`error: ${e.message}`);
-    process.exit(2);
-  }
-  reportImport(targetRoot, imp);
-  process.exit(imp.errors.length ? 1 : 0);
 }
-
-// A benign warning (e.g. a missing copy source) on a completed scaffold exits 0.
-process.exit(0);

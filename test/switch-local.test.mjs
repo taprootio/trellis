@@ -9,10 +9,10 @@ import { mkdtempSync, mkdirSync, renameSync, writeFileSync, rmSync, existsSync, 
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { applyScaffold, shouldPromptVocab, DEFAULTS, completedSkeleton, artifactBullet } from "../src/init.mjs";
+import { applyScaffold, shouldPromptVocab, DEFAULTS, completedSkeleton, artifactBullet, agentsBlock, compactBlock, AGENTS_MARKERS } from "../src/init.mjs";
 import { switchToLocal, testSeams } from "../src/switch-local.mjs";
 import { OutputRefused, ignoreLineFor, testSeams as outputSeams } from "../src/local-output.mjs";
-import { initRefFormat } from "./git-support.mjs";
+import { initRefFormat, ledgerTest } from "./git-support.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const initScript = join(sourceRoot, "scripts", "trellis-init.mjs");
@@ -32,7 +32,8 @@ const ITEM = `---\nid: TAP0001\ntitle: First task\nstatus: active\nmilestone: Al
 // is generated only (exactly what init made). `tasksDir` and `cfg` shape the config;
 // `ignore` is the .gitignore text (default: the right line; null writes none); `inGit`
 // false leaves it outside any work tree.
-function fixture({ tasksDir, cfg = {}, inGit = true, ignore, commit = true } = {}) {
+// `goodAgent` seeds the detection marker, and `skip` is passed to the scaffold (TRL0040).
+function fixture({ tasksDir, cfg = {}, inGit = true, ignore, commit = true, goodAgent = false, skip } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "trellis-switch-")));
   mkdirSync(join(root, "trellis"), { recursive: true });
   const config = { specVersion: "2.5", idPrefix: "TAP", idWidth: DEFAULTS.idWidth, milestones: DEFAULTS.milestones, priorities: DEFAULTS.priorities, effort: DEFAULTS.effort, ...(tasksDir ? { tasksDir } : {}), ...cfg };
@@ -40,7 +41,8 @@ function fixture({ tasksDir, cfg = {}, inGit = true, ignore, commit = true } = {
   const dir = tasksDir ? tasksDir.replace(/^\.\//, "").replace(/\/$/, "") : "trellis";
   mkdirSync(join(root, dir, "active"), { recursive: true });
   writeFileSync(join(root, dir, "active", "TAP0001.md"), ITEM);
-  const { summary } = applyScaffold(root, {}, {}, sourceRoot);
+  if (goodAgent) writeFileSync(join(root, "good-agent.config.json"), "{}\n");
+  const { summary } = applyScaffold(root, skip ? { skip } : {}, {}, sourceRoot);
   assert.deepEqual(summary.errors, []);
   const readme = join(root, dir, "README.md");
   writeFileSync(readme, readFileSync(readme, "utf8").replace("# Backlog\n", "# Backlog\n\nIntro prose.\n") + "\n## Notes\n\nAuthored after the block.\n");
@@ -641,5 +643,70 @@ test("a legacy backlog goes through the local migration with blank cells and nul
     for (const t of json.tasks.filter((x) => x.status !== "active")) {
       for (const k of ["summary", "milestone", "priority", "effort"]) assert.equal(t[k], null, `${t.id} ${k}`);
     }
+  } finally { f.cleanup(); }
+});
+
+// ---------------------------------------- block variants (TRL0040)
+const TAP = { prefix: "TAP", idWidth: DEFAULTS.idWidth };
+const GENERATED_MARKER_TEXTS = ["BEGIN/END GENERATED", "BEGIN GENERATED", "END GENERATED"];
+// The marked TRELLIS block of AGENTS.md, delimiters included.
+const blockOf = (root) => {
+  const text = readFileSync(join(root, "AGENTS.md"), "utf8");
+  const [begin, end] = AGENTS_MARKERS;
+  const bi = text.indexOf(begin);
+  return text.slice(bi, text.indexOf(end, bi) + end.length + 1);
+};
+
+test("a compact block switches to the .generated/ wording, keeps its variant and delimiters, and a rerun is quiet", () => {
+  const f = fixture({ goodAgent: true });
+  try {
+    assert.equal(blockOf(f.root), compactBlock(TAP), "the fixture holds the compact block");
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!r.stderr.includes("warning"));
+    const block = blockOf(f.root);
+    assert.equal(block, compactBlock(TAP, "trellis", "local"));
+    assert.ok(block.startsWith(AGENTS_MARKERS[0]) && block.endsWith(`${AGENTS_MARKERS[1]}\n`));
+    for (const text of GENERATED_MARKER_TEXTS) assert.ok(!block.includes(text), text);
+    assert.ok(Buffer.byteLength(block) < 1200);
+    runCommands(f.root, r.stdout);
+    f.commit();
+    const before = tree(f.root);
+    const again = runSwitch(f.root);
+    assert.equal(again.status, 0, again.stderr);
+    assert.ok(!again.stderr.includes("warning"));
+    assert.deepEqual(tree(f.root), before);
+  } finally { f.cleanup(); }
+});
+
+test("a full block made with --skip ci,branch-protection switches without getting those lines back", () => {
+  const skip = ["ci", "branch-protection"];
+  const f = fixture({ skip });
+  try {
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    const block = blockOf(f.root);
+    assert.equal(block, agentsBlock(TAP, "trellis", "local", { skip }));
+    assert.ok(block.startsWith(AGENTS_MARKERS[0]) && block.endsWith(`${AGENTS_MARKERS[1]}\n`));
+    for (const text of GENERATED_MARKER_TEXTS) assert.ok(!block.includes(text), text);
+    assert.ok(!block.includes("`backlog` job") && !block.includes("branch-protection.md"));
+  } finally { f.cleanup(); }
+});
+
+ledgerTest("a ledger-mode full block switches with its claim line untouched", () => {
+  const f = fixture({ cfg: { idAllocation: "ledger" } });
+  try {
+    assert.equal(blockOf(f.root), agentsBlock(TAP, "trellis", "committed", { ledger: true }));
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(blockOf(f.root), agentsBlock(TAP, "trellis", "local", { ledger: true }));
+  } finally { f.cleanup(); }
+});
+
+test("--switch-to-local with --with-playbooks is a usage error and changes nothing", () => {
+  const f = fixture();
+  try {
+    const r = refusedWith(f.root, /--with-playbooks/, ["--with-playbooks"]);
+    assert.ok(r.stderr.includes("--switch-to-local"));
   } finally { f.cleanup(); }
 });

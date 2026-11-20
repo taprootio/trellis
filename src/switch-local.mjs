@@ -256,8 +256,10 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
     const ei = bi === -1 ? -1 : text.indexOf(end, bi);
     if (ei !== -1) {
       const block = text.slice(bi, ei);
-      const committed = artifactBullet(root, "committed");
-      const local = artifactBullet(root, "local");
+      // The block keeps its variant: the full text or the compact text of the committed bullet.
+      const variant = ["full", "compact"].find((v) => findWholeLines(block, artifactBullet(root, "committed", v)) !== -1) ?? "full";
+      const committed = artifactBullet(root, "committed", variant);
+      const local = artifactBullet(root, "local", variant);
       const at = findWholeLines(block, committed);
       // The copy must end its list item: a continuation line after it means the user
       // extended the bullet, so it is not Trellis's own text any more.
@@ -269,7 +271,7 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
       if (at !== -1 && endsItem) {
         requireClean("AGENTS.md", "holds the Trellis block the switch updates");
         edits.push({ path: agentsPath, rel: "AGENTS.md", before: text, after: text.slice(0, bi) + block.slice(0, at) + local + block.slice(at + committed.length) + text.slice(ei), why: "updated the generated-files bullet" });
-      } else if (at !== -1 || findWholeLines(block, local) === -1) {
+      } else if (at !== -1 || !["full", "compact"].some((v) => findWholeLines(block, artifactBullet(root, "local", v)) !== -1)) {
         warnings.push(`AGENTS.md: the generated-files bullet in the Trellis block differs from Trellis's own text, so it was left alone. Edit it by hand to say the index is generated into ${root}/${GENERATED_DIR}/ and that no committed file is generated`);
       }
     }
