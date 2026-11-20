@@ -5,9 +5,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync, chmodSync, cpSync } from "node:fs";
+import { spawnSync, execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   loadConfig,
   loadRoster,
@@ -19,6 +21,11 @@ import {
   composeFile,
   parseFrontMatter,
   paths,
+  branchNameProblem,
+  artifactSet,
+  checkGenerated,
+  validateLocal,
+  markerLineErrors,
 } from "../src/backlog.mjs";
 
 const FISH = {
@@ -536,4 +543,744 @@ test("serializeFrontMatter/parseFrontMatter round-trip owner and collaborators",
   const parsed = parseFrontMatter(text, "x", []);
   assert.equal(parsed.owner, "alice");
   assert.deepEqual(parsed.collaborators, ["bob", "carol"]);
+});
+
+// ------------------------------------------------- id ledger config (TRL0037)
+
+const LEDGER_CFG = { ...ARRAY_CFG, specVersion: "2.5", idAllocation: "ledger" };
+const configErrors = (config) => withRepo(config, {}, (root) => loadConfig(root).errors);
+
+test("idAllocation accepts scan and ledger and rejects anything else", () => {
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, idAllocation: "scan" }), []);
+  assert.deepEqual(configErrors(LEDGER_CFG), []);
+  assert.ok(configErrors({ ...ARRAY_CFG, idAllocation: "local" }).some((e) => e.includes("idAllocation")));
+});
+
+test("a present idAllocation or idLedgerRef must be valid, so an explicit null is an error", () => {
+  assert.ok(configErrors({ ...ARRAY_CFG, idAllocation: null }).some((e) => e.includes("idAllocation")));
+  assert.ok(configErrors({ ...LEDGER_CFG, idLedgerRef: null }).some((e) => e.includes("idLedgerRef")));
+  assert.deepEqual(configErrors(ARRAY_CFG), [], "an absent key is still the default");
+});
+
+test("idLedgerRef must sit under refs/trellis/ and pass the ref-format rules", () => {
+  assert.deepEqual(configErrors({ ...LEDGER_CFG, idLedgerRef: "refs/trellis/my-ids" }), []);
+  const bad = [
+    "refs/heads/ids", "refs/trellis/", "refs/trellis", "refs/trellis/my ids", "refs/trellis/a..b",
+    "refs/trellis//a", "refs/trellis/a@{b", "refs/trellis/a~", "refs/trellis/a^", "refs/trellis/a:b",
+    "refs/trellis/a?", "refs/trellis/a*", "refs/trellis/a[", "refs/trellis/a\\b", "refs/trellis/a\u007f",
+    "refs/trellis/a\tb", "refs/trellis/a/", "refs/trellis/a.", "refs/trellis/.a", "refs/trellis/a.lock/b",
+    "", 7,
+  ];
+  for (const ref of bad) {
+    assert.ok(configErrors({ ...LEDGER_CFG, idLedgerRef: ref }).some((e) => e.includes("idLedgerRef")), `rejects ${JSON.stringify(ref)}`);
+  }
+});
+
+test("ledger mode refuses a tasksDir inside .git; scan mode and lookalikes pass", () => {
+  for (const tasksDir of [".git", ".git/trellis", "./.git/x", ".git/", ".GIT", ".Git/x", "./.gIt", ".//.git/refs", "././/.git", ".//.GIT//x"]) {
+    assert.ok(configErrors({ ...LEDGER_CFG, tasksDir }).some((e) => e.includes("tasksDir")), `ledger rejects ${tasksDir}`);
+  }
+  for (const tasksDir of [".github", ".gitx/t", "docs/.git"]) {
+    assert.deepEqual(configErrors({ ...LEDGER_CFG, tasksDir }), [], `ledger accepts ${tasksDir}`);
+  }
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, tasksDir: ".git/t" }), [], "scan mode is unchanged");
+});
+
+test("ledger mode checks .git after the trailing-separator cleanup", () => {
+  // On POSIX `.git\\` cleans to `.git`; `.git\\archive` is one ordinary folder name there.
+  const bad = (tasksDir) => configErrors({ ...LEDGER_CFG, tasksDir }).some((e) => e.includes(".git"));
+  assert.equal(bad(".git\\"), true);
+  assert.equal(bad(".git/\\"), true);
+  assert.equal(bad(".git\\archive"), process.platform === "win32");
+});
+
+test("ledger mode reads a backslash in tasksDir by the platform's rules", () => {
+  const dir = ".git\\archive";
+  const errors = configErrors({ ...LEDGER_CFG, tasksDir: dir }).filter((e) => e.includes(".git"));
+  // On POSIX this is one ordinary folder name; on Windows it is a path inside .git.
+  assert.equal(errors.length, process.platform === "win32" ? 1 : 0);
+});
+
+test("ledger mode needs integer effort values; scan mode keeps fractions", () => {
+  for (const effort of [[0.5, 1, 3], { values: [1, 2.5] }, [1, 1e21]]) {
+    assert.ok(configErrors({ ...LEDGER_CFG, effort }).some((e) => e.includes("integers")), JSON.stringify(effort));
+  }
+  assert.deepEqual(configErrors({ ...LEDGER_CFG, effort: [1, 2, 3] }), []);
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, effort: [0.5, 1, 3] }), []);
+});
+
+test("branchNameProblem applies the full refs/heads rules", () => {
+  for (const name of ["@", "/lane", "lane/", "-x", "a//b", "a..b", "x.lock", "bad name", ""]) {
+    assert.ok(branchNameProblem(name), JSON.stringify(name));
+  }
+  for (const name of ["main", "feature/x-1", "je/trl0037/slug"]) assert.equal(branchNameProblem(name), null, name);
+});
+
+test("ledger mode renders effort text on one line, so it cannot form a marker line", () => {
+  const scale = (label, emoji) => ({
+    ...LEDGER_CFG,
+    effort: { values: [1, 2, 3], scale: "s", scales: { s: { 1: { label, emoji }, 2: { label: "Two" }, 3: { label: "Three" } } } },
+  });
+  const cfgOver = scale("Small\n<!-- END GENERATED:MILESTONES -->\r\nmore", "\u2028<!-- END GENERATED:MILESTONES -->");
+  withRepo(cfgOver, { active: [{ id: "DEMO0001", title: "One", effort: 1 }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    const { files, errors } = generateArtifacts(root, cfg, data);
+    assert.deepEqual(errors, []);
+    const readme = files.find((f) => f.path === paths(root, cfg).readme).content;
+    const markerLines = readme.split(/\r\n|[\n\r\u2028\u2029]/).filter((l) => l.trim() === "<!-- END GENERATED:MILESTONES -->");
+    assert.equal(markerLines.length, 1, "only the real end marker is a line");
+    writeFileSync(paths(root, cfg).readme, readme);
+    const again = generateArtifacts(root, cfg, readBacklog(root, cfg));
+    assert.equal(again.files.find((f) => f.path === paths(root, cfg).readme).content, readme, "regenerates identically");
+  });
+});
+
+test("ledger mode accepts trailing spaces and tabs on delimiter lines", () => {
+  withRepo(LEDGER_CFG, { active: [{ id: "DEMO0001", title: "One", effort: 3 }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const file = paths(root, cfg).readme;
+    writeFileSync(file, "# Backlog\n\n<!-- BEGIN GENERATED:MILESTONES --> \t\nold\n<!-- END GENERATED:MILESTONES -->  \n");
+    const { files, errors } = generateArtifacts(root, cfg, readBacklog(root, cfg));
+    assert.deepEqual(errors, []);
+    assert.match(files.find((f) => f.path === file).content, /DEMO0001/);
+  });
+});
+
+test("ledger mode caps idWidth at 9", () => {
+  assert.deepEqual(configErrors({ ...LEDGER_CFG, idWidth: 9 }), []);
+  assert.ok(configErrors({ ...LEDGER_CFG, idWidth: 10 }).some((e) => e.includes("idWidth")));
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, idWidth: 10 }), [], "scan mode keeps any width");
+});
+
+test("ledger mode needs a plain prefix; scan mode accepts the same prefixes", () => {
+  for (const idPrefix of ["A,B", " A", "R+", "A.B", "1A", "A-B", "A/B", "A\tB"]) {
+    assert.ok(configErrors({ ...LEDGER_CFG, idPrefix }).some((e) => e.includes("idPrefix")), `ledger rejects ${JSON.stringify(idPrefix)}`);
+    assert.deepEqual(configErrors({ ...ARRAY_CFG, idPrefix }), [], `scan accepts ${JSON.stringify(idPrefix)}`);
+  }
+  assert.deepEqual(configErrors({ ...LEDGER_CFG, idPrefix: "Ab9" }), []);
+});
+
+test("a scan backlog configured with R+ still checks RR0001.md", () => {
+  withRepo({ ...ARRAY_CFG, idPrefix: "R+" }, { active: [{ id: "RR0001", title: "Regex quirk", effort: 3 }] }, (root) => {
+    const { cfg, errors } = loadConfig(root);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(readBacklog(root, cfg).errors, []);
+  });
+});
+
+// Run the real check CLI with PATH replaced, so any git call is observable or fails.
+const CHECK_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "backlog-readme.mjs");
+function runCheck(root, pathDir) {
+  return spawnSync(process.execPath, [CHECK_CLI, "--check", "--target", root], {
+    encoding: "utf8",
+    env: { PATH: pathDir, HOME: root },
+  });
+}
+
+function ledgerCheckRepo() {
+  const root = makeRepo({ ...LEDGER_CFG, idLedgerRef: "refs/trellis/ids" }, { active: [{ id: "DEMO0001", title: "One", effort: 3 }] });
+  // `generate` once so the check has current artifacts to compare.
+  const { cfg } = loadConfig(root);
+  const { files } = generateArtifacts(root, cfg, readBacklog(root, cfg));
+  for (const f of files) writeFileSync(f.path, f.content);
+  return root;
+}
+
+test("check passes in ledger mode with git unavailable", () => {
+  const root = ledgerCheckRepo();
+  const empty = mkdtempSync(join(tmpdir(), "trellis-nopath-"));
+  try {
+    const r = runCheck(root, empty);
+    assert.equal(r.status, 0, r.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+test("check never calls git in ledger mode", { skip: process.platform === "win32" }, () => {
+  const root = ledgerCheckRepo();
+  const shimDir = mkdtempSync(join(tmpdir(), "trellis-shim-"));
+  const log = join(shimDir, "calls.log");
+  writeFileSync(join(shimDir, "git"), `#!/bin/sh\necho "$@" >> "${log}"\nexit 1\n`);
+  chmodSync(join(shimDir, "git"), 0o755);
+  try {
+    const r = runCheck(root, shimDir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(log) ? readFileSync(log, "utf8") : "", "", "no git invocation");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(shimDir, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------ nextIdOverride hook (TRL0037)
+
+test("nextIdOverride: undefined computes the scan value, null and strings are emitted as given", () => {
+  withRepo(ARRAY_CFG, { active: [{ id: "DEMO0002", title: "Two", effort: 3 }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    const json = (opts) => JSON.parse(buildBacklogJson(cfg, data, opts));
+    assert.equal(buildBacklogJson(cfg, data), buildBacklogJson(cfg, data, {}), "default output is unchanged");
+    assert.equal(buildBacklogJson(cfg, data), buildBacklogJson(cfg, data, { nextIdOverride: undefined }));
+    assert.equal(json().nextId, "DEMO0003");
+    assert.equal(json({ nextIdOverride: null }).nextId, null);
+    assert.equal(json({ nextIdOverride: "DEMO0042" }).nextId, "DEMO0042");
+
+    const plain = generateArtifacts(root, cfg, data);
+    assert.equal(plain.nextId, "DEMO0003");
+    const nulled = generateArtifacts(root, cfg, data, { nextIdOverride: null });
+    assert.equal(nulled.nextId, null);
+    const file = (r) => r.files.find((f) => f.path.endsWith("backlog.json")).content;
+    assert.equal(JSON.parse(file(nulled)).nextId, null);
+    assert.equal(file(plain), file(generateArtifacts(root, cfg, data, { nextIdOverride: undefined })));
+    // Only backlog.json carries the next id.
+    assert.deepEqual(plain.files.filter((f) => !f.path.endsWith("backlog.json")), nulled.files.filter((f) => !f.path.endsWith("backlog.json")));
+  });
+});
+
+// ------------------------------------------ local generated artifacts (TRL0038)
+
+const LOCAL_CFG = { ...ARRAY_CFG, specVersion: "2.5", milestones: ["Alpha", "Beta"], generatedArtifacts: "local" };
+const ITEMS = {
+  active: [
+    { id: "DEMO0001", title: "First | pipe", effort: 3 },
+    { id: "DEMO0002", title: "Second", effort: 5, milestone: "Beta", priority: "Low", depends_on: ["DEMO0001"] },
+  ],
+  completed: [{ id: "DEMO0003", title: "Done", effort: 2, summary: "Did it.", completed_on: "2026-01-02" }],
+  removed: [{ id: "DEMO0004", title: "Gone", effort: 1, summary: "Dropped.", removed_on: "2026-01-03", removed_reason: "No longer needed." }],
+};
+
+// A local-mode repo: the committed README and index files are plain author text.
+function makeLocalRepo(config = LOCAL_CFG, items = ITEMS) {
+  const root = makeRepo(config, items);
+  const tasks = join(root, "trellis");
+  writeFileSync(join(tasks, "README.md"), "# Backlog\n\nAuthored prose.\n");
+  writeFileSync(join(tasks, "completed", "index.md"), "# Completed\n\nAuthored notes.\n");
+  writeFileSync(join(tasks, "removed", "index.md"), "# Removed\n");
+  return root;
+}
+const withLocalRepo = (fn, config, items) => {
+  const root = makeLocalRepo(config, items);
+  try { return fn(root); } finally { rmSync(root, { recursive: true, force: true }); }
+};
+
+test("generatedArtifacts: only committed or local is accepted, and null is not", () => {
+  for (const good of ["committed", "local"]) {
+    withRepo({ ...ARRAY_CFG, generatedArtifacts: good }, {}, (root) => assert.deepEqual(loadConfig(root).errors, []));
+  }
+  withRepo(ARRAY_CFG, {}, (root) => assert.deepEqual(loadConfig(root).errors, []));
+  for (const bad of ["Local", "", null, true, 1, ["local"]]) {
+    withRepo({ ...ARRAY_CFG, generatedArtifacts: bad }, {}, (root) => {
+      assert.match(loadConfig(root).errors.join("\n"), /`generatedArtifacts` must be "committed" or "local"/, JSON.stringify(bad));
+    });
+  }
+});
+
+test("local mode requires an ASCII tasksDir; committed mode does not", () => {
+  const unicode = ["planning", "r\u00e9sum\u00e9", "\u212a/backlog"];
+  withRepo({ ...ARRAY_CFG, generatedArtifacts: "local", tasksDir: unicode[1] }, {}, (root) => {
+    assert.match(loadConfig(root).errors.join("\n"), /`tasksDir` must be ASCII when `generatedArtifacts` is "local"/);
+  });
+  withRepo({ ...ARRAY_CFG, generatedArtifacts: "local", tasksDir: unicode[2] }, {}, (root) => {
+    assert.match(loadConfig(root).errors.join("\n"), /must be ASCII/);
+  });
+  withRepo({ ...ARRAY_CFG, generatedArtifacts: "local", tasksDir: "docs/plan" }, {}, (root) => assert.deepEqual(loadConfig(root).errors, []));
+  withRepo({ ...ARRAY_CFG, generatedArtifacts: "committed", tasksDir: unicode[1] }, {}, (root) => assert.deepEqual(loadConfig(root).errors, []));
+});
+
+test("committed output is byte-identical to the pinned fixture", () => {
+  const cfg = { ...ARRAY_CFG, milestones: ["Alpha", "Beta"], effort: [1, 2, 3, 5] };
+  withRepo(cfg, ITEMS, (root) => {
+    const loaded = loadConfig(root).cfg;
+    const { files, errors } = generateArtifacts(root, loaded, readBacklog(root, loaded));
+    assert.deepEqual(errors, []);
+    const rel = (f) => f.path.slice(root.length + 1).split(sep).join("/");
+    assert.deepEqual(files.map(rel), ["trellis/README.md", "trellis/completed/index.md", "trellis/removed/index.md", "trellis/backlog.json"]);
+    assert.equal(files[0].content, `# Backlog
+
+<!-- BEGIN GENERATED:MILESTONES -->
+
+### Alpha
+
+| ID | Title | Owner | Priority | Effort |
+| --- | --- | --- | --- | --- |
+| [DEMO0001](active/DEMO0001.md) | First \\| pipe |  | High | 3 |
+
+### Beta
+
+| ID | Title | Owner | Priority | Effort |
+| --- | --- | --- | --- | --- |
+| [DEMO0002](active/DEMO0002.md) | Second |  | Low | 5 |
+
+<!-- END GENERATED:MILESTONES -->
+`);
+    assert.equal(files[1].content, `# Completed
+
+<!-- BEGIN GENERATED:COMPLETED -->
+| ID | Title | Summary | Completed |
+| --- | --- | --- | --- |
+| [DEMO0003](tasks/DEMO0003.md) | Done | Did it. | 2026-01-02 |
+<!-- END GENERATED:COMPLETED -->
+`);
+    assert.equal(files[2].content, `# Removed
+
+<!-- BEGIN GENERATED:REMOVED -->
+| ID | Title | Summary | Removed | Reason |
+| --- | --- | --- | --- | --- |
+| [DEMO0004](DEMO0004.md) | Gone | Dropped. | 2026-01-03 | No longer needed. |
+<!-- END GENERATED:REMOVED -->
+`);
+    const json = JSON.parse(files[3].content);
+    assert.equal(json.nextId, "DEMO0005");
+    assert.deepEqual(json.counts, { active: 2, completed: 1, removed: 1 });
+    assert.equal(files[3].content, buildBacklogJson(loaded, readBacklog(root, loaded)));
+  });
+});
+
+test("artifactSet names the four files per mode and the author-owned files in local mode", () => {
+  withRepo(ARRAY_CFG, {}, (root) => {
+    const set = artifactSet(root, loadConfig(root).cfg);
+    assert.equal(set.mode, "committed");
+    assert.deepEqual(set.generated.map((e) => e.rel.split(sep).join("/")), ["trellis/README.md", "trellis/completed/index.md", "trellis/removed/index.md", "trellis/backlog.json"]);
+    assert.deepEqual(set.authorOwned, []);
+  });
+  withLocalRepo((root) => {
+    const set = artifactSet(root, loadConfig(root).cfg);
+    assert.equal(set.mode, "local");
+    assert.deepEqual(set.generated.map((e) => e.rel.split(sep).join("/")), [
+      "trellis/.generated/index.md", "trellis/.generated/completed.md", "trellis/.generated/removed.md", "trellis/.generated/backlog.json",
+    ]);
+    assert.deepEqual(set.authorOwned.map((e) => e.rel.split(sep).join("/")), ["trellis/README.md", "trellis/completed/index.md", "trellis/removed/index.md"]);
+    assert.equal(set.dir, join(root, "trellis", ".generated"));
+  });
+});
+
+test("local output has four files under .generated/ with headings and links that resolve", () => {
+  withLocalRepo((root) => {
+    const { cfg, errors: cfgErrors } = loadConfig(root);
+    assert.deepEqual(cfgErrors, []);
+    const { files, errors } = generateArtifacts(root, cfg, readBacklog(root, cfg));
+    assert.deepEqual(errors, []);
+    const dir = join(root, "trellis", ".generated");
+    assert.deepEqual(files.map((f) => f.path), ["index.md", "completed.md", "removed.md", "backlog.json"].map((n) => join(dir, n)));
+    const byName = Object.fromEntries(files.map((f) => [f.path.slice(dir.length + 1), f.content]));
+    assert.match(byName["index.md"], /^# Backlog\n/);
+    assert.match(byName["completed.md"], /^# Completed tasks\n/);
+    assert.match(byName["removed.md"], /^# Removed tasks\n/);
+    assert.match(byName["index.md"], /### Alpha/);
+    assert.match(byName["index.md"], /### Beta/);
+    // No generated Markdown file carries a marker, and every link resolves from .generated/.
+    let links = 0;
+    for (const name of ["index.md", "completed.md", "removed.md"]) {
+      assert.doesNotMatch(byName[name], /GENERATED:/, name);
+      for (const m of byName[name].matchAll(/\]\((\.\.\/[^)]+)\)/g)) {
+        links++;
+        assert.ok(existsSync(join(dir, m[1])), `${name} links to ${m[1]}`);
+      }
+    }
+    assert.equal(links, 4);
+    assert.equal(byName["index.md"].includes("](active/"), false, "no committed-style link");
+  });
+});
+
+test("local generation reads no file and ignores a missing README", () => {
+  withLocalRepo((root) => {
+    rmSync(join(root, "trellis", "README.md"));
+    rmSync(join(root, "trellis", "completed", "index.md"));
+    rmSync(join(root, "trellis", "removed", "index.md"));
+    const { cfg } = loadConfig(root);
+    const { errors } = generateArtifacts(root, cfg, readBacklog(root, cfg));
+    assert.deepEqual(errors, []);
+  });
+});
+
+test("local backlog.json holds a given nextIdOverride, null included", () => {
+  withLocalRepo((root) => {
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    const json = (opts) => JSON.parse(generateArtifacts(root, cfg, data, opts).files.find((f) => f.path.endsWith("backlog.json")).content);
+    assert.equal(json().nextId, "DEMO0005");
+    assert.equal(json({ nextIdOverride: null }).nextId, null);
+    assert.equal(json({ nextIdOverride: "DEMO0042" }).nextId, "DEMO0042");
+    assert.equal(generateArtifacts(root, cfg, data, { nextIdOverride: null }).nextId, null);
+  });
+});
+
+const SIX_MARKERS = [
+  "<!-- BEGIN GENERATED:MILESTONES -->", "<!-- END GENERATED:MILESTONES -->",
+  "<!-- BEGIN GENERATED:COMPLETED -->", "<!-- END GENERATED:COMPLETED -->",
+  "<!-- BEGIN GENERATED:REMOVED -->", "<!-- END GENERATED:REMOVED -->",
+];
+
+test("the marker scan fails on each of the six marker lines, in any author-owned file", () => {
+  withLocalRepo((root) => {
+    const { cfg } = loadConfig(root);
+    const files = [join(root, "trellis", "README.md"), join(root, "trellis", "completed", "index.md"), join(root, "trellis", "removed", "index.md")];
+    assert.deepEqual(markerLineErrors(root, cfg), []);
+    SIX_MARKERS.forEach((marker, i) => {
+      const file = files[i % 3];
+      const original = readFileSync(file, "utf8");
+      for (const tail of ["", " ", "\t", "\r"]) {
+        writeFileSync(file, `${original}\n${marker}${tail}\nmore\n`);
+        const errors = markerLineErrors(root, cfg);
+        assert.equal(errors.length, 1, `${marker} + ${JSON.stringify(tail)}`);
+        assert.ok(errors[0].includes(marker));
+        assert.ok(errors[0].startsWith(file.slice(root.length + 1)), "names the file");
+      }
+      writeFileSync(file, original);
+    });
+  });
+});
+
+test("the marker scan reports a FIFO README without reading it", { skip: process.platform === "win32" }, () => {
+  withLocalRepo((root) => {
+    const { cfg } = loadConfig(root);
+    const readme = join(root, "trellis", "README.md");
+    rmSync(readme);
+    execFileSync("mkfifo", [readme]);
+    const errors = markerLineErrors(root, cfg);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /^trellis\/README\.md: cannot read/);
+  });
+});
+
+test("the marker scan passes on prose that names a marker", () => {
+  withLocalRepo((root) => {
+    const { cfg } = loadConfig(root);
+    writeFileSync(join(root, "trellis", "README.md"), [
+      "# Backlog", "", "Do not leave <!-- BEGIN GENERATED:MILESTONES --> in this file.", "    <!-- END GENERATED:MILESTONES -->", "`<!-- BEGIN GENERATED:COMPLETED -->`", "",
+    ].join("\n"));
+    assert.deepEqual(markerLineErrors(root, cfg), []);
+  });
+});
+
+test("checkGenerated returns no files in local mode and the compare set in committed mode", () => {
+  withLocalRepo((root) => {
+    const { cfg } = loadConfig(root);
+    const out = checkGenerated(root, cfg, readBacklog(root, cfg));
+    assert.deepEqual(out, { errors: [], files: [] });
+  });
+  withRepo(ARRAY_CFG, {}, (root) => {
+    const { cfg } = loadConfig(root);
+    const out = checkGenerated(root, cfg, readBacklog(root, cfg));
+    assert.deepEqual(out.errors, []);
+    assert.equal(out.files.length, 4);
+  });
+});
+
+test("the local validation entry point orders roster, item and marker errors with no early exit", () => {
+  withLocalRepo((root) => {
+    // A malformed item and a stray marker, plus a malformed roster.
+    writeFileSync(join(root, "trellis", "active", "DEMO0001.md"), fm({ id: "DEMO0001", title: "T", status: "active", depends_on: [], summary: "S.", milestone: "Nope", priority: "High", effort: 3 }));
+    writeFileSync(join(root, "trellis", "README.md"), `# Backlog\n\n${SIX_MARKERS[0]}\n`);
+    writeFileSync(join(root, "trellis", "team.json"), JSON.stringify({ members: "x" }));
+    const { cfg } = loadConfig(root);
+    const { errors } = validateLocal(root, cfg);
+    assert.equal(errors.length, 3, errors.join("\n"));
+    assert.match(errors[0], /team\.json/);
+    assert.match(errors[1], /active\/DEMO0001\.md: milestone must be one of/);
+    assert.match(errors[2], /README\.md: holds the generated marker line/);
+  });
+});
+
+// ---------------------------------------------------------- legacy config (TRL0039)
+const LEGACY = { through: "DEMO0010", closedBefore: "2026-11-19" };
+const withLegacy = (legacy, extra = {}) => ({ ...ARRAY_CFG, legacy, ...extra });
+
+test("a valid legacy loads with no errors, and with ledger mode", () => {
+  assert.deepEqual(configErrors(withLegacy(LEGACY)), []);
+  assert.deepEqual(configErrors({ ...LEDGER_CFG, legacy: LEGACY }), []);
+});
+
+test("legacy.through must be a full id in the repo's format", () => {
+  const bad = ["TRL0010", "DEMO010", "DEMO00010", "DEMO00x0", "DEMO", "", 5, null, undefined];
+  for (const through of bad) {
+    assert.ok(configErrors(withLegacy({ ...LEGACY, through })).some((e) => e.includes("through")), JSON.stringify(through));
+  }
+  // The remainder must be digits only, even under a longer prefix such as TR.
+  const errs = configErrors({ ...ARRAY_CFG, idPrefix: "TR", idWidth: 5, legacy: { ...LEGACY, through: "TRL0038" } });
+  assert.ok(errs.some((e) => e.includes("through")));
+});
+
+test("legacy.closedBefore must be a real date string", () => {
+  for (const closedBefore of ["2026-02-31", "2026-13-01", "11/19/2026", "", 20261119, null, undefined, { toString: null }]) {
+    assert.ok(configErrors(withLegacy({ ...LEGACY, closedBefore })).some((e) => e.includes("closedBefore")), JSON.stringify(closedBefore));
+  }
+});
+
+test("legacy rejects extra keys, null, and non-objects", () => {
+  assert.ok(configErrors(withLegacy({ ...LEGACY, extra: 1 })).some((e) => e.includes("unknown key")));
+  for (const legacy of [null, [], "x", 3]) {
+    assert.ok(configErrors(withLegacy(legacy)).some((e) => e.includes("`legacy`")), JSON.stringify(legacy));
+  }
+});
+
+test("legacy needs a plain prefix; without legacy the same prefix behaves as today", () => {
+  for (const idPrefix of ["T.P", "T+P"]) {
+    const legacy = { through: `${idPrefix}0010`, closedBefore: "2026-11-19" };
+    assert.ok(configErrors({ ...ARRAY_CFG, idPrefix, legacy }).some((e) => e.includes("idPrefix")), idPrefix);
+    assert.ok(configErrors({ ...LEDGER_CFG, idPrefix, legacy }).length > 0, `ledger ${idPrefix}`);
+    assert.deepEqual(configErrors({ ...ARRAY_CFG, idPrefix }), [], `no legacy ${idPrefix}`);
+  }
+});
+
+test("legacy with a bad idPrefix or idWidth reports only the existing error and does not throw", () => {
+  for (const idPrefix of [5, ""]) {
+    const errs = configErrors({ ...ARRAY_CFG, idPrefix, legacy: LEGACY });
+    assert.ok(errs.some((e) => e.includes("idPrefix")));
+    assert.equal(errs.filter((e) => e.includes("idPrefix")).length, 1);
+  }
+  assert.ok(configErrors({ ...ARRAY_CFG, idWidth: 0, legacy: LEGACY }).some((e) => e.includes("idWidth")));
+});
+
+// ------------------------------------------------ legacy validation (TRL0039)
+const LEGACY_FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "legacy-adoption");
+const TAP_CFG = { ...FISH, idPrefix: "TAP", legacy: { through: "TAP0004", closedBefore: "2026-11-19" } };
+const MISSING_FOUR = ["summary", "milestone", "priority", "effort"].map((f) => `missing \`${f}\``);
+
+// A repo for TAP_CFG holding only the committed fixture files.
+function legacyRoot(config = TAP_CFG, { fixture = true } = {}) {
+  const root = makeRepo(config, {});
+  if (fixture) cpSync(LEGACY_FIXTURE, join(root, "trellis"), { recursive: true });
+  return root;
+}
+
+// Write one item file by hand: an undefined field is omitted, and values are raw
+// front-matter text, so a blank is passed as `'""'` or `'"   "'`.
+function putItem(root, folder, id, fields) {
+  const base = { id, title: "T", status: folder === "removed" ? "removed" : "completed", depends_on: "[]" };
+  const all = { ...base, ...fields };
+  const text = Object.entries(all).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}: ${v}`).join("\n");
+  const dir = folder === "active" ? "active" : folder === "removed" ? "removed" : join("completed", "tasks");
+  writeFileSync(join(root, "trellis", dir, `${id}.md`), `---\n${text}\n---\n\nBody.\n`);
+}
+const FULL = { summary: "S.", milestone: "Alpha", priority: "High", effort: 3 };
+const closed = (folder, date, extra = {}) => ({ [folder === "removed" ? "removed_on" : "completed_on"]: date, ...(folder === "removed" ? { removed_reason: "R." } : {}), ...extra });
+
+function legacyRead(root) {
+  const { cfg, errors } = loadConfig(root);
+  assert.deepEqual(errors, []);
+  return { cfg, data: readBacklog(root, cfg) };
+}
+const legacyErrors = (root) => legacyRead(root).data.errors;
+const cleanup = (root) => rmSync(root, { recursive: true, force: true });
+
+test("legacy fixture items validate, emit null, and render empty Summary cells", () => {
+  const root = legacyRoot();
+  try {
+    const { cfg, data } = legacyRead(root);
+    assert.deepEqual(data.errors, []);
+    const json = JSON.parse(buildBacklogJson(cfg, data));
+    for (const t of json.tasks) {
+      for (const k of ["summary", "milestone", "priority", "effort"]) assert.equal(t[k], null, `${t.id} ${k}`);
+      for (const k of ["effortLabel", "effortEmoji", "effortImage"]) assert.equal(k in t, false, `${t.id} ${k}`);
+    }
+    const { files } = generateArtifacts(root, cfg, data);
+    const done = files.find((f) => f.path === paths(root, cfg).completedIndex).content;
+    const gone = files.find((f) => f.path === paths(root, cfg).removedIndex).content;
+    assert.match(done, /\| \[TAP0002\]\(tasks\/TAP0002\.md\) \| Old completed item \|  \| 2026-06-01 \|/);
+    assert.match(done, /\| \[TAP0003\]\(tasks\/TAP0003\.md\) \| Old completed item with blank fields \|  \| 2026-06-01 \|/);
+    assert.match(gone, /\| Old removed item \|  \| 2026-06-01 \| Superseded before adoption\. \|/);
+  } finally { cleanup(root); }
+});
+
+test("a completed item at through validates with the fields omitted, and with them blank", () => {
+  for (const fields of [{}, { summary: '""', milestone: '""', priority: '"   "', effort: '""' }]) {
+    const root = legacyRoot(TAP_CFG, { fixture: false });
+    try {
+      putItem(root, "completed", "TAP0004", closed("completed", "2026-06-01", fields));
+      const { cfg, data } = legacyRead(root);
+      assert.deepEqual(data.errors, []);
+      const t = JSON.parse(buildBacklogJson(cfg, data)).tasks[0];
+      assert.deepEqual([t.summary, t.milestone, t.priority, t.effort], [null, null, null, null]);
+    } finally { cleanup(root); }
+  }
+});
+
+test("a qualifying item mixing blank and populated fields keeps the populated ones", () => {
+  const root = legacyRoot(TAP_CFG, { fixture: false });
+  try {
+    putItem(root, "completed", "TAP0002", closed("completed", "2026-06-01", { summary: "Kept.", milestone: '""', priority: "High", effort: '"  "' }));
+    const { cfg, data } = legacyRead(root);
+    assert.deepEqual(data.errors, []);
+    const t = JSON.parse(buildBacklogJson(cfg, data)).tasks[0];
+    assert.deepEqual([t.summary, t.milestone, t.priority, t.effort], ["Kept.", null, "High", null]);
+    const { files } = generateArtifacts(root, cfg, data);
+    const done = files.find((f) => f.path === paths(root, cfg).completedIndex).content;
+    assert.match(done, /\| \[TAP0002\]\(tasks\/TAP0002\.md\) \| T \| Kept\. \| 2026-06-01 \|/);
+  } finally { cleanup(root); }
+});
+
+test("an item above through, or closed on the adoption date, fails with today's messages", () => {
+  const cases = [
+    ["completed", "TAP0005", "2026-06-01"],
+    ["completed", "TAP0002", "2026-11-19"],
+    ["removed", "TAP0004", "2026-11-19"],
+    ["removed", "TAP0005", "2026-06-01"],
+  ];
+  for (const [folder, id, date] of cases) {
+    const root = legacyRoot(TAP_CFG, { fixture: false });
+    try {
+      putItem(root, folder, id, closed(folder, date));
+      const errs = legacyErrors(root).join("\n");
+      for (const m of MISSING_FOUR) assert.ok(errs.includes(m), `${folder} ${id} ${date}: ${m}`);
+    } finally { cleanup(root); }
+  }
+});
+
+test("a qualifying item the day before closedBefore validates, completed or removed", () => {
+  for (const folder of ["completed", "removed"]) {
+    const root = legacyRoot(TAP_CFG, { fixture: false });
+    try {
+      putItem(root, folder, "TAP0004", closed(folder, "2026-11-18"));
+      assert.deepEqual(legacyErrors(root), [], folder);
+    } finally { cleanup(root); }
+  }
+});
+
+test("legacy still enforces removed_reason, depends_on, id and status", () => {
+  const root = legacyRoot(TAP_CFG, { fixture: false });
+  try {
+    putItem(root, "removed", "TAP0004", { removed_on: "2026-06-01" });
+    assert.ok(legacyErrors(root).some((e) => e.includes("removed_reason")));
+    putItem(root, "removed", "TAP0004", closed("removed", "2026-06-01", { depends_on: undefined }));
+    assert.ok(legacyErrors(root).some((e) => e.includes("depends_on")));
+    putItem(root, "removed", "TAP0004", closed("removed", "2026-06-01", { id: undefined, status: "active" }));
+    const errs = legacyErrors(root).join("\n");
+    assert.match(errs, /missing `id`/);
+    assert.match(errs, /`status` must be "removed"/);
+  } finally { cleanup(root); }
+});
+
+test("with legacy, an impossible close date is an item error; without it only the shape is checked", () => {
+  for (const folder of ["completed", "removed"]) {
+    const root = legacyRoot(TAP_CFG, { fixture: false });
+    try {
+      putItem(root, folder, "TAP0005", closed(folder, "2026-02-31", FULL));
+      assert.ok(legacyErrors(root).some((e) => e.includes("real calendar date")), folder);
+      putItem(root, folder, "TAP0004", closed(folder, "2026-02-31"));
+      assert.ok(legacyErrors(root).some((e) => e.includes("TAP0004") && e.includes("real calendar date")), `${folder} qualifying`);
+    } finally { cleanup(root); }
+    const { legacy, ...noLegacy } = TAP_CFG;
+    const plain = legacyRoot(noLegacy, { fixture: false });
+    try {
+      putItem(plain, folder, "TAP0005", closed(folder, "2026-02-31", FULL));
+      assert.deepEqual(legacyErrors(plain), [], `${folder} without legacy`);
+    } finally { cleanup(plain); }
+  }
+});
+
+for (const folder of ["completed", "removed"]) {
+  for (const field of ["summary", "milestone", "priority", "effort"]) {
+    for (const blank of ['""', '"   "']) {
+      test(`a ${blank} ${field} on a non-qualifying ${folder} item: missing with legacy, as today without`, () => {
+        const item = closed(folder, "2026-06-01", { ...FULL, [field]: blank });
+        const withLegacyRoot = legacyRoot(TAP_CFG, { fixture: false });
+        const { legacy, ...noLegacy } = TAP_CFG;
+        const plain = legacyRoot(noLegacy, { fixture: false });
+        try {
+          putItem(withLegacyRoot, folder, "TAP0005", item);
+          assert.ok(legacyErrors(withLegacyRoot).some((e) => e.includes(`missing \`${field}\``)));
+          putItem(plain, folder, "TAP0005", item);
+          // Today `"   "` is a present value and `""` is missing.
+          assert.equal(legacyErrors(plain).some((e) => e.includes(`missing \`${field}\``)), blank === '""');
+        } finally { cleanup(withLegacyRoot); cleanup(plain); }
+      });
+    }
+  }
+}
+
+test("a numeric effort or summary never throws the blank test", () => {
+  const root = legacyRoot(TAP_CFG, { fixture: false });
+  try {
+    putItem(root, "completed", "TAP0005", closed("completed", "2026-06-01", { ...FULL, summary: 0, effort: 5 }));
+    assert.ok(legacyErrors(root).some((e) => e.includes("missing `summary`")), "summary: 0 is still missing, as today");
+  } finally { cleanup(root); }
+});
+
+test("a qualifying removed item with blank fields emits null", () => {
+  const root = legacyRoot(TAP_CFG, { fixture: false });
+  try {
+    putItem(root, "removed", "TAP0003", closed("removed", "2026-06-01", { summary: '""', milestone: '"   "', priority: '""', effort: '""' }));
+    const { cfg, data } = legacyRead(root);
+    assert.deepEqual(data.errors, []);
+    const t = JSON.parse(buildBacklogJson(cfg, data)).tasks[0];
+    assert.deepEqual([t.summary, t.milestone, t.priority, t.effort], [null, null, null, null]);
+  } finally { cleanup(root); }
+});
+
+test("the blank rule is for closed items only: active items validate as today", () => {
+  const root = legacyRoot(TAP_CFG, { fixture: false });
+  try {
+    const active = { id: "TAP0003", title: "T", status: "active", depends_on: "[]", ...FULL };
+    for (const field of ["summary", "milestone", "priority"]) {
+      for (const v of [undefined, '""']) {
+        putItem(root, "active", "TAP0003", { ...active, [field]: v });
+        assert.ok(legacyErrors(root).length > 0, `${field} ${v}`);
+      }
+    }
+    putItem(root, "active", "TAP0003", { ...active, summary: '"   "' });
+    assert.deepEqual(legacyErrors(root), []);
+  } finally { cleanup(root); }
+});
+
+test("a qualifying item with an archived _effortLabel and a blank or missing effort emits no effortLabel", () => {
+  for (const effort of ['""', undefined]) {
+    const root = legacyRoot(TAP_CFG, { fixture: false });
+    try {
+      putItem(root, "completed", "TAP0002", closed("completed", "2026-06-01", { effort, _effortLabel: "Trout" }));
+      const { cfg, data } = legacyRead(root);
+      assert.deepEqual(data.errors, []);
+      const t = JSON.parse(buildBacklogJson(cfg, data)).tasks[0];
+      assert.equal("effortLabel" in t, false);
+    } finally { cleanup(root); }
+  }
+});
+
+test("through compares ids lexically, so ids past 2^53 do not collapse", () => {
+  const cfg = { ...TAP_CFG, idWidth: 16, legacy: { through: "TAP9007199254740992", closedBefore: "2026-11-19" } };
+  const root = legacyRoot(cfg, { fixture: false });
+  try {
+    putItem(root, "completed", "TAP9007199254740992", closed("completed", "2026-06-01"));
+    assert.deepEqual(legacyErrors(root), []);
+    putItem(root, "completed", "TAP9007199254740993", closed("completed", "2026-06-01"));
+    const errs = legacyErrors(root);
+    assert.ok(errs.every((e) => e.includes("TAP9007199254740993")));
+    assert.ok(errs.some((e) => e.includes("missing `summary`")));
+  } finally { cleanup(root); }
+});
+
+test("a scan-mode repo without legacy renders a $& title literally", () => {
+  withRepo(ARRAY_CFG, { completed: [{ id: "DEMO0001", title: "Explain $&", effort: 3 }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const { files, errors } = generateArtifacts(root, cfg, readBacklog(root, cfg));
+    assert.deepEqual(errors, []);
+    const index = files.find((f) => f.path === paths(root, cfg).completedIndex).content;
+    assert.match(index, /\| Explain \$& \|/);
+    assert.equal(index.split("BEGIN GENERATED:COMPLETED").length, 2);
+  });
+});
+
+test("a qualifying item with a retired effort label and an old _effortLabel keeps the value and emits no display fields", () => {
+  const root = legacyRoot(TAP_CFG, { fixture: false });
+  try {
+    putItem(root, "completed", "TAP0002", closed("completed", "2026-06-01", { ...FULL, effort: "Kraken", _effortLabel: "Trout" }));
+    const { cfg, data } = legacyRead(root);
+    assert.deepEqual(data.errors, []);
+    const t = JSON.parse(buildBacklogJson(cfg, data)).tasks[0];
+    assert.equal(t.effort, "Kraken");
+    for (const k of ["effortLabel", "effortEmoji", "effortImage"]) assert.equal(k in t, false, k);
+  } finally { cleanup(root); }
+});
+
+test("summary: 0 still fails on a qualifying item and on a non-qualifying one in a legacy repo", () => {
+  for (const id of ["TAP0002", "TAP0005"]) {
+    const root = legacyRoot(TAP_CFG, { fixture: false });
+    try {
+      putItem(root, "completed", id, closed("completed", "2026-06-01", { ...FULL, summary: 0 }));
+      assert.ok(legacyErrors(root).some((e) => e.includes("missing `summary`")), id);
+    } finally { cleanup(root); }
+  }
 });

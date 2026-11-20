@@ -6,14 +6,15 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, symlinkSync, readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
-import { listResources, readResource, buildPrompt, RESOURCES, PROMPTS } from "../src/prompts.mjs";
+import { listResources, readResource, buildPrompt, RESOURCES, PROMPTS, PROMPT_TOKENS, PLAYBOOK_DEPENDENCIES } from "../src/prompts.mjs";
 import { TrellisError } from "../src/mcp.mjs";
+import { loadConfig, readBacklog } from "../src/backlog.mjs";
 import { TOOLS } from "../scripts/trellis-mcp.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -202,4 +203,381 @@ test("buildPrompt rejects an unknown prompt name", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// The packaged copies under templates/ are what `trellis init` ships to other repos, so
+// they must stay byte-identical to the in-repo sources (TRL0038: both name what `check`
+// verifies in each generated-artifacts mode).
+test("each packaged playbook and the branch-protection guide match their source byte for byte", () => {
+  const pairs = readdirSync(join(sourceRoot, "templates", "trellis", "playbooks"))
+    .map((f) => `playbooks/${f}`)
+    .concat("branch-protection.md");
+  for (const rel of pairs) {
+    assert.equal(
+      readFileSync(join(sourceRoot, "templates", "trellis", rel), "utf8"),
+      readFileSync(join(sourceRoot, "trellis", rel), "utf8"),
+      `templates/trellis/${rel} must equal trellis/${rel}`,
+    );
+  }
+});
+
+// ----------------------------------- playbooks absent (TRL0040)
+const PLAYBOOK_SEPARATOR = "--- playbook ---";
+const NAMES = ["work-task", "code-review", "pr-draft"];
+const argsFor = (name) => (name === "work-task" ? { id: "DEMO0001" } : {});
+// A scaffolded repo with every playbook removed, optionally detected and without a PR template.
+function bareRepo({ detected = false, template = true } = {}) {
+  const root = freshRepo();
+  rmSync(join(root, "trellis", "playbooks"), { recursive: true, force: true });
+  if (!template) rmSync(join(root, ".github", "pull_request_template.md"));
+  if (detected) writeFileSync(join(root, "good-agent.config.json"), "{}\n");
+  return root;
+}
+const textOf = (root, name, args = argsFor(name)) => buildPrompt(root, name, args).messages[0].content.text;
+
+test("a prompt with its playbook absent answers with a handoff, never a playbook body", () => {
+  for (const detected of [true, false]) {
+    for (const name of NAMES) {
+      const root = bareRepo({ detected });
+      try {
+        const text = textOf(root, name);
+        assert.equal(text.split("\n")[0], PROMPT_TOKENS.handoff);
+        assert.ok(!text.includes(PLAYBOOK_SEPARATOR));
+        if (detected) {
+          if (name === "pr-draft") {
+            assert.ok(text.includes("review-loop") && text.includes(PROMPT_TOKENS.prFlow));
+            assert.ok(!text.includes("write-task") && !text.includes("work-task"));
+          } else {
+            for (const skill of ["write-task", "work-task", "review-loop"]) assert.ok(text.includes(skill), skill);
+          }
+        } else {
+          assert.ok(text.includes("templates/trellis/playbooks/"));
+          assert.ok(!text.includes(PROMPT_TOKENS.prFlow));
+        }
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }
+  }
+});
+
+test("the pr-draft handoff carries the no-template token exactly when the template is absent", () => {
+  for (const detected of [true, false]) {
+    for (const template of [true, false]) {
+      const root = bareRepo({ detected, template });
+      try {
+        assert.equal(textOf(root, "pr-draft").includes(PROMPT_TOKENS.noTemplate), !template);
+        assert.ok(!textOf(root, "code-review").includes(PROMPT_TOKENS.noTemplate));
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }
+  }
+});
+
+test("each prompt falls back on its own: a directory with only code-review.md still hands off work-task", () => {
+  const root = bareRepo({ detected: true });
+  try {
+    mkdirSync(join(root, "trellis", "playbooks"));
+    writeFileSync(join(root, "trellis", "playbooks", "code-review.md"), "# Playbook: code review\n");
+    assert.ok(textOf(root, "code-review").includes(PLAYBOOK_SEPARATOR), "the present playbook is embedded");
+    const text = textOf(root, "work-task");
+    assert.equal(text.split("\n")[0], PROMPT_TOKENS.handoff);
+    assert.ok(text.includes("write-task"));
+    // The id is validated like the normal prompt's, and a valid one is named.
+    assert.throws(() => textOf(root, "work-task", { id: "nope" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+    assert.ok(text.includes("DEMO0001"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("prompt ids: the literal format, or an existing task file that `check` reads, for a prefix with a regex character", () => {
+  const root = mkdtempSync(join(tmpdir(), "trellis-prompts-"));
+  try {
+    applyScaffold(root, { prefix: "R+" }, {}, sourceRoot);
+    writeFileSync(join(root, "trellis", "active", "RR0001.md"), "---\nid: RR0001\ntitle: Odd prefix\nstatus: active\nmilestone: Alpha\npriority: High\neffort: 3\ndepends_on: []\nsummary: Summary.\n---\n\nBody.\n");
+    const { cfg } = loadConfig(root);
+    assert.deepEqual(readBacklog(root, cfg).errors, [], "check accepts the id");
+    for (const playbooks of [true, false]) {
+      if (!playbooks) rmSync(join(root, "trellis", "playbooks"), { recursive: true });
+      assert.ok(textOf(root, "work-task", { id: "R+0001" }).includes("R+0001"), "accepted by format");
+      assert.ok(textOf(root, "work-task", { id: "RR0001" }).includes("RR0001"), "an existing file is served");
+      for (const bad of ["RR0002", "nope"]) assert.throws(() => textOf(root, "work-task", { id: bad }), (e) => e instanceof TrellisError && e.code === "invalid_request", bad);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the missing-playbook recovery command names the served repo", () => {
+  const root = bareRepo();
+  try {
+    const text = textOf(root, "code-review");
+    assert.ok(text.includes("templates/trellis/playbooks/"));
+    assert.ok(text.split("\n").includes(`run from: ${root}`), "the path is on its own line, not in a shell command");
+    assert.ok(!text.includes(`"${root}"`));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the pr-draft handoff finds a repo-owned PR template in GitHub's standard places", () => {
+  const cases = [
+    [(r) => writeFileSync(join(r, "PULL_REQUEST_TEMPLATE.md"), "# t\n"), "PULL_REQUEST_TEMPLATE.md"],
+    [(r) => { mkdirSync(join(r, "docs")); writeFileSync(join(r, "docs", "pull_request_template.md"), "# t\n"); }, "docs/pull_request_template.md"],
+    [(r) => { mkdirSync(join(r, ".github", "PULL_REQUEST_TEMPLATE")); writeFileSync(join(r, ".github", "PULL_REQUEST_TEMPLATE", "a.md"), "# t\n"); }, ".github/PULL_REQUEST_TEMPLATE/"],
+  ];
+  cases.push([(r) => symlinkSync(join(r, "real.md"), join(r, "pull_request_template.md")), "pull_request_template.md"]);
+  for (const detected of [true, false]) {
+    for (const [seed, where] of cases) {
+      const root = bareRepo({ detected, template: false });
+      try {
+        writeFileSync(join(root, "real.md"), "# t\n");
+        seed(root);
+        const text = textOf(root, "pr-draft");
+        assert.ok(!text.includes(PROMPT_TOKENS.noTemplate), where);
+        assert.ok(text.includes(where), where);
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }
+  }
+});
+
+test("the pr-draft catalog description is template-neutral, and a present playbook is embedded as before", () => {
+  assert.doesNotMatch(PROMPTS.find((p) => p.name === "pr-draft").description, /conform to/);
+  const root = freshRepo();
+  try {
+    const text = textOf(root, "pr-draft");
+    assert.ok(text.includes(PLAYBOOK_SEPARATOR));
+    assert.ok(!text.includes(PROMPT_TOKENS.handoff));
+    assert.ok(text.includes(readFileSync(join(root, "trellis", "playbooks", "pr-draft.md"), "utf8").trimEnd()));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a PR template folder with no .md template does not count as a template", () => {
+  const root = bareRepo({ template: false });
+  try {
+    mkdirSync(join(root, ".github", "PULL_REQUEST_TEMPLATE"));
+    writeFileSync(join(root, ".github", "PULL_REQUEST_TEMPLATE", ".gitkeep"), "");
+    assert.ok(textOf(root, "pr-draft").includes(PROMPT_TOKENS.noTemplate));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an id check never throws on a prefix that is not a valid regex, and a directory is not a task file", () => {
+  const root = mkdtempSync(join(tmpdir(), "trellis-prompts-"));
+  try {
+    mkdirSync(join(root, "trellis"), { recursive: true });
+    const cfg = { specVersion: "2.5", idPrefix: "R[", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1] };
+    writeFileSync(join(root, "trellis", "backlog.config.json"), JSON.stringify(cfg));
+    assert.ok(textOf(root, "work-task", { id: "R[0001" }).includes("R[0001"));
+    assert.throws(() => textOf(root, "work-task", { id: "R[0002x" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+
+  const dirRoot = mkdtempSync(join(tmpdir(), "trellis-prompts-"));
+  try {
+    applyScaffold(dirRoot, { prefix: "R+" }, {}, sourceRoot);
+    mkdirSync(join(dirRoot, "trellis", "active", "RR0001.md"));
+    assert.throws(() => textOf(dirRoot, "work-task", { id: "RR0001" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+  } finally { rmSync(dirRoot, { recursive: true, force: true }); }
+});
+
+test("PR template folders count under .github, the root and docs, including symlinked folders", () => {
+  const cases = [
+    [(r) => { mkdirSync(join(r, "docs", "PULL_REQUEST_TEMPLATE"), { recursive: true }); writeFileSync(join(r, "docs", "PULL_REQUEST_TEMPLATE", "feature.md"), "# t\n"); }, "docs/PULL_REQUEST_TEMPLATE/"],
+    [(r) => { mkdirSync(join(r, "elsewhere")); writeFileSync(join(r, "elsewhere", "a.md"), "# t\n"); mkdirSync(join(r, ".github"), { recursive: true }); symlinkSync(join(r, "elsewhere"), join(r, ".github", "PULL_REQUEST_TEMPLATE")); }, ".github/PULL_REQUEST_TEMPLATE/"],
+  ];
+  for (const [seed, where] of cases) {
+    const root = bareRepo({ template: false });
+    try {
+      seed(root);
+      const text = textOf(root, "pr-draft");
+      assert.ok(!text.includes(PROMPT_TOKENS.noTemplate) && text.includes(where), where);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+  // A directory or a dangling link named like the template file does not hide the real one.
+  for (const bad of [(p) => mkdirSync(p), (p) => symlinkSync("/nonexistent-trellis-target", p)]) {
+    const root = bareRepo({ template: false });
+    try {
+      bad(join(root, ".github", "pull_request_template.md"));
+      mkdirSync(join(root, "docs"));
+      writeFileSync(join(root, "docs", "pull_request_template.md"), "# t\n");
+      assert.ok(textOf(root, "pr-draft").includes("docs/pull_request_template.md"));
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("the undetected recovery tells the user to copy the playbook, for all three prompts", () => {
+  const root = bareRepo({ template: false });
+  try {
+    for (const name of NAMES) {
+      const text = textOf(root, name);
+      assert.ok(text.includes("templates/trellis/playbooks/") && text.includes(`${name}.md`), name);
+      for (const dep of PLAYBOOK_DEPENDENCIES[name]) assert.ok(text.includes(dep), `${name} needs ${dep}`);
+      assert.ok(text.includes("keep existing copies"));
+      assert.ok(!text.includes("trellis init"), "never suggests init");
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a stray notes.md in active/ is not a task id", () => {
+  const root = freshRepo();
+  try {
+    writeFileSync(join(root, "trellis", "active", "notes.md"), "---\nid: notes\n---\n");
+    assert.throws(() => textOf(root, "work-task", { id: "notes" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a .txt PR template and a root PULL_REQUEST_TEMPLATE folder are found", () => {
+  const txt = bareRepo({ template: false });
+  const folder = bareRepo({ template: false });
+  try {
+    mkdirSync(join(txt, "docs"));
+    writeFileSync(join(txt, "docs", "pull_request_template.txt"), "t\n");
+    assert.ok(textOf(txt, "pr-draft").includes("docs/pull_request_template.txt"));
+    mkdirSync(join(folder, "PULL_REQUEST_TEMPLATE"));
+    writeFileSync(join(folder, "PULL_REQUEST_TEMPLATE", "feature.md"), "# t\n");
+    assert.ok(textOf(folder, "pr-draft").includes("PULL_REQUEST_TEMPLATE/"));
+    assert.ok(!textOf(folder, "pr-draft").includes(PROMPT_TOKENS.noTemplate));
+  } finally { for (const r of [txt, folder]) rmSync(r, { recursive: true, force: true }); }
+});
+
+test("the work-task prompt on a repo without AGENTS.md carries the fallback rule wherever AGENTS.md is required", () => {
+  const root = freshRepo();
+  try {
+    rmSync(join(root, "AGENTS.md"));
+    const text = textOf(root, "work-task");
+    assert.ok(text.includes("Wherever this playbook names AGENTS.md"), "the playbook carries the fallback");
+    assert.ok(text.includes("SPEC.md"));
+    for (const f of ["work-task", "code-review", "conventions", "pr-draft"]) {
+      for (const base of ["trellis", "templates/trellis"]) {
+        assert.ok(readFileSync(join(sourceRoot, base, "playbooks", `${f}.md`), "utf8").includes("Wherever this playbook names AGENTS.md"), `${base}/${f}`);
+      }
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("without an AGENTS.md the prompts do not require the conventions resource", () => {
+  const root = freshRepo();
+  try {
+    rmSync(join(root, "AGENTS.md"));
+    for (const name of NAMES) {
+      const text = textOf(root, name);
+      const before = text.slice(0, text.indexOf(PLAYBOOK_SEPARATOR));
+      assert.ok(!before.includes("trellis://conventions") && !before.includes("AGENTS.md"), name);
+      assert.ok(before.includes("SPEC.md"));
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a task file must be in the directory listing by its exact name", () => {
+  const root = mkdtempSync(join(tmpdir(), "trellis-prompts-"));
+  try {
+    applyScaffold(root, { prefix: "[Rr]" }, {}, sourceRoot);
+    const dir = join(root, "trellis", "active");
+    writeFileSync(join(dir, "R0001.md"), "---\nid: R0001\n---\n");
+    assert.ok(readdirSync(dir).includes("R0001.md") && !readdirSync(dir).includes("r0001.md"));
+    assert.ok(textOf(root, "work-task", { id: "R0001" }).includes("R0001"));
+    // The scan pattern `[Rr]\d{4}` accepts `r0001`. Rejecting it only exercises the exact-name
+    // guard on a case-insensitive filesystem; on a case-sensitive one it passes either way.
+    assert.throws(() => textOf(root, "work-task", { id: "r0001" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a .txt template inside a PULL_REQUEST_TEMPLATE folder counts", () => {
+  const root = bareRepo({ template: false });
+  try {
+    mkdirSync(join(root, "docs", "PULL_REQUEST_TEMPLATE"), { recursive: true });
+    writeFileSync(join(root, "docs", "PULL_REQUEST_TEMPLATE", "feature.txt"), "t\n");
+    const text = textOf(root, "pr-draft");
+    assert.ok(text.includes("docs/PULL_REQUEST_TEMPLATE/") && !text.includes(PROMPT_TOKENS.noTemplate));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the dependency set equals the playbooks each packaged playbook links or names", () => {
+  for (const name of NAMES) {
+    const text = readFileSync(join(sourceRoot, "templates", "trellis", "playbooks", `${name}.md`), "utf8");
+    const derived = new Set([...text.matchAll(/(?:\]\(|trellis\/playbooks\/)([a-z-]+)\.md/g)].map((m) => m[1]).filter((n) => n !== name));
+    assert.deepEqual([...derived].sort(), PLAYBOOK_DEPENDENCIES[name].map((f) => f.replace(/\.md$/, "")).sort(), name);
+  }
+});
+
+test("the pr-draft prompt on a repo whose only instructions are CONTRIBUTING.md carries the attribution fallback", () => {
+  const root = freshRepo();
+  try {
+    rmSync(join(root, "AGENTS.md"));
+    writeFileSync(join(root, "CONTRIBUTING.md"), "# Contributing\n\nAttribution: add a Signed-off-by trailer.\n");
+    const text = textOf(root, "pr-draft");
+    const from = text.indexOf("**Attribution:**");
+    const rule = text.slice(from, text.indexOf("\n\n", from) === -1 ? undefined : text.indexOf("\n\n", from));
+    assert.ok(from > 0);
+    assert.ok(rule.includes("Wherever this playbook names AGENTS.md") && rule.includes("CONTRIBUTING.md"));
+    const flat = rule.replace(/\s+/g, " ");
+    assert.ok(flat.includes("the repo's `attribution` policy") && flat.indexOf("the repo's `attribution` policy") < flat.indexOf("the default is none"), "the repo's policy comes before Trellis's default");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the PR template resource and the pr-draft handoff agree on a .txt template", () => {
+  const root = bareRepo({ template: false });
+  try {
+    mkdirSync(join(root, "docs"));
+    writeFileSync(join(root, "docs", "pull_request_template.txt"), "template text\n");
+    assert.ok(textOf(root, "pr-draft").includes("docs/pull_request_template.txt"));
+    const res = readResource(root, "trellis://template/pull-request");
+    assert.equal(res.text, "template text\n");
+    assert.equal(res.mimeType, "text/plain");
+    assert.equal(listResources(root).find((r) => r.uri === "trellis://template/pull-request").available, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the PR template lookup prefers .github/pull_request_template.md, and a lone folder template is the template", () => {
+  const root = bareRepo({ template: false });
+  try {
+    mkdirSync(join(root, "docs"));
+    writeFileSync(join(root, "docs", "pull_request_template.md"), "docs\n");
+    writeFileSync(join(root, "PULL_REQUEST_TEMPLATE.md"), "variant\n");
+    writeFileSync(join(root, ".github", "PULL_REQUEST_TEMPLATE.txt"), "txt\n");
+    writeFileSync(join(root, ".github", "pull_request_template.md"), "exact\n");
+    assert.ok(textOf(root, "pr-draft").includes(".github/pull_request_template.md"));
+    assert.equal(readResource(root, "trellis://template/pull-request").text, "exact\n");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+
+  const one = bareRepo({ template: false });
+  const many = bareRepo({ template: false });
+  try {
+    mkdirSync(join(one, "docs", "PULL_REQUEST_TEMPLATE"), { recursive: true });
+    writeFileSync(join(one, "docs", "PULL_REQUEST_TEMPLATE", "bug.md"), "bug\n");
+    assert.ok(textOf(one, "pr-draft").includes("docs/PULL_REQUEST_TEMPLATE/bug.md"));
+    assert.equal(readResource(one, "trellis://template/pull-request").text, "bug\n");
+
+    mkdirSync(join(many, "docs", "PULL_REQUEST_TEMPLATE"), { recursive: true });
+    for (const f of ["a.md", "b.txt"]) writeFileSync(join(many, "docs", "PULL_REQUEST_TEMPLATE", f), "t\n");
+    const text = textOf(many, "pr-draft");
+    assert.ok(text.includes("docs/PULL_REQUEST_TEMPLATE/") && text.includes("pick"));
+    assert.ok(!text.includes(PROMPT_TOKENS.noTemplate));
+    assert.equal(listResources(many).find((r) => r.uri === "trellis://template/pull-request").available, false);
+    assert.throws(() => readResource(many, "trellis://template/pull-request"), (e) => e instanceof TrellisError && e.code === "not_found");
+  } finally { rmSync(one, { recursive: true, force: true }); rmSync(many, { recursive: true, force: true }); }
+});
+
+test("a directory at .github/pull_request_template.md leaves the template resource unavailable, without EISDIR", () => {
+  const root = bareRepo({ template: false });
+  try {
+    mkdirSync(join(root, ".github", "pull_request_template.md"));
+    assert.equal(listResources(root).find((r) => r.uri === "trellis://template/pull-request").available, false);
+    assert.throws(() => readResource(root, "trellis://template/pull-request"), (e) => e instanceof TrellisError && e.code === "not_found");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the PR template lookup sorts candidates by code unit, so directory order never decides", () => {
+  const root = bareRepo({ template: false });
+  try {
+    writeFileSync(join(root, ".github", "pull_request_template.txt"), "txt\n");
+    writeFileSync(join(root, ".github", "Pull_Request_Template.md"), "upper\n");
+    assert.ok(!readdirSync(join(root, ".github")).includes("pull_request_template.md"), "the exact lowercase name is absent from the listing");
+    assert.ok(textOf(root, "pr-draft").includes(".github/Pull_Request_Template.md"));
+    assert.equal(readResource(root, "trellis://template/pull-request").text, "upper\n");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a directory at a playbook path hands off instead of failing, and AGENTS.md as a directory is not pointed at", () => {
+  const root = freshRepo();
+  try {
+    rmSync(join(root, "trellis", "playbooks", "code-review.md"));
+    mkdirSync(join(root, "trellis", "playbooks", "code-review.md"));
+    assert.equal(textOf(root, "code-review").split("\n")[0], PROMPT_TOKENS.handoff);
+    rmSync(join(root, "AGENTS.md"));
+    mkdirSync(join(root, "AGENTS.md"));
+    const text = textOf(root, "work-task");
+    assert.ok(!text.slice(0, text.indexOf(PLAYBOOK_SEPARATOR)).includes("trellis://conventions"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

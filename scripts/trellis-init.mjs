@@ -14,14 +14,18 @@
 import { dirname, join, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
-import { DEFAULTS, applyScaffold, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
-import { applyImport } from "../src/import.mjs";
+import { AGENTS_BYTE_LIMIT, DEFAULTS, INIT_TOKENS, SKIP_PARTS, applyScaffold, carryOverWarning, optionConflicts, parseSkip, resolveOptions, validateOptions, retireSource, shouldPromptVocab } from "../src/init.mjs";
+import { applyImport, importFailureLines, assertNotLedgerMode, assertNotLegacyConfig, assertNotLocalMode, assertNoLeftoverMarkers, assertSourceNotLocalOutput, ImportRefused } from "../src/import.mjs";
+import { loadConfig } from "../src/backlog.mjs";
+import { switchToLocal } from "../src/switch-local.mjs";
+import { LedgerError, refuseSymlinkedArtifacts, artifactPaths } from "../src/ledger.mjs";
 import { loadProfile, loadMappingFile } from "../src/profiles.mjs";
 
 const HELP = `trellis init — scaffold the Trellis backlog into a repo
 
 Usage:
   trellis init [target] [flags]
+  trellis init [target] --switch-to-local [--dry-run]
 
 Flags:
   --prefix <P>          id prefix (default: ${DEFAULTS.prefix})
@@ -36,9 +40,48 @@ Flags:
   --id-floor <N>        with --import, floor the organic next id (default: auto — next 1000 above the band)
   --retire-source <p>   history-preservingly git-rm an imported source tree at <p>
                         (a separate, later step — see below; cannot combine with --import)
-  --force               overwrite existing files instead of skipping
+  --skip <parts>        leave parts out of the scaffold: ${Object.keys(SKIP_PARTS).join(", ")}
+                        (a comma list; repeated --skip flags are united; "agents" leaves AGENTS.md alone)
+  --with-playbooks      write the playbooks and the full AGENTS.md block even when good-agent is
+                        detected; a rerun writes only what it is told to, so repeat your other
+                        --skip flags
+  --force               overwrite existing files instead of skipping (refused when the
+                        existing config has idAllocation "ledger", generatedArtifacts "local"
+                        or a legacy cutoff)
+  --switch-to-local     migrate this backlog to generatedArtifacts "local" (see below; only --dry-run
+                        may accompany it)
   --dry-run             report what would change without writing
   -h, --help            show this help
+
+--switch-to-local is a standalone migration to generatedArtifacts "local" (generated files in
+an ignored <tasksDir>/.generated/ folder, nothing generated committed). It takes only --dry-run
+and the target, never prompts, and never stages, commits, runs git rm or edits .gitignore: add
+the ignore line it prints first, run it, then run the git rm commands it prints, then run
+"trellis init" (no --force, repeating the --skip flags you used before), "trellis generate" and
+"trellis check". It refuses, changing nothing, when its AGENTS.md edit would take the file from at most ${AGENTS_BYTE_LIMIT.toLocaleString("en-US")} bytes to more; a file already over the limit gets a warning and the switch goes on.
+
+good-agent detection: a target with good-agent.config.json or .agents/skills/work-task/SKILL.md
+(each a regular file) is a good-agent repo. Init then skips the playbooks, names the marker it
+found, and writes a compact AGENTS.md block that defers the loops to good-agent's skills.
+--with-playbooks restores the playbooks and the full block; it never rewrites an existing TRELLIS
+block, and prints the full block for you to place instead. If you skip the playbooks in a repo that
+is not detected, ${INIT_TOKENS.blockNotUpdated} the TRELLIS block is not updated; add the playbook
+pointers by hand (init prints \`trellis init --with-playbooks\` as the way to add them later).
+
+Size guard: init never writes an AGENTS.md larger than ${AGENTS_BYTE_LIMIT} bytes, the most Codex reads. It leaves
+the file alone, prints the block with the bytes needed, and exits 0; trim AGENTS.md or place the
+block by hand. The MCP work-task, code-review and pr-draft prompts answer with a short handoff when
+their playbook is absent (good-agent's skills when detected, else a note naming the playbook and its
+dependency files; copy any missing ones from the package's templates/trellis/playbooks/ into
+trellis/playbooks/ and keep existing copies).
+
+To adopt a backlog whose closed items predate these rules, write a \`legacy\` cutoff into
+trellis/backlog.config.json first, then run "trellis init" without --force: init cannot create
+\`legacy\` itself, and --force is refused once it is set, because the replacement config would
+drop it. With no config yet, hand-author the full config (idPrefix, idWidth, milestones,
+priorities, effort, legacy), since init would otherwise validate against the strict defaults.
+When the backlog lives outside trellis/, set tasksDir in that config (the config file itself
+stays at trellis/backlog.config.json), or init can succeed against an empty default tree.
 
 With --import, provide exactly one of --profile or --mapping; a relative <path>
 resolves against the target repo. --dry-run previews the scaffold without writing;
@@ -76,6 +119,7 @@ function parseArgs(argv) {
     };
     switch (key) {
       case "-h": case "--help": opts.help = true; break;
+      case "--switch-to-local": opts.switchToLocal = true; break;
       case "--force": opts.force = true; break;
       case "--dry-run": opts.dryRun = true; break;
       case "--import": opts.import = next(); break;
@@ -89,6 +133,9 @@ function parseArgs(argv) {
         break;
       }
       case "--retire-source": opts.retireSource = next(); break;
+      // Raw values, one per flag (undefined when missing); validated once by parseSkip.
+      case "--skip": (opts.skip ||= []).push(next()); break;
+      case "--with-playbooks": opts.withPlaybooks = true; break;
       case "--prefix": opts.prefix = next(); break;
       case "--id-width": opts.idWidth = Number(next()); break;
       case "--milestones": opts.milestones = csv(next()); break;
@@ -124,6 +171,38 @@ async function promptMissing(opts) {
   }
 }
 
+// Says what good-agent detection (or an explicit skip) did to the playbooks, and how to
+// get them back. The recovery line is only for a repo that is not detected.
+function restoreCommand(summary) {
+  const rest = summary.omitted.filter((p) => p !== "playbooks");
+  return `trellis init --with-playbooks${rest.length ? ` --skip ${rest.join(",")}` : ""}`;
+}
+
+function reportDetection(summary) {
+  if (summary.detected) {
+    console.log(`  detected good-agent: ${summary.detected}`);
+    if (summary.playbooksOmittedBy === "detection") console.log("  playbooks left out because of it; add them by running `" + restoreCommand(summary) + "` from the target repository");
+    else if (summary.playbooksOmittedBy === "skip") console.log("  playbooks left out by --skip playbooks");
+  } else if (summary.playbooksOmittedBy === "skip") {
+    console.log(`${INIT_TOKENS.blockNotUpdated} To add the playbooks later, run \`${restoreCommand(summary)}\` from the target repository; the TRELLIS block is not updated, so add the playbook pointers by hand`);
+  }
+}
+
+// Prints each block init did not write: the block goes to stdout, the warnings to stderr.
+// A dry run says it would print. One shared reporter for both print reasons.
+function reportPrinted(summary, dryRun) {
+  for (const p of summary.printed) {
+    console.log(dryRun ? `${INIT_TOKENS.preview} Would print this block for AGENTS.md (dry run, nothing written):` : "Place this block in AGENTS.md by hand:");
+    process.stdout.write(p.block);
+    if (p.reason === "size") {
+      console.error(`${INIT_TOKENS.size} AGENTS.md would be ${p.bytesNeeded} bytes, over the ${AGENTS_BYTE_LIMIT}-byte limit Codex reads, so it is left unchanged. Trim AGENTS.md, or place the block above by hand.`);
+      console.error(carryOverWarning());
+    } else {
+      console.error(carryOverWarning({ bytesNeeded: p.bytesNeeded }));
+    }
+  }
+}
+
 function report(targetRoot, summary, dryRun) {
   // Fatal errors → never claim success. "Refused" if nothing was written;
   // "did not complete" if some files landed before a fatal generate failure.
@@ -142,6 +221,8 @@ function report(targetRoot, summary, dryRun) {
   line(dryRun ? "append" : "appended", summary.appended);
   line(dryRun ? "regenerate" : "generated", summary.generated);
   line("skipped", summary.skipped);
+  line("omitted", summary.omitted);
+  reportDetection(summary);
   // Remaining warnings are benign (e.g. a missing copy source) — the scaffold
   // still completed, so they do not change the exit code.
   for (const w of summary.warnings) console.warn(`  warning: ${w}`);
@@ -152,10 +233,14 @@ function report(targetRoot, summary, dryRun) {
     console.log(`  reconcile (${summary.reconcile.length}) — pre-Trellis backlog guidance to rewrite by hand (init left these untouched):`);
     for (const r of summary.reconcile) console.log(`    - ${r.file}: ${r.note}`);
   }
+  reportPrinted(summary, dryRun);
   if (!dryRun) {
     console.log(`Done. For a fresh backlog, add a task under ${summary.root}/active/, then \`npx @taprootio/trellis generate\`.`);
     console.log(`If you are importing an existing backlog, run \`npx @taprootio/trellis import ...\` before creating any new task so imported ids keep the first available range.`);
-    console.log(`Then enable branch protection so the \`backlog\` check gates merges — see trellis/branch-protection.md.`);
+    // The final step follows the parts that were skipped: no `backlog` job without `ci`, no recipe link without `branch-protection`.
+    const noCi = summary.omitted.includes("ci"), noGuide = summary.omitted.includes("branch-protection");
+    const gate = noCi ? "Then require `trellis check` through your existing CI (SPEC §10) so it gates merges" : "Then enable branch protection so the `backlog` check gates merges";
+    console.log(`${gate}${noGuide ? "." : " — see trellis/branch-protection.md."}`);
   }
 }
 
@@ -181,6 +266,8 @@ function retireFlagErrors(opts) {
   const errors = [];
   if (!opts.retireSource || !String(opts.retireSource).trim()) errors.push("--retire-source requires a path");
   if (opts.import) errors.push("--retire-source cannot be combined with --import — retire the source in a separate run after the import is committed");
+  if (opts.skip) errors.push("--retire-source cannot be combined with --skip, which only applies to scaffolding");
+  if (opts.withPlaybooks) errors.push("--retire-source cannot be combined with --with-playbooks, which only applies to scaffolding");
   return errors;
 }
 
@@ -189,9 +276,7 @@ function retireFlagErrors(opts) {
 // review before committing.
 function reportImport(targetRoot, summary) {
   if (summary.errors.length) {
-    const wrote = summary.created.length || summary.generated.length;
-    console.error(wrote ? `Import into ${targetRoot} did not complete:` : `Refused to import into ${targetRoot} — wrote nothing:`);
-    for (const e of summary.errors) console.error(`  - ${e}`);
+    for (const line of importFailureLines(`Import into ${targetRoot}`, targetRoot, summary)) console.error(line);
     for (const w of summary.warnings) console.warn(`  warning: ${w}`);
     return;
   }
@@ -234,8 +319,55 @@ function reportRetire(summary, dryRun) {
   console.log("Review with `git status`, then commit. Git preserves the history.");
 }
 
+// Prints what the switch did (or would do) and the removal commands for the user to run.
+function runSwitch(targetRoot, dryRun) {
+  let r;
+  try {
+    r = switchToLocal(targetRoot, { dryRun });
+  } catch (e) {
+    console.error(`error: ${e.message}`);
+    process.exit(e instanceof LedgerError ? e.exitCode : 1);
+  }
+  console.log(`${dryRun ? "Would switch" : "Switched"} ${targetRoot} to generatedArtifacts "local"${dryRun ? " (dry run)" : ""}`);
+  if (r.edits.length) {
+    console.log(`  ${dryRun ? "edit" : "edited"} (${r.edits.length}):`);
+    for (const e of r.edits) console.log(`    ${e.rel}: ${e.why}`);
+  } else {
+    console.log("  nothing to edit");
+  }
+  for (const w of r.warnings) console.warn(`  warning: ${w}`);
+  if (r.removals.length) {
+    console.log("Legacy generated files are still tracked. Run these from a shell that has no GIT_DIR, GIT_COMMON_DIR, GIT_WORK_TREE or GIT_INDEX_FILE set, to delete them (the switch never runs git rm):");
+    for (const x of r.removals) console.log(`  ${x.command}`);
+  }
+  console.log("Nothing was staged or committed. Next: run any commands above, then `trellis init` (no --force, and repeating the same --skip flags you used before), `trellis generate` and `trellis check`.");
+  process.exit(0);
+}
+
 const { target, opts } = parseArgs(process.argv.slice(2));
 if (opts.help) { process.stdout.write(HELP); process.exit(0); }
+
+// --switch-to-local is dispatched before any prompt or scaffold path: it takes only
+// --dry-run and the target, and any other flag is a usage error before anything is read.
+if (opts.switchToLocal) {
+  const extra = Object.keys(opts).filter((k) => !["switchToLocal", "dryRun"].includes(k));
+  if (extra.length) {
+    console.error(`error: --switch-to-local takes only --dry-run and a target; remove: ${extra.map((k) => "--" + k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())).join(", ")}`);
+    process.exit(2);
+  }
+  runSwitch(resolve(target), !!opts.dryRun);
+}
+
+// `--skip` is checked before any prompt or write. The raw values become the list of part names.
+if (opts.skip) {
+  const { parts, errors } = parseSkip(opts.skip);
+  errors.push(...optionConflicts(parts, opts.withPlaybooks));
+  if (errors.length) {
+    for (const e of errors) console.error(`error: ${e}`);
+    process.exit(2);
+  }
+  opts.skip = parts;
+}
 
 await promptMissing(opts);
 
@@ -258,6 +390,22 @@ if (flagErrors.length) {
 const targetRoot = resolve(target);
 const dryRun = !!opts.dryRun;
 
+// `init --force` would drop a `legacy` cutoff from the config, so it is refused before any
+// write, including on the --retire-source path (TRL0039).
+if (opts.force) {
+  try {
+    // Name the reason that fits the command: --retire-source never replaces the config.
+    const why = "retireSource" in opts
+      ? "--force has no use with --retire-source, which only stages the removal of the source. Rerun the same command without --force"
+      : "the replacement config would drop it. Rerun the same command without --force (keeping --import if you gave it). trellis/backlog.config.json must stay";
+    assertNotLegacyConfig(targetRoot, "init --force", why);
+  } catch (e) {
+    if (!(e instanceof ImportRefused)) throw e;
+    console.error(`error: ${e.message}`);
+    process.exit(2);
+  }
+}
+
 // --retire-source: a deliberate, standalone step run after the import is committed. It
 // does not scaffold or import — it stages a history-preserving `git rm` of the source.
 // Keyed on presence (a valueless flag was already rejected by retireFlagErrors).
@@ -267,15 +415,57 @@ if ("retireSource" in opts) {
   process.exit(ret.errors.length ? 1 : 0);
 }
 
-const { summary } = applyScaffold(targetRoot, opts, { dryRun }, sourceRoot);
+// A ledger-mode backlog owns its config and its claimed ids, so --force and --import
+// are refused before anything is scaffolded, by reading the existing config first.
+// The import mapping is loaded and parsed once; loader errors are reported before anything is scaffolded.
+let importMapping = null;
+if (opts.force || opts.import) {
+  try {
+    // `init --force` would replace a local config with a committed one and overwrite the
+    // author-owned README and index files (TRL0038).
+    if (opts.force) assertNotLocalMode(targetRoot, "init --force", "it would replace the config, fall back to committed mode and overwrite the author-owned README and index files");
+    if (opts.import) {
+      assertNotLedgerMode(targetRoot, "init --import");
+      // A local-mode target with a leftover marker is refused before init scaffolds anything.
+      assertNoLeftoverMarkers(targetRoot, "init --import");
+      // A mapped source file that is one of the local outputs is refused the same way.
+      const loaded = opts.profile ? loadProfile(opts.profile) : loadMappingFile(opts.mapping);
+      if (loaded.error) { console.error(`error: ${loaded.error}`); process.exit(2); }
+      importMapping = loaded.mapping;
+      assertSourceNotLocalOutput(targetRoot, isAbsolute(opts.import) ? opts.import : resolve(targetRoot, opts.import), importMapping, "init --import");
+    } else assertNotLedgerMode(targetRoot, "init --force", "it would overwrite the config that holds the ledger settings");
+  } catch (e) {
+    if (!(e instanceof ImportRefused)) throw e;
+    console.error(`error: ${e.message}`);
+    process.exit(2);
+  }
+}
+
+// Scaffolding rewrites the generated files, so an existing ledger-mode config with a
+// symlinked one is refused first, with nothing written.
+{
+  const { cfg, errors } = loadConfig(targetRoot);
+  if (!errors.length && cfg.idAllocation === "ledger") {
+    try {
+      refuseSymlinkedArtifacts(artifactPaths(targetRoot, cfg));
+    } catch (e) {
+      if (!(e instanceof LedgerError)) throw e;
+      console.error(`error: ${e.message}`);
+      process.exit(2);
+    }
+  }
+}
+
+const { summary } = applyScaffold(targetRoot, opts, { dryRun, deferGenerate: !!opts.import }, sourceRoot);
 report(targetRoot, summary, dryRun);
 // A failed scaffold (refusal or generate failure) is fatal and blocks any import.
 if (summary.errors.length) process.exit(1);
 
-// --import on-ramp: scaffold, then import an existing backlog in one command.
+// The rest sets `process.exitCode` and lets the script end, so a large printed block
+// is flushed to a pipe. A benign warning (e.g. a missing copy source) exits 0.
 if (opts.import) {
-  const { mapping, error } = opts.profile ? loadProfile(opts.profile) : loadMappingFile(opts.mapping);
-  if (error) { console.error(`error: ${error}`); process.exit(2); }
+  // --import on-ramp: scaffold, then import an existing backlog in one command.
+  const mapping = importMapping;
   const importSource = isAbsolute(opts.import) ? opts.import : resolve(targetRoot, opts.import);
   if (dryRun) {
     // A dry run scaffolds nothing, so there is no initialized target to plan the
@@ -285,12 +475,18 @@ if (opts.import) {
     const via = opts.profile ? `profile ${opts.profile}` : `mapping ${opts.mapping}`;
     console.log(`Would then import from ${importSource} using ${via}.`);
     console.log("Re-run without --dry-run to scaffold and import, or run `npx @taprootio/trellis import --dry-run` on the initialized repo to preview the import plan.");
-    process.exit(0);
+  } else {
+    let imp = null;
+    try {
+      ({ summary: imp } = applyImport(targetRoot, importSource, mapping, { dryRun: false, preserveIds: opts.preserveIds, idFloor: opts.idFloor }));
+    } catch (e) {
+      if (!(e instanceof ImportRefused)) throw e;
+      console.error(`error: ${e.message}`);
+      process.exitCode = 2;
+    }
+    if (imp) {
+      reportImport(targetRoot, imp);
+      process.exitCode = imp.errors.length ? 1 : 0;
+    }
   }
-  const { summary: imp } = applyImport(targetRoot, importSource, mapping, { dryRun: false, preserveIds: opts.preserveIds, idFloor: opts.idFloor });
-  reportImport(targetRoot, imp);
-  process.exit(imp.errors.length ? 1 : 0);
 }
-
-// A benign warning (e.g. a missing copy source) on a completed scaffold exits 0.
-process.exit(0);

@@ -13,7 +13,7 @@
 // dependency-free.
 
 import { resolve } from "node:path";
-import { applyImport } from "../src/import.mjs";
+import { applyImport, importFailureLines, ImportRefused } from "../src/import.mjs";
 import { optionToken, requiredValue, resolveRepoRoot, showHelp, usageError } from "../src/cli.mjs";
 import { loadProfile, loadMappingFile, listProfiles } from "../src/profiles.mjs";
 
@@ -39,6 +39,9 @@ source ids deduped). With --preserve-ids, a source id matching the target format
 kept, collisions/mismatches are reassigned into the gap above the imported band, and a
 nextIdFloor is recorded so organically-created ids begin above it. depends_on is
 rewritten either way. Relative <source> paths resolve against the target repo.
+
+Import is not supported when the target's idAllocation is "ledger" (dry run included; exit
+2): import first, then switch to ledger mode and run "trellis claim --seed".
 `;
 
 function parseArgs(argv) {
@@ -90,9 +93,7 @@ function parseArgs(argv) {
 
 function report(targetRoot, summary, dryRun) {
   if (summary.errors.length) {
-    const wrote = summary.created.length || summary.generated.length;
-    console.error(wrote ? `Import of ${targetRoot} did not complete:` : `Refused to import into ${targetRoot} — wrote nothing:`);
-    for (const e of summary.errors) console.error(`  - ${e}`);
+    for (const line of importFailureLines(`Import of ${targetRoot}`, targetRoot, summary)) console.error(line);
     // Even on refusal, the id map + warnings help the user fix the mapping — e.g.
     // see which source ids collided behind an ambiguous depends_on.
     if (summary.idMap.length) {
@@ -154,6 +155,12 @@ const targetRoot = resolveRepoRoot(opts.target);
 const sourceRoot = resolve(targetRoot, source); // relative <source> resolves against the target repo
 const dryRun = opts.dryRun || !opts.apply; // dry-run by default; --apply writes, but an explicit --dry-run always wins
 
-const { summary } = applyImport(targetRoot, sourceRoot, mapping, { dryRun, preserveIds: opts.preserveIds, idFloor: opts.idFloor });
+let summary;
+try {
+  ({ summary } = applyImport(targetRoot, sourceRoot, mapping, { dryRun, preserveIds: opts.preserveIds, idFloor: opts.idFloor }));
+} catch (e) {
+  if (e instanceof ImportRefused) { console.error(`error: ${e.message}`); process.exit(2); }
+  throw e;
+}
 report(targetRoot, summary, dryRun);
 process.exit(summary.errors.length ? 1 : 0);

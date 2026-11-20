@@ -39,8 +39,8 @@
 // to the item's source id (plus an optional `. : - – —` and whitespace) is dropped from
 // the stored title (TRL0029); it is set on the numeric-prefix profiles, off elsewhere.
 
-import { readFileSync, readdirSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
-import { join, relative, dirname, isAbsolute } from "node:path";
+import { readFileSync, readdirSync, writeFileSync, existsSync, rmSync, statSync, openSync, closeSync, realpathSync } from "node:fs";
+import { join, relative, dirname, isAbsolute, sep, basename, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   loadConfig,
@@ -52,7 +52,105 @@ import {
   parseFrontMatter,
   paths,
   composeFile,
+  artifactSet,
+  isLocalMode,
+  markerLineErrors,
+  CONFIG_DIR,
+  GENERATED_DIR,
+  LOCAL_TITLES,
+  localHead,
 } from "./backlog.mjs";
+import { OutputRefused, makeDirs, outputPreflight, previewNextId, removeCreatedDirs, writeArtifactFiles } from "./local-output.mjs";
+
+// A typed refusal for a ledger-mode target (TRL0037). It is thrown, not put in
+// `summary.errors`, so each caller can map it to exit 2 / `invalid_request`.
+export class ImportRefused extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ImportRefused";
+  }
+}
+
+// Throws ImportRefused when the target's config says `idAllocation: "ledger"`.
+// Import could assign an id that is an open claim, so it is unsupported there; and
+// `init --force` would rewrite a config that owns the ledger settings. The config is
+// read raw: a missing or unparseable one is not ledger mode (an unreadable one is refused), and the later steps
+// report it their own way.
+export const LEDGER_IMPORT_WHY = "ids come from the local ledger, and an import could reuse an open claim. Import before switching to ledger mode and running `trellis claim --seed`";
+
+export function assertNotLedgerMode(targetRoot, what, why = LEDGER_IMPORT_WHY) {
+  let text;
+  try {
+    text = readFileSync(join(targetRoot, CONFIG_DIR, "backlog.config.json"), "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return;
+    // An unreadable config might be a ledger config, so fail closed.
+    throw new ImportRefused(`${what} cannot check ${CONFIG_DIR}/backlog.config.json (${e.code || e.message}). Nothing was written.`);
+  }
+  let cfg;
+  try {
+    cfg = JSON.parse(text);
+  } catch {
+    return;
+  }
+  if (cfg && cfg.idAllocation === "ledger") {
+    throw new ImportRefused(`${what} is not supported when idAllocation is "ledger": ${why}. Nothing was written.`);
+  }
+}
+
+// Reads the target's config raw and parses it. Null when it is missing or not JSON,
+// since the later steps report those their own way; an unreadable one is refused.
+function readRawConfig(targetRoot, what) {
+  let text;
+  try {
+    text = readFileSync(join(targetRoot, CONFIG_DIR, "backlog.config.json"), "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw new ImportRefused(`${what} cannot check ${CONFIG_DIR}/backlog.config.json (${e.code || e.message}). Nothing was written.`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+// Sibling of assertNotLedgerMode for `init --force`: it would replace a local-mode
+// config with a committed-mode one and overwrite the author-owned README and indexes (TRL0038).
+export function assertNotLocalMode(targetRoot, what, why) {
+  const cfg = readRawConfig(targetRoot, what);
+  if (cfg && cfg.generatedArtifacts === "local") {
+    throw new ImportRefused(`${what} is not supported when generatedArtifacts is "local": ${why}. Nothing was written.`);
+  }
+}
+
+// `init --force` would replace the config with one that has no `legacy`, so an existing
+// `legacy` key is refused whatever its value or `tasksDir` (TRL0039). A read or parse
+// failure passes through to the guards and preflight that already handle it.
+export function assertNotLegacyConfig(targetRoot, what, why) {
+  let cfg;
+  try {
+    cfg = readRawConfig(targetRoot, what);
+  } catch (e) {
+    if (e instanceof ImportRefused) return;
+    throw e;
+  }
+  if (cfg && typeof cfg === "object" && !Array.isArray(cfg) && Object.hasOwn(cfg, "legacy")) {
+    throw new ImportRefused(`${what} is not supported when the config has \`legacy\`: ${why}. Nothing was written.`);
+  }
+}
+
+// Refuses a local-mode target that still holds a generated marker line in an
+// author-owned file, so an import or scaffold cannot report success while `check`
+// fails. Reads files only. A target without a usable local config passes.
+export function assertNoLeftoverMarkers(targetRoot, what) {
+  const raw = readRawConfig(targetRoot, what);
+  if (!raw || raw.generatedArtifacts !== "local") return;
+  const { cfg, errors } = loadConfig(targetRoot);
+  if (errors.length) return;
+  const markers = markerLineErrors(targetRoot, cfg);
+  if (markers.length) throw new ImportRefused(`${what} refused: ${markers.join("; ")}. Nothing was written.`);
+}
 
 // Target subdir for each status; statuses are always processed in this fixed order
 // (not the mapping's key order) so id assignment is deterministic.
@@ -223,11 +321,74 @@ function buildBody(raw, newId, title) {
 // --------------------------------------------------------------- discovery
 // The source-relative PATHS the Trellis generator owns (SPEC §8): a source that is
 // itself a Trellis backlog carries these alongside its tasks, so never select one as an
-// importable item — a `*.md` glob would otherwise pull them in and fail validation.
-// Matched by PATH, not basename, so a real task that merely happens to be named
-// `active/index.md` still imports.
-const GENERATED_ARTIFACTS = new Set(["README.md", "completed/index.md", "removed/index.md"]);
-const isGeneratedArtifact = (rel) => GENERATED_ARTIFACTS.has(rel.split(/[/\\]/).join("/"));
+// importable item — a `*.md` glob would otherwise pull them in and fail validation. Both
+// the committed files and the local `.generated/` files are listed, whatever the
+// target's mode (the source's own mode is unknown), and derived from `artifactSet` so
+// the names have one owner. The committed names match by exact PATH, so a real task
+// named `active/index.md` still imports.
+// A local file is recognized by its own header (the heading and the "generated" note the
+// local generator writes), wherever its `.generated/` folder sits, so a real task that
+// is named `index.md` in a `.generated/` folder still imports.
+// The committed `backlog.json` is JSON, not a Markdown item, so it is excluded only inside a
+// `.generated` folder and only when it has the generated shape; a mapped source-root
+// `backlog.json` is the user's own file (round 3).
+const COMMITTED_ARTIFACTS = new Set(
+  artifactSet(".", { tasksDir: ".", generatedArtifacts: "committed" }).generated.filter((e) => e.key !== "backlog").map((e) => e.rel.split(sep).join("/")),
+);
+const LOCAL_HEADS = new Map(
+  artifactSet(".", { tasksDir: ".", generatedArtifacts: "local" }).generated
+    .filter((e) => LOCAL_TITLES[e.key])
+    .map((e) => [basename(e.path), localHead(LOCAL_TITLES[e.key])]),
+);
+// A `.generated/backlog.json` is skipped only when it has the generated shape; any other
+// file at that path is the user's own and imports like an ordinary mapped file.
+const BACKLOG_KEYS = ["prefix", "milestones", "nextId", "counts", "tasks"];
+// SPEC §8.2: every task carries the descriptive metadata keys, `null` where a closed
+// item has none. Effort is a number or a label.
+const orNull = (type) => (v) => v === null || typeof v === type;
+const stringList = (v) => Array.isArray(v) && v.every((x) => typeof x === "string");
+const TASK_KEY_TYPES = {
+  id: (v) => typeof v === "string", title: (v) => typeof v === "string", status: (v) => typeof v === "string",
+  milestone: orNull("string"), priority: orNull("string"), summary: orNull("string"), owner: orNull("string"),
+  effort: (v) => v === null || typeof v === "number" || typeof v === "string",
+  depends_on: stringList, collaborators: stringList,
+};
+// Closed items also carry their close fields (SPEC §8.2).
+const CLOSE_KEYS = { completed: ["completed_on"], removed: ["removed_on", "removed_reason"] };
+function hasTaskShape(t) {
+  return !!t && typeof t === "object" && !Array.isArray(t) && Object.entries(TASK_KEY_TYPES).every(([k, ok]) => Object.hasOwn(t, k) && ok(t[k]))
+    && (CLOSE_KEYS[t.status] || []).every((k) => typeof t[k] === "string");
+}
+function hasBacklogShape(abs) {
+  try {
+    const obj = JSON.parse(readFileSync(abs, "utf8"));
+    if (!obj || typeof obj !== "object" || Array.isArray(obj) || !BACKLOG_KEYS.every((k) => Object.hasOwn(obj, k))) return false;
+    const counts = obj.counts;
+    return typeof obj.prefix === "string" && Array.isArray(obj.milestones) && (obj.nextId === null || typeof obj.nextId === "string")
+      && !!counts && typeof counts === "object" && !Array.isArray(counts)
+      && ["active", "completed", "removed"].every((k) => Number.isInteger(counts[k]) && counts[k] >= 0)
+      && Array.isArray(obj.tasks)
+      && obj.tasks.every(hasTaskShape)
+      && obj.tasks.length === ["active", "completed", "removed"].reduce((n, k) => n + counts[k], 0)
+      && ["active", "completed", "removed"].every((k) => obj.tasks.filter((t) => t.status === k).length === counts[k]);
+  } catch { return false; }
+}
+function isGeneratedArtifact(rel, abs) {
+  const parts = rel.split(/[/\\]/);
+  if (COMMITTED_ARTIFACTS.has(parts.join("/"))) return true;
+  // The folder is the source file's own parent, not a mapping-relative segment: a source
+  // root that is itself `.generated` (dirs ["."]) has no such segment in `rel`.
+  // Resolve symlinks first: a source root linked to an external `.generated` folder is
+  // still a generated folder.
+  let real;
+  try { real = realpathSync(abs); } catch { real = resolve(abs); }
+  const inGenerated = basename(dirname(real)) === GENERATED_DIR;
+  const name = basename(real);
+  if (name === "backlog.json" && inGenerated) return hasBacklogShape(abs);
+  const head = LOCAL_HEADS.get(name);
+  if (!head || !inGenerated) return false;
+  try { return readFileSync(abs, "utf8").replace(/\r\n/g, "\n").startsWith(head); } catch { return false; }
+}
 
 function listFiles(dir, re) {
   if (!existsSync(dir)) return null; // null = dir absent (a warning), [] = present-but-empty
@@ -238,7 +399,7 @@ function listFiles(dir, re) {
 
 // Gather every source item across the mapped status dirs, in a deterministic global
 // order (status order, then path) so fresh-sequential ids are reproducible.
-function discoverSources(sourceRoot, mapping, warnings) {
+function discoverSources(sourceRoot, mapping, warnings, { includeGenerated = false } = {}) {
   const out = [];
   for (const status of STATUS_ORDER) {
     const spec = mapping.sources[status];
@@ -251,7 +412,7 @@ function discoverSources(sourceRoot, mapping, warnings) {
       if (files === null) { warnings.push(`source dir not found, skipped: ${d}`); continue; }
       for (const f of files) {
         const rel = relative(sourceRoot, join(dir, f));
-        if (isGeneratedArtifact(rel)) continue; // a Trellis generated artifact at its known path — not a task
+        if (!includeGenerated && isGeneratedArtifact(rel, join(dir, f))) continue; // a Trellis generated artifact at its known path — not a task
         hits.push({ status, dir, file: join(dir, f), basename: f.replace(/\.[^.]+$/, ""), rel });
       }
     }
@@ -306,7 +467,9 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   // The target must already be a Trellis repo — import emits items + regenerates,
   // it does not scaffold (that's `trellis init`, or the `init --import` on-ramp
   // that scaffolds first, then calls this).
-  if (!existsSync(p.readme) || !existsSync(p.completedIndex) || !existsSync(p.removedIndex)) {
+  // In local mode the index files are author-owned and optional, so a loadable config
+  // and roster (checked through readBacklog below) is all it needs.
+  if (!isLocalMode(cfg) && (!existsSync(p.readme) || !existsSync(p.completedIndex) || !existsSync(p.removedIndex))) {
     return { ...empty(), cfg, root, errors: ["target is not an initialized Trellis backlog (missing generated indexes); run `npx @taprootio/trellis init` first"] };
   }
   const data = readBacklog(targetRoot, cfg);
@@ -589,9 +752,108 @@ export function planImport(targetRoot, sourceRoot, mapping, opts = {}) {
   return { cfg, root, items, idMap, counts, provenance, warnings, errors, preserved, reassigned, idFloor };
 }
 
-// The four generated-artifact paths, repo-relative under the backlog root.
-function generatedRels(root) {
-  return [`${root}/README.md`, `${root}/completed/index.md`, `${root}/removed/index.md`, `${root}/backlog.json`];
+// The generated-artifact paths for the config's mode, repo-relative with `/`.
+const generatedRels = (targetRoot, cfg) => artifactSet(targetRoot, cfg).generated.map((e) => e.rel.split(sep).join("/"));
+
+// Test seam: runs after an item file is created and recorded, before its contents are written.
+export const testSeams = { afterItemCreate: null };
+
+// Local mode only: refuse before planning when a marker is left in an author-owned
+// file (a dry run checks just that), or, for a real run, when an output path is
+// unignored, tracked or not a regular file. Becomes ImportRefused (exit 2).
+function refuseLocalOutputs(targetRoot, dryRun) {
+  const { cfg, errors } = loadConfig(targetRoot);
+  if (errors.length || !isLocalMode(cfg)) return;
+  try {
+    if (dryRun) {
+      const markers = markerLineErrors(targetRoot, cfg);
+      if (markers.length) throw new OutputRefused(markers.join("\n"));
+    } else {
+      outputPreflight(targetRoot, cfg);
+    }
+  } catch (e) {
+    if (e instanceof OutputRefused) throw new ImportRefused(`import refused: ${e.message}\nNothing was written.`);
+    throw e;
+  }
+}
+
+// The real path of `path` even when it does not exist yet: the nearest existing
+// ancestor is resolved and the missing tail is appended.
+function resolveFuture(path) {
+  const tail = [];
+  let at = resolve(path);
+  for (;;) {
+    try {
+      return join(realpathSync(at), ...tail.reverse());
+    } catch (e) {
+      if (e.code !== "ENOENT" || dirname(at) === at) return resolve(path);
+      tail.push(basename(at));
+      at = dirname(at);
+    }
+  }
+}
+
+const identityOf = (path) => { try { const st = statSync(path); return `${st.dev}:${st.ino}`; } catch { return null; } };
+// Identities of `path` and each of its existing ancestors.
+function existingChain(path) {
+  const ids = new Set();
+  for (let at = resolve(path); ; at = dirname(at)) {
+    const id = identityOf(at);
+    if (id) ids.add(id);
+    if (dirname(at) === at) return ids;
+  }
+}
+const posixRel = (from, to) => relative(from, to).split(sep).join("/");
+
+// Local mode only: a mapped source file that is one of the target's own outputs would be
+// read while the import rewrites it, so refuse before anything is written (TRL0038).
+// Runs for `import` and, before it scaffolds, for `init --import`. The mapping is
+// checked by the planner, so an invalid one is skipped here.
+export function assertSourceNotLocalOutput(targetRoot, sourceRoot, mapping, what = "import") {
+  if (!mapping || validateMapping(mapping).length) return;
+  const { cfg, errors } = loadConfig(targetRoot);
+  if (errors.length || !isLocalMode(cfg)) return;
+  const set = artifactSet(targetRoot, cfg);
+  // A mapped folder that is, holds or sits inside the target's `.generated` folder would
+  // read the outputs the import rewrites, whatever its glob matches (round 8).
+  const genReal = resolveFuture(set.dir);
+  const genId = identityOf(set.dir);
+  const overlaps = (a, b) => { const r = relative(a, b); return r === "" || (r !== ".." && !r.startsWith(`..${sep}`) && !isAbsolute(r)); };
+  // Existing folders on the way up to the target's `.generated`, by device and inode: a
+  // case-folding volume can spell the same folder two ways (round 10).
+  const genChain = existingChain(set.dir);
+  for (const d of [".", ...STATUS_ORDER.map((s) => mapping.sources[s]).filter(Boolean).flatMap((spec) => spec.dirs)]) {
+    const dir = d === "." ? sourceRoot : join(sourceRoot, d);
+    const real = resolveFuture(dir);
+    const dirId = identityOf(dir);
+    if (overlaps(real, genReal) || overlaps(genReal, real) || (genId && genId === dirId) || (dirId && genChain.has(dirId)) || (genId && existingChain(dir).has(genId))) {
+      throw new ImportRefused(`${what} refused: the source folder ${d === "." ? "(the source root)" : d} overlaps the target's generated folder ${posixRel(targetRoot, set.dir)}. Map a different source. Nothing was written.`);
+    }
+  }
+  const outputs = new Map(set.generated.map((e) => [resolveFuture(e.path), e.rel]));
+  // A path can name an output through another spelling (a case-folding volume), so existing
+  // files are also matched by device and inode.
+  const identity = identityOf;
+  const ids = new Map(set.generated.map((e) => [identity(e.path), e.rel]).filter(([id]) => id));
+  for (const src of discoverSources(sourceRoot, mapping, [], { includeGenerated: true })) {
+    const hit = outputs.get(resolveFuture(src.file)) || ids.get(identity(src.file));
+    if (hit) throw new ImportRefused(`${what} refused: the mapped source file ${src.rel} is the target's generated output ${hit.split(sep).join("/")}. Map a different source. Nothing was written.`);
+  }
+}
+
+// The failure banner both import reporters print: "did not complete" when anything was
+// written or a rollback left files behind, else "wrote nothing", then the errors and any
+// files the rollback could not restore.
+export function importFailureLines(label, targetRoot, summary) {
+  const left = summary.rollback || [];
+  const wrote = summary.created.length || summary.generated.length || left.length;
+  const lines = [wrote ? `${label} did not complete:` : `Refused to import into ${targetRoot} — wrote nothing:`];
+  for (const e of summary.errors) lines.push(`  - ${e}`);
+  if (left.length) {
+    lines.push("  rollback was incomplete; these files need attention:");
+    for (const r of left) lines.push(`    - ${r}`);
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------- apply
@@ -600,7 +862,10 @@ function generatedRels(root) {
 // restore the artifacts) so a rejected import leaves the target exactly as it was.
 // `dryRun` returns the plan without writing. The source tree is never written.
 export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, gitDate, preserveIds = false, idFloor } = {}) {
-  const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, provenance: null, root: null, preserved: 0, reassigned: [], idFloor: null, warnings: [], errors: [] };
+  assertNotLedgerMode(targetRoot, "import");
+  refuseLocalOutputs(targetRoot, dryRun);
+  if (!dryRun) assertSourceNotLocalOutput(targetRoot, sourceRoot, mapping);
+  const summary = { imported: [], created: [], generated: [], idMap: [], counts: null, provenance: null, root: null, preserved: 0, reassigned: [], idFloor: null, rollback: [], warnings: [], errors: [] };
   const plan = planImport(targetRoot, sourceRoot, mapping, { gitDate, preserveIds, idFloor });
   summary.idMap = plan.idMap;
   summary.counts = plan.counts;
@@ -615,25 +880,36 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
   if (dryRun) {
     summary.imported = plan.items.map((i) => i.newId);
     summary.created = plan.items.map((i) => i.targetRel);
-    summary.generated = generatedRels(plan.root);
+    summary.generated = generatedRels(targetRoot, plan.cfg);
     return { summary };
   }
 
   const p = paths(targetRoot, plan.cfg);
-  const artifacts = [p.readme, p.completedIndex, p.removedIndex, p.backlogJson];
-  const priorArtifacts = artifacts.map((path) => ({ path, before: existsSync(path) ? readFileSync(path, "utf8") : null }));
+  const local = isLocalMode(plan.cfg);
+  const artifacts = artifactSet(targetRoot, plan.cfg).generated.map((e) => e.path);
+  // Committed imports snapshot and restore the artifacts here; a local import relies on the
+  // staged writer's own rollback, which never needs a second restore.
+  const priorArtifacts = local ? [] : artifacts.map((path) => ({ path, before: existsSync(path) ? readFileSync(path, "utf8") : null }));
   // Persisting nextIdFloor mutates the config; snapshot it for rollback.
   const priorConfig = plan.idFloor != null ? readFileSync(p.config, "utf8") : null;
   const written = [];
+  const createdDirs = []; // folders this run made, removed again (when empty) on failure
   try {
     for (const it of plan.items) {
       const abs = join(targetRoot, it.targetRel);
       // A preserved id could match an existing item; a pre-existing target file means a
       // corrupt plan (preservation checks the target's ids first), so refuse to clobber.
       if (existsSync(abs)) throw new Error(`refusing to overwrite existing ${it.targetRel}`);
-      mkdirSync(dirname(abs), { recursive: true });
-      writeFileSync(abs, composeFile(it.fm, it.body));
+      makeDirs(dirname(abs), createdDirs);
+      // Create (`wx`), record, then write: a failure between the two still rolls back the file.
+      const fd = openSync(abs, "wx");
       written.push(abs);
+      try {
+        if (testSeams.afterItemCreate) testSeams.afterItemCreate(abs);
+        writeFileSync(fd, composeFile(it.fm, it.body));
+      } finally {
+        closeSync(fd);
+      }
     }
     // Record the new-id floor before regenerating so backlog.json's nextId (and every
     // future organic id) begins above the imported band; plan.cfg already carries it.
@@ -644,20 +920,27 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
     }
     const data = readBacklog(targetRoot, plan.cfg);
     if (data.errors.length) throw new Error(`imported backlog is invalid: ${data.errors.join("; ")}`);
-    const { files, errors } = generateArtifacts(targetRoot, plan.cfg, data);
+    // Local mode runs in scan mode only, so the override is `undefined` (the scan value).
+    const { files, errors } = generateArtifacts(targetRoot, plan.cfg, data, { nextIdOverride: local ? previewNextId(targetRoot, plan.cfg) : undefined });
     if (errors.length) throw new Error(`generate failed: ${errors.join("; ")}`);
-    for (const f of files) writeFileSync(f.path, f.content);
+    if (local) summary.warnings.push(...writeArtifactFiles(files).warnings);
+    else for (const f of files) writeFileSync(f.path, f.content);
 
     summary.imported = plan.items.map((i) => i.newId);
     summary.created = plan.items.map((i) => i.targetRel);
     summary.generated = files.map((f) => relative(targetRoot, f.path));
     return { summary };
   } catch (e) {
-    for (const abs of written) { try { rmSync(abs, { force: true }); } catch { /* best-effort */ } }
+    // Anything the rollback cannot undo is reported, never hidden behind "wrote nothing".
+    const left = summary.rollback;
+    if (e.kept) left.push(...e.kept.map((k) => `kept backup: ${k}`));
+    if (e.failed) left.push(...e.failed);
+    for (const abs of written) { try { rmSync(abs, { force: true }); } catch (re) { left.push(`could not remove ${abs}: ${re.message}`); } }
     for (const a of priorArtifacts) {
-      try { a.before === null ? rmSync(a.path, { force: true }) : writeFileSync(a.path, a.before); } catch { /* best-effort */ }
+      try { a.before === null ? rmSync(a.path, { force: true }) : writeFileSync(a.path, a.before); } catch (re) { left.push(`could not restore ${a.path}: ${re.message}`); }
     }
-    if (priorConfig != null) { try { writeFileSync(p.config, priorConfig); } catch { /* best-effort */ } }
+    if (priorConfig != null) { try { writeFileSync(p.config, priorConfig); } catch (re) { left.push(`could not restore ${p.config}: ${re.message}`); } }
+    removeCreatedDirs(createdDirs);
     summary.errors.push(e.message);
     return { summary };
   }

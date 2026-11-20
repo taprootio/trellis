@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0042",
   "counts": {
-    "active": 12,
-    "completed": 29,
+    "active": 8,
+    "completed": 33,
     "removed": 0
   },
   "tasks": [
@@ -130,70 +130,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Once the ledger, local-artifact, legacy-archive and good-agent-aware init changes ship in 0.3.0, onboard ../taproot in place with only the published package and record every friction point."
-    },
-    {
-      "id": "TRL0037",
-      "title": "Claim task ids from a local git ledger",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "High",
-      "effort": 5,
-      "effortLabel": "Tuna",
-      "effortImage": "assets/effort/tuna.svg",
-      "depends_on": [],
-      "owner": "jereme",
-      "collaborators": [],
-      "summary": "Add an opt-in id ledger on a local orphan branch that every worktree of a clone shares, so `trellis claim` and the MCP create path hand out each id exactly once even when several sessions write stories at the same time."
-    },
-    {
-      "id": "TRL0038",
-      "title": "Keep generated backlog artifacts out of git",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "High",
-      "effort": 5,
-      "effortLabel": "Tuna",
-      "effortImage": "assets/effort/tuna.svg",
-      "depends_on": [
-        "TRL0037"
-      ],
-      "owner": "jereme",
-      "collaborators": [],
-      "summary": "Add an opt-in mode in which the generated index, completed and removed tables and backlog.json are written to an ignored folder instead of being committed, so parallel branches stop conflicting on them; local `check` validates config, roster and items, scans for leftover markers, and skips freshness comparisons."
-    },
-    {
-      "id": "TRL0039",
-      "title": "Accept closed items that predate a repo's adoption",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "High",
-      "effort": 2,
-      "effortLabel": "Goldfish",
-      "effortEmoji": "🐠",
-      "depends_on": [
-        "TRL0038"
-      ],
-      "owner": "jereme",
-      "collaborators": [],
-      "summary": "Add an optional legacy cutoff (an inclusive id and an exclusive close date) under which completed and removed items may omit the descriptive metadata (summary, milestone, priority, effort), so a long-lived backlog can adopt Trellis in place without inventing history while new closures stay strict."
-    },
-    {
-      "id": "TRL0040",
-      "title": "Onboard a repo that already runs good-agent and its own CI",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "High",
-      "effort": 3,
-      "effortLabel": "Trout",
-      "effortEmoji": "🐡",
-      "depends_on": [
-        "TRL0037",
-        "TRL0038",
-        "TRL0039"
-      ],
-      "owner": "jereme",
-      "collaborators": [],
-      "summary": "Let `trellis init` skip the parts an established repo already owns (CI workflow, PR template, process playbooks) and write a compact AGENTS.md block that defers the loops to good-agent's skills, refusing to push AGENTS.md past Codex's 32 KiB budget."
     },
     {
       "id": "TRL0041",
@@ -701,6 +637,74 @@
       "collaborators": [],
       "summary": "Install good-agent as an exact-pinned dev dependency, add its skills, config, guard and GOOD-AGENT block, and route Trellis's own story writing and task work through the shipped write-task, work-task and review-loop skills.",
       "completed_on": "2026-11-19"
+    },
+    {
+      "id": "TRL0037",
+      "title": "Claim task ids from a local git ledger",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Add an opt-in id ledger on a local orphan branch that every worktree of a clone shares, so `trellis claim` and the MCP create path hand out each id exactly once even when several sessions write stories at the same time.",
+      "completed_on": "2026-11-20"
+    },
+    {
+      "id": "TRL0038",
+      "title": "Keep generated backlog artifacts out of git",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [
+        "TRL0037"
+      ],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Add an opt-in mode in which the generated index, completed and removed tables and backlog.json are written to an ignored folder instead of being committed, so parallel branches stop conflicting on them; local `check` validates config, roster and items, scans for leftover markers, and skips freshness comparisons.",
+      "completed_on": "2026-11-20"
+    },
+    {
+      "id": "TRL0039",
+      "title": "Accept closed items that predate a repo's adoption",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 2,
+      "effortLabel": "Goldfish",
+      "effortEmoji": "🐠",
+      "depends_on": [
+        "TRL0038"
+      ],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Add an optional legacy cutoff (an inclusive id and an exclusive close date) under which completed and removed items may omit the descriptive metadata (summary, milestone, priority, effort), so a long-lived backlog can adopt Trellis in place without inventing history while new closures stay strict.",
+      "completed_on": "2026-11-20"
+    },
+    {
+      "id": "TRL0040",
+      "title": "Onboard a repo that already runs good-agent and its own CI",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 3,
+      "effortLabel": "Trout",
+      "effortEmoji": "🐡",
+      "depends_on": [
+        "TRL0037",
+        "TRL0038",
+        "TRL0039"
+      ],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Let `trellis init` skip the parts an established repo already owns (CI workflow, PR template, process playbooks) and write a compact AGENTS.md block that defers the loops to good-agent's skills, refusing to push AGENTS.md past Codex's 32 KiB budget.",
+      "completed_on": "2026-11-20"
     }
   ]
 }

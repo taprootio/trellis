@@ -62,6 +62,74 @@ failure**, so a refused import leaves the target exactly as it was.
 - **A real run leaves the backlog `--check`-green**, or rolls back to the
   pre-import state if anything fails.
 
+### Adopt a Trellis-shaped backlog in place (`legacy`)
+
+A backlog that is already Trellis-shaped but older than the closed-item rules (its
+archive omits `summary`, `milestone`, `priority` or `effort`) is adopted in place, not
+imported. Set the optional `legacy` cutoff (SPEC §5.1, §7) so items from before
+adoption may omit those fields, while new closures stay strict. `legacy` covers this
+in-place onboarding only: it does not relax the milestone, priority and effort
+requirement on a source item for any import profile, including `trellis`. A target
+that has `legacy` is read under its rules, so its qualifying blank items do not block
+an import.
+
+1. Write `legacy` into `trellis/backlog.config.json` first: `through` is the highest
+   id that exists today and `closedBefore` is today's date (the adoption date,
+   exclusive). `init` cannot create `legacy` itself. It validates the archive with the
+   config it keeps, so a repo with no config must hand-author the full config
+   (`idPrefix`, `idWidth`, `milestones`, `priorities`, `effort`, `legacy`) before it
+   runs `init`; with no config, init validates against the strict defaults. The
+   `idPrefix` must be a plain prefix (a letter, then letters or digits). When the
+   backlog lives outside `trellis/`, set `tasksDir` in that config too; the config
+   file itself stays at `trellis/backlog.config.json`. Otherwise `init` can succeed
+   against an empty default tree.
+2. Add `depends_on: []` to any item that lacks it: it stays required.
+
+   Adopting in local generated-artifacts mode (SPEC §8.5)? Skip steps 3 and 4 and
+   follow the [switch
+   procedure](#switch-a-trellis-backlog-to-local-generated-artifacts) instead,
+   after preparing the config for your case:
+   - A new, untracked, hand-authored config: write `generatedArtifacts: "local"`,
+     `specVersion: "2.5"` and `legacy` directly. The switch keeps that config as
+     written.
+   - An existing committed-mode backlog: add `legacy` only, keep committed mode, and
+     commit that change. `init --switch-to-local` then changes the mode itself, and it
+     refuses a config with uncommitted changes. Setting `generatedArtifacts: "local"`
+     yourself first would flip the mode early and leave the generated markers in
+     place, so `check` would fail.
+
+   Running the committed-mode steps first can rewrite tracked indexes and leave
+   uncommitted changes that the switch refuses to strip.
+3. Run `npx @taprootio/trellis init` **without** `--force`. `init --force` is refused
+   (exit 2, nothing written) once the config has `legacy`. Rerun the same command
+   without `--force`, keeping `--retire-source` or `--import`. The reason depends on
+   the command: when scaffolding, the replacement config would drop `legacy`; with
+   `--retire-source`, `--force` has no use, since that step only stages the removal of
+   the source. Without `--force`, `init`
+   refreshes stale generated sections and creates missing scaffold files in committed
+   mode; do not delete an existing README or index, which can lose authored text. In
+   local mode it writes `.generated/` and does not create the README or index files,
+   which are author-owned. `trellis/backlog.config.json` must stay. In committed mode, a backlog-root
+   `README.md`, `completed/index.md` or `removed/index.md` that has no generated
+   markers still fails ordinary `init` after `legacy` is added: add the correct marker
+   pair and keep the authored text outside it, or move the file aside first.
+4. Run `npx @taprootio/trellis check`.
+
+A repo that onboarded with `--skip` flags repeats the same flags on this ordinary
+`init`; a bare `init` would recreate the skipped parts.
+
+Local adopters: see the note after step 2. They run `init --switch-to-local` and the
+removal commands it prints before ordinary `init`.
+
+### Not in ledger mode
+
+Import is unsupported when the target's `idAllocation` is `"ledger"` (SPEC §3.1).
+`trellis import` (preview and `--apply`), the MCP `import` tool, `init --import` and
+plain `init --force` all refuse before any write: the CLI exits 2 and the MCP tool
+returns an error with the same guidance. The importer assigns ids from a scan, and in a
+ledger-mode backlog that could pick an id that is an open claim. Import first, in scan
+mode, then switch `idAllocation` to `"ledger"` and run `trellis claim --seed`.
+
 ### Preserve source ids (`--preserve-ids`)
 
 By default an import assigns fresh ids. With `--preserve-ids`, an item **keeps its own
@@ -104,6 +172,9 @@ prints them as a `reconcile` checklist:
   reconcile (1) — pre-Trellis backlog guidance to rewrite by hand (init left these untouched):
     - AI_GUIDELINES.md: has a "AI Backlog" section that looks like pre-Trellis backlog guidance — rewrite it to point at trellis/
 ```
+
+Under `--skip agents`, ordinary init leaves AGENTS.md out of this scan, since it does not
+touch that file.
 
 `init` **only ever reports** here — it appends its own marked block and never edits or
 deletes your prose. The surgical rewrite (point the section at `trellis/`, drop the old
@@ -263,6 +334,14 @@ the title.
   repo to have a `team.json` (with no roster, every owner drops or carries as
   above); curating the roster can stay a manual post-import step.
 
+### Local generated artifacts
+
+An import into a repo with `generatedArtifacts: "local"` (SPEC §8.5) works in scan
+mode only, like any import. It writes the items and `.generated/`, never the
+committed README or index files, and it refuses, before writing, when one of those
+files still holds a generated marker line. It needs only a loadable config and
+roster, since the index files are optional there.
+
 ### Import-time git and provenance
 
 Some legacy backlogs don't record everything the schema needs — most commonly a
@@ -270,14 +349,19 @@ closed item with no date header, or an item whose effort lives under a `Size:` l
 or isn't recorded at all. The importer fills these as faithfully as it can and
 **reports what it inferred**, so nothing passes as authored history:
 
-- **Git is read at import time only.** When a close date has no header, the importer
-  reads the source file's last commit date from the *source* repo's git. This is the
-  one-time importer's privilege; the deterministic generator and `--check` never read
-  git (SPEC §8.4), so the gate stays reproducible.
-- **It degrades, never fails on git alone.** Missing git, a non-repo or shallow
+- **Git is read here only for the source-date lookup.** When a close date has no
+  header, the importer reads the source file's last commit date from the *source*
+  repo's git. This is the one-time importer's privilege; `--check` is git-free
+  (SPEC §8.3), so the gate stays reproducible.
+- **It degrades, never fails on git alone, for the source-date lookup.** Missing git, a non-repo or shallow
   source, or an uncommitted file all make the lookup return nothing — the chain then
   falls to a `defaults.<field>` floor if configured, and only errors if neither git
   nor a floor yields a date. The importer never invents a close date out of nothing.
+  This applies only to that lookup. The generator stays git-free for `check`, but in
+  `generatedArtifacts: "local"` mode generation and an applied import inspect the
+  *target* repo with git (to confirm the generated folder is ignored and untracked)
+  and refuse, writing nothing, when that inspection fails for any reason other than
+  git being absent or the target being outside a work tree.
 - **Inferred values are flagged.** A git-derived or floor-defaulted close date, and a
   **closed** item whose effort fell back to `defaults.effort` (no `Effort:`/`Size:`
   signal), each emit a per-item warning and increment a count in the import summary
@@ -297,3 +381,49 @@ or isn't recorded at all. The importer fills these as faithfully as it can and
   live in. A source that keeps everything in one folder with a `Status:` field is
   not directly importable today; split it into per-status directories first, or
   point each status at the directory that holds those items.
+
+## Switch a Trellis backlog to local generated artifacts
+
+A repo that commits its generated index and `backlog.json` can stop doing so
+(`generatedArtifacts: "local"`, SPEC §8.5). The generated files then live in the
+ignored `<tasksDir>/.generated/` folder and parallel branches stop conflicting on
+them. The migration is five steps, in this order:
+
+1. Add the ignore line to `.gitignore` (the switch prints the exact line when it is
+   missing, escaped for the repo's `tasksDir`): `trellis/.generated/` by default.
+2. Run `npx @taprootio/trellis init --switch-to-local` (add `--dry-run` to preview).
+   It sets `generatedArtifacts` to `"local"` and raises `specVersion` to 2.5, strips
+   the generated block and markers from `README.md` and from index files that hold
+   authored text, and updates the AGENTS.md bullet when it is still Trellis's own
+   text. It runs before ordinary init, so its checks see a tracked `.generated/`
+   file before init could overwrite it. It never prompts, stages, commits or edits
+   `.gitignore`. Index files that hold nothing but a generated block are left
+   exactly as they are and reported.
+3. Run the `git -C '<repo root>' --literal-pathspecs rm -- '<path>'` commands it prints. They delete
+   the untouched generated-only index files and the legacy `backlog.json`.
+4. Run `npx @taprootio/trellis init`, without `--force` (init refuses `--force` on a
+   local repo), repeating the `--skip` flags you used when you first ran `init`. It
+   creates nothing under the README or index paths.
+5. Run `npx @taprootio/trellis generate`, then `npx @taprootio/trellis check`.
+
+The switch refuses, changing nothing, when an output path is not ignored, a file it
+would edit or remove is a symlink or has uncommitted changes, a marker is unpaired,
+sits inline, repeats or belongs to another file, anything under `.generated/` is
+tracked, an untracked `backlog.json` exists, or the AGENTS.md edit would take the file
+from at most 32,768 bytes (the limit Codex reads) to more. A file already over the limit
+gets a warning and the switch goes on. A rerun after a finished switch changes nothing.
+
+### Onboarding notes for repos with their own CI or good-agent
+
+- A copy of `trellis/playbooks/pr-draft.md` from an older release lacks the
+  two-branch rewrite. Init keeps existing files, so merge the whole rewrite into your
+  copy by hand: the `## With a PR template`, `## Without a PR template` and `## Title
+  and attribution (both branches)` sections and the template-neutral introduction (no
+  rerun needed). Or move the old file aside
+  and rerun `trellis init --with-playbooks` with your other `--skip` flags, `playbooks`
+  dropped from them; add `--skip pr-template` to stay template-free, since a repo
+  scaffolded before that flag existed would otherwise get the template back. A bare
+  rerun still omits the playbooks when good-agent is detected.
+- A repo that is not detected and skipped `playbooks` has a TRELLIS block that does
+  not point at them. Init does not rewrite an existing block, so add the playbook
+  pointers by hand.

@@ -21,6 +21,37 @@ npx @taprootio/trellis init <target> --prefix ABC   # --dry-run to preview
 It does not vendor the generator; the onboarded repo runs Trellis via the
 package (the scaffolded CI calls `npx @taprootio/trellis check`), which ships in TRL0010.
 
+A repo that already owns some of this can leave it out. `--skip <parts>` takes a
+comma list (repeats are united) of `ci`, `pr-template`, `playbooks`,
+`branch-protection` and `agents`; `agents` leaves AGENTS.md alone entirely. Init also
+detects a repo that runs good-agent (a `good-agent.config.json` or
+`.agents/skills/work-task/SKILL.md` file): it then skips the `playbooks` and writes a
+compact AGENTS.md block that defers the loops to good-agent's `write-task`,
+`work-task` and `review-loop` skills. `--with-playbooks` writes the playbooks and the
+full block anyway; on a repo whose AGENTS.md already has a Trellis block it never
+rewrites that block, and prints the full block for you to place, with a reminder to
+carry over your Loop contract values. A rerun that restores the playbooks must repeat
+your other `--skip` flags. If you skip `playbooks` in a repo that is not detected, the
+TRELLIS block is not updated, so add the playbook pointers by hand.
+
+Init never pushes AGENTS.md past the 32,768 bytes Codex reads: when the result would
+be larger, it leaves the file alone, prints the block and says how many bytes it
+needs, so you can trim the file or place the block by hand. The MCP `work-task`,
+`code-review` and `pr-draft` prompts answer with a short handoff when their playbook
+is absent: the good-agent skills in a detected repo, otherwise a
+note naming the playbook and its dependency files: copy any missing ones from the
+installed package's `templates/trellis/playbooks/` into `trellis/playbooks/` and keep
+existing copies (the server cannot know your earlier skips, so it never suggests `init`).
+
+By default the generated index and `backlog.json` are committed. To keep them out
+of git (so parallel branches stop conflicting on them), set
+`"generatedArtifacts": "local"` in `trellis/backlog.config.json`: `trellis generate`
+then writes `trellis/.generated/`, which you add to `.gitignore`, and `trellis
+check` validates the items and scans for leftover markers without comparing any
+generated file. A repo that already commits them migrates with `trellis init
+--switch-to-local`; the steps are in [`docs/import.md`](docs/import.md#switch-a-trellis-backlog-to-local-generated-artifacts)
+and the rules in SPEC §8.5.
+
 ## Import an existing backlog
 
 `trellis import` converts a backlog on a foreign schema into Trellis items in an
@@ -40,6 +71,25 @@ and import in one step on a fresh repo, use
 `trellis init --import <path> --profile <name>`. The mapping schema, the built-in
 profiles, and the full getting-started guide are in
 [`docs/import.md`](docs/import.md).
+
+## Claim task ids
+
+Parallel worktrees that scan for the highest id can claim the same one. Set
+`"idAllocation": "ledger"` in `trellis/backlog.config.json` and every worktree of a
+clone hands out ids from one local git ref (`refs/trellis/ids`) instead. The ledger
+is local only: nothing is pushed.
+
+```
+npx @taprootio/trellis claim --seed                  # create the ledger from the ids in every worktree
+npx @taprootio/trellis claim --title "Short title"   # claim the next id and print it
+npx @taprootio/trellis claim --list                  # print the tip and every ledger line
+npx @taprootio/trellis claim --through <ID>          # reserve every id up to <ID>
+```
+
+In ledger mode `trellis generate` no longer prints a next id, and MCP
+`create_task` claims through the ledger. Import is unsupported there (see
+[`docs/import.md`](docs/import.md)). The format, cutover and recovery rules are in
+SPEC §3.1.
 
 ## Track task history
 
@@ -67,7 +117,7 @@ regenerate, and read the history of tasks in a repo:
 npx @taprootio/trellis mcp --repo <path>   # serves over stdio; defaults to cwd
 ```
 
-Tools: `list_tasks`, `get_task`, `next_id`, `create_task`, `move_task`,
+Tools: `list_tasks`, `get_task`, `next_id`, `claim_id`, `create_task`, `move_task`,
 `validate`, `regenerate`, `import`, `history` — each reuses the same core as the
 CLI, so results carry the `backlog.json` shape (except `import`, which returns an
 import summary, and `history`, which returns git-derived change entries). Mutating

@@ -15,14 +15,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { pathToFileURL } from "node:url";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { optionToken, requiredValue, resolveRepoRoot, usageError } from "../src/cli.mjs";
 import { OPS, TrellisError } from "../src/mcp.mjs";
 import { RESOURCES, PROMPTS, listResources, readResource, buildPrompt } from "../src/prompts.mjs";
 
-// Server implementation version (distinct from the spec version; packaging and
-// real versioning are TRL0010).
-const SERVER_VERSION = "0.1.0";
+// The server reports the package's own version.
+const SERVER_VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 function parseArgs(argv) {
   let repo;
@@ -64,7 +63,7 @@ const repoRootArg = { repoRoot: z.string().optional().describe("repo root to ope
 // test can assert the served metadata stays repo-agnostic without booting the server.
 export const TOOLS = {
   list_tasks: {
-    description: "List backlog tasks (the backlog.json shape), optionally filtered by status or milestone.",
+    description: "List backlog tasks (the backlog.json shape), optionally filtered by status or milestone. In ledger mode nextId is the ledger preview (null with a nextIdNote when there is no usable ledger), not the published value.",
     inputSchema: {
       ...repoRootArg,
       status: z.enum(["active", "completed", "removed"]).optional().describe("only tasks with this status"),
@@ -76,11 +75,18 @@ export const TOOLS = {
     inputSchema: { ...repoRootArg, id: z.string().describe("task id using this repo's configured id prefix and width") },
   },
   next_id: {
-    description: "The id a newly created task would receive.",
+    description: "The id a newly created task would receive. In ledger mode (idAllocation \"ledger\") the result is a preview only: it never claims, so another writer may take that id first; with no ledger yet it returns nextId null and says to run `trellis claim --seed`.",
     inputSchema: { ...repoRootArg },
   },
+  claim_id: {
+    description: "Claim the next task id from the local id ledger (idAllocation \"ledger\" only) and return it. Each id is handed out once across every worktree of the clone and stays claimed even if no item is written for it. Fails with guidance when the repo is in scan mode or the ledger has not been seeded (`trellis claim --seed`).",
+    inputSchema: {
+      ...repoRootArg,
+      title: z.string().describe("one-line title for the claim: no tabs or control characters"),
+    },
+  },
   create_task: {
-    description: "Create an active task: assigns the next id, writes the item file, then regenerates and validates.",
+    description: "Create an active task: assigns the next id, writes the item file, then regenerates and validates (in local mode, into .generated/, after the same output checks as regenerate). In ledger mode the id is claimed from the local id ledger (never from a scan, so a missing ledger is an error naming `trellis claim --seed`); if a later write fails the item and generated files roll back but the claimed id stays claimed.",
     inputSchema: {
       ...repoRootArg,
       title: z.string().describe("one-line title"),
@@ -108,11 +114,11 @@ export const TOOLS = {
     },
   },
   validate: {
-    description: "Validate the backlog (config, items, markers); read-only. Returns { ok, errors, warnings }.",
+    description: "Validate the backlog (config, items, markers); read-only. Returns { ok, errors, warnings }. With generatedArtifacts \"local\" it validates config, roster and items and scans the committed README and index files for leftover generated markers; no generated file is compared.",
     inputSchema: { ...repoRootArg },
   },
   regenerate: {
-    description: "Rewrite any stale generated artifact. Returns { changed, nextId, counts }.",
+    description: "Rewrite any stale generated artifact. Returns { changed, nextId, counts }. In ledger mode the files on disk keep the scan nextId, and the returned nextId is the ledger preview (null with a note when there is no usable ledger). With generatedArtifacts \"local\" it writes only <tasksDir>/.generated/ (its backlog.json carries the ledger preview in ledger mode) and refuses before writing on a leftover marker or an output that git does not ignore or tracks.",
     inputSchema: { ...repoRootArg },
   },
   import: {
@@ -156,10 +162,9 @@ export function registerTools(server, defaultRoot) {
 // so the list never offers what this repo can't serve (e.g. SPEC.md is absent in
 // onboarded repos until TRL0010). Returns the count registered.
 function registerResources(server, defaultRoot) {
-  const available = new Set(listResources(defaultRoot).filter((r) => r.available).map((r) => r.uri));
-  const byUri = new Map(RESOURCES.map((r) => [r.uri, r]));
-  for (const uri of available) {
-    const r = byUri.get(uri);
+  // The resolved entries carry the mimeType `resources/read` will return.
+  const available = listResources(defaultRoot).filter((r) => r.available);
+  for (const r of available) {
     server.registerResource(
       r.name,
       r.uri,
@@ -170,7 +175,7 @@ function registerResources(server, defaultRoot) {
       },
     );
   }
-  return available.size;
+  return available.length;
 }
 
 // Prompts are bound to the server's repo, exactly like resources — deliberately
@@ -178,8 +183,9 @@ function registerResources(server, defaultRoot) {
 // `trellis://…` resources, which resolve to `defaultRoot`; letting a prompt build
 // against a different repo would make those pointers reference the wrong repo's
 // conventions. Per-repo addressing across the whole surface (tools, prompts, AND
-// resources, with root scoping) is TRL0019. A failed build (bad id, missing
-// playbook) throws a TrellisError, which the SDK surfaces as the prompt's get error.
+// resources, with root scoping) is TRL0019. A failed build (bad id)
+// throws a TrellisError, which the SDK surfaces as the prompt's get error; a missing
+// playbook returns a short handoff instead (TRL0040).
 function registerPrompts(server, defaultRoot) {
   for (const p of PROMPTS) {
     const argsSchema = {};

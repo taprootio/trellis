@@ -8,11 +8,11 @@
 // Front-matter is the small, fixed YAML subset from SPEC.md §5, parsed in-house
 // on purpose so Trellis stays drop-in with no install step.
 
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join, relative, isAbsolute } from "node:path";
+import { closeSync, fstatSync, openSync, readFileSync, readdirSync, existsSync, constants as fsConstants } from "node:fs";
+import { join, relative, isAbsolute, normalize, sep } from "node:path";
 
 // Spec version this tool implements (SemVer major.minor); see SPEC.md §9.
-export const SPEC_VERSION = "2.4";
+export const SPEC_VERSION = "2.5";
 
 // The backlog root defaults to `trellis/` and is overridable per repo via the
 // config's `tasksDir` key (SPEC §2/§7). The config file itself lives at a FIXED
@@ -20,6 +20,52 @@ export const SPEC_VERSION = "2.4";
 // it before it knows where the task tree is — see paths().
 export const DEFAULT_TASKS_DIR = "trellis";
 export const CONFIG_DIR = "trellis";
+
+// Id ledger config (SPEC §3.1, §7; TRL0037). Validation lives here so `check`
+// can reject a bad ledger config without git; reading the ledger is src/ledger.mjs.
+export const DEFAULT_LEDGER_REF = "refs/trellis/ids";
+export const LEDGER_NAMESPACE = "refs/trellis/";
+// A prefix with no regex, comma, whitespace or path characters, so ledger rows
+// and every existing id matcher can use it unescaped.
+export const PLAIN_PREFIX_RE = /^[A-Za-z][A-Za-z0-9]*$/;
+
+// The `git check-ref-format` character and sequence rules as a pattern, shared by
+// the ledger ref and the branch names in the ledger. Returns a problem or null.
+export function refNameProblem(ref) {
+  if (/[\x00-\x20\x7f~^:?*[\\]/.test(ref)) return "contains a character git forbids in ref names";
+  if (ref.includes("..") || ref.includes("//") || ref.includes("@{")) return "contains a sequence git forbids in ref names";
+  if (ref.endsWith("/") || ref.endsWith(".")) return "ends in a character git forbids at the end of a ref name";
+  if (ref.split("/").some((c) => c.startsWith(".") || c.endsWith(".lock"))) {
+    return "has a component starting with `.` or ending in `.lock`";
+  }
+  return null;
+}
+
+// A branch name as git accepts it for `refs/heads/<name>`: the ref rules on the full
+// ref, plus the branch-only ones (no `@`, no leading `-`). Returns a problem or null.
+// One predicate for the ledger reader and every writer.
+export function branchNameProblem(name) {
+  if (name === "@" || name.startsWith("-")) return "is not a name git accepts for a branch";
+  return refNameProblem(`refs/heads/${name}`);
+}
+
+// Returns a problem description, or null when `ref` is a valid ledger ref: the
+// namespace rule plus the ref-name rules.
+export function ledgerRefProblem(ref) {
+  if (typeof ref !== "string" || !ref) return "must be a non-empty string";
+  if (!ref.startsWith(LEDGER_NAMESPACE) || ref.length === LEDGER_NAMESPACE.length) {
+    return `must name a ref under ${LEDGER_NAMESPACE}`;
+  }
+  return refNameProblem(ref);
+}
+
+// One owner of "real calendar date": the shape, then a UTC round trip so 2026-02-31
+// fails. Used by the ledger reader, the `legacy` config and closed-item dates.
+export function isRealDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
 
 export const MARKERS = {
   milestones: ["<!-- BEGIN GENERATED:MILESTONES -->", "<!-- END GENERATED:MILESTONES -->"],
@@ -57,6 +103,36 @@ export function paths(repoRoot, cfg) {
   };
 }
 
+// ------------------------------------------------------- artifact set (TRL0038)
+// `generatedArtifacts` is "committed" (default) or "local". In local mode the
+// generated files live in an ignored folder under the backlog root and the
+// committed README and index files are author-owned.
+export const GENERATED_DIR = ".generated";
+export const isLocalMode = (cfg) => cfg.generatedArtifacts === "local";
+
+// The one mode-aware list of artifact paths. `generated` are the files the
+// generator writes; `authorOwned` (local mode only) are files that `check` scans
+// for leftover generated markers. No other code spells an artifact path.
+export function artifactSet(repoRoot, cfg) {
+  const p = paths(repoRoot, cfg);
+  const entry = (key, path) => ({ key, path, rel: relative(repoRoot, path) });
+  if (!isLocalMode(cfg)) {
+    return {
+      mode: "committed",
+      dir: null,
+      generated: [entry("readme", p.readme), entry("completed", p.completedIndex), entry("removed", p.removedIndex), entry("backlog", p.backlogJson)],
+      authorOwned: [],
+    };
+  }
+  const dir = join(p.tasks, GENERATED_DIR);
+  return {
+    mode: "local",
+    dir,
+    generated: [entry("index", join(dir, "index.md")), entry("completed", join(dir, "completed.md")), entry("removed", join(dir, "removed.md")), entry("backlog", join(dir, "backlog.json"))],
+    authorOwned: [entry("readme", p.readme), entry("completedIndex", p.completedIndex), entry("removedIndex", p.removedIndex)],
+  };
+}
+
 // ----------------------------------------------------------------- config
 export function loadConfig(repoRoot) {
   const warnings = [];
@@ -68,7 +144,13 @@ export function loadConfig(repoRoot) {
   } catch (e) {
     return { cfg: null, warnings, errors: [`backlog.config.json is not valid JSON (${e.message})`] };
   }
+  return validateConfig(cfg);
+}
 
+// The config rules, on a parsed object. `loadConfig` reads the file and calls this; the
+// local-mode switch calls it on the config it would write, so both apply one rule set.
+export function validateConfig(cfg) {
+  const warnings = [];
   const errors = [];
   if (typeof cfg.idPrefix !== "string" || !cfg.idPrefix) errors.push("config: `idPrefix` must be a non-empty string");
   if (!Number.isInteger(cfg.idWidth) || cfg.idWidth < 1) errors.push("config: `idWidth` must be a positive integer");
@@ -81,6 +163,12 @@ export function loadConfig(repoRoot) {
       errors.push(`config: \`nextIdFloor\` (${cfg.nextIdFloor}) must be < 10^idWidth (${10 ** cfg.idWidth}) to fit ${cfg.idWidth} digits`);
     }
   }
+  validateIdAllocation(cfg, errors);
+  validateLegacy(cfg, errors);
+  // A present key must be valid, so an explicit null is an error, not a default (TRL0038).
+  if (Object.hasOwn(cfg, "generatedArtifacts") && cfg.generatedArtifacts !== "committed" && cfg.generatedArtifacts !== "local") {
+    errors.push('config: `generatedArtifacts` must be "committed" or "local" when present');
+  }
   if (!Array.isArray(cfg.milestones) || cfg.milestones.length === 0) errors.push("config: `milestones` must be a non-empty array");
   if (!Array.isArray(cfg.priorities) || cfg.priorities.length === 0) errors.push("config: `priorities` must be a non-empty array");
   const effortValues = Array.isArray(cfg.effort) ? cfg.effort : cfg.effort && cfg.effort.values;
@@ -90,6 +178,10 @@ export function loadConfig(repoRoot) {
     errors.push("config: `effort` values must all be numbers");
   }
   cfg.effortValues = Array.isArray(effortValues) ? effortValues : [];
+  // Ledger mode re-reads what it writes, so an effort must survive the front-matter round trip.
+  if (cfg.idAllocation === "ledger" && cfg.effortValues.some((v) => typeof v === "number" && !Number.isSafeInteger(v))) {
+    errors.push("config: `effort` values must be integers when `idAllocation` is \"ledger\"");
+  }
   attachEffortScale(cfg, errors);
 
   // `tasksDir` is optional (defaults to `trellis/`); when present it must be a
@@ -107,6 +199,11 @@ export function loadConfig(repoRoot) {
       // CLI summary) don't inherit a doubled separator from a trailing slash.
       // join() already tolerates it, but the echoed strings should be clean.
       cfg.tasksDir = cfg.tasksDir.replace(/[/\\]+$/, "");
+      // Git's case-insensitive pathspec folds only ASCII, so a Unicode folder name could
+      // alias an output on a folding filesystem without git seeing it (TRL0038). Git-free.
+      if (cfg.generatedArtifacts === "local" && /[^\x00-\x7f]/.test(cfg.tasksDir)) {
+        errors.push("config: `tasksDir` must be ASCII when `generatedArtifacts` is \"local\"");
+      }
     }
   }
 
@@ -116,6 +213,58 @@ export function loadConfig(repoRoot) {
     warnings.push(`config \`specVersion\` ${cfg.specVersion} differs in major version from this tool's spec ${SPEC_VERSION}`);
   }
   return { cfg, warnings, errors };
+}
+
+// `legacy` (TRL0039) exempts closed items from before adoption from the descriptive
+// metadata. A present key must be valid. `through` is checked without a regex built
+// from `idPrefix`, which scan mode interpolates unescaped.
+const LEGACY_KEYS = new Set(["through", "closedBefore"]);
+function validateLegacy(cfg, errors) {
+  if (!Object.hasOwn(cfg, "legacy")) return;
+  const legacy = cfg.legacy;
+  if (legacy === null || typeof legacy !== "object" || Array.isArray(legacy)) {
+    errors.push("config: `legacy` must be an object with `through` and `closedBefore`");
+    return;
+  }
+  for (const k of Object.keys(legacy)) if (!LEGACY_KEYS.has(k)) errors.push(`config: \`legacy\` has an unknown key \`${k}\``);
+  const prefixOk = typeof cfg.idPrefix === "string" && cfg.idPrefix;
+  if (prefixOk && !PLAIN_PREFIX_RE.test(cfg.idPrefix)) {
+    errors.push("config: `idPrefix` must be a letter followed by letters or digits when `legacy` is set");
+  }
+  const { through } = legacy;
+  if (typeof through !== "string" || !through) {
+    errors.push("config: `legacy.through` must be a full task id such as TR01388");
+  } else if (prefixOk && Number.isInteger(cfg.idWidth) && cfg.idWidth >= 1) {
+    const rest = through.startsWith(cfg.idPrefix) ? through.slice(cfg.idPrefix.length) : "";
+    if (!/^\d+$/.test(rest) || rest.length !== cfg.idWidth) {
+      errors.push(`config: \`legacy.through\` must be ${cfg.idPrefix} + ${cfg.idWidth} digits`);
+    }
+  }
+  if (!isRealDate(legacy.closedBefore)) errors.push("config: `legacy.closedBefore` must be a real date (YYYY-MM-DD)");
+}
+
+// `idAllocation` is "scan" (default) or "ledger" (TRL0037). Ledger mode also
+// limits the prefix and width so ledger rows stay unambiguous and id math exact.
+function validateIdAllocation(cfg, errors) {
+  // A present key must be valid, so an explicit null is an error, not a default.
+  if (Object.hasOwn(cfg, "idAllocation") && cfg.idAllocation !== "scan" && cfg.idAllocation !== "ledger") {
+    errors.push('config: `idAllocation` must be "scan" or "ledger" when present');
+  }
+  if (Object.hasOwn(cfg, "idLedgerRef")) {
+    const problem = ledgerRefProblem(cfg.idLedgerRef);
+    if (problem) errors.push(`config: \`idLedgerRef\` ${problem}`);
+  }
+  if (cfg.idAllocation !== "ledger") return;
+  // Checked on the text (after the trailing-separator cleanup) with the platform's own path rules (as paths() joins it), so `check` stays git-free. On POSIX a backslash is an ordinary name character. Writes under .git could corrupt the ledger ref.
+  if (typeof cfg.tasksDir === "string" && normalize(cfg.tasksDir.replace(/[/\\]+$/, "")).split(sep)[0].toLowerCase() === ".git") {
+    errors.push("config: `tasksDir` must not be inside the repository's `.git` directory when `idAllocation` is \"ledger\"");
+  }
+  if (typeof cfg.idPrefix === "string" && cfg.idPrefix && !PLAIN_PREFIX_RE.test(cfg.idPrefix)) {
+    errors.push("config: `idPrefix` must be a letter followed by letters or digits when `idAllocation` is \"ledger\"");
+  }
+  if (Number.isInteger(cfg.idWidth) && cfg.idWidth > 9) {
+    errors.push("config: `idWidth` must be at most 9 when `idAllocation` is \"ledger\"");
+  }
 }
 
 // ------------------------------------------------------------- team roster
@@ -326,7 +475,9 @@ function effortError(cfg) {
 function effortCell(it, cfg) {
   if (cfg.effortScale.isIdentity || !it._effortLabel) return String(it.effort ?? "");
   const emoji = it._effortEmoji ? `${it._effortEmoji} ` : "";
-  return `${emoji}${it._effortLabel} · ${it.effort}`;
+  const text = `${emoji}${it._effortLabel} · ${it.effort}`;
+  // Ledger mode keeps configured text on one line, so it cannot form a marker line.
+  return cfg.idAllocation === "ledger" ? text.replace(/\r\n|[\n\r\v\f\u0085\u2028\u2029]/g, " ") : text;
 }
 
 // ----------------------------------------------------------- front-matter
@@ -434,9 +585,130 @@ function idsFromDir(dir, fileRe) {
   return readdirSync(dir).map((f) => f.match(fileRe)).filter(Boolean).map((m) => m[1]);
 }
 
+// The scan-mode id pattern, as readBacklog reads it from the config (the prefix is not
+// escaped). The one owner for item checks, filenames and the MCP prompts (TRL0040).
+export const scanIdPattern = (cfg) => `${cfg.idPrefix}\\d{${cfg.idWidth}}`;
+
+// The per-item checks, shared by readBacklog and the ledger create preflight (TRL0037).
+function makeValidators(cfg, roster, ids) {
+  const idRe = new RegExp(`^${scanIdPattern(cfg)}$`);
+  const isoDate = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+  // Resolve `effort` (number or label alias) and attach the display fields used
+  // by rendering. Active items surface a resolution error; closed items resolve
+  // best-effort (historical values are not re-validated — SPEC §5.1, §8.3).
+  const attachEffort = (it, onError) => {
+    const r = resolveEffort(cfg, it.effort);
+    if (r.error) { if (onError) onError(r.error); return; }
+    it.effort = r.value;
+    it._effortLabel = r.label;
+    if (r.emoji) it._effortEmoji = r.emoji;
+    if (r.image) it._effortImage = r.image;
+  };
+
+  const checkCommon = (it, expected, err) => {
+    const fileId = it._file.replace(/\.md$/, "");
+    if (!idRe.test(fileId)) err(`filename must be ${cfg.idPrefix} + ${cfg.idWidth} digits`);
+    if (!it.id) err("missing `id`");
+    else if (it.id !== fileId) err(`id (${it.id}) does not match filename (${fileId})`);
+    if (!it.title) err("missing `title`");
+    if (it.status !== expected) err(`\`status\` must be "${expected}"`);
+    if (it.depends_on === undefined) err("missing `depends_on` (use [] for none)");
+    else for (const d of it.depends_on) if (!ids.has(d)) err(`depends_on ${d} is not a known task id`);
+  };
+
+  // The descriptive metadata is required on closed items too, as a historical
+  // snapshot (SPEC §5.1): its *presence* is enforced here, but its enum membership
+  // is NOT re-validated against the current config (§8.3) — a value that has since
+  // left the config still validates. Call before attachEffort, so a present-but-
+  // unresolvable historical effort (e.g. a retired scale label) counts as present.
+  //
+  // With `legacy` (TRL0039): a blank string counts as missing on every closed item, and
+  // an item that `qualifies` (below) may omit all four.
+  const legacy = cfg.legacy;
+  const blank = (v) => typeof v === "string" && !v.trim();
+  const missing = (v) => v === undefined || v === "" || (legacy && blank(v));
+  const checkHistorical = (it, err, qualifies = false) => {
+    if (qualifies) {
+      // A qualifying item may omit or blank `summary`, but a falsy non-blank value such as 0 still fails.
+      if (it.summary !== undefined && !it.summary && !blank(it.summary)) err("missing `summary`");
+      return;
+    }
+    if (!it.summary || (legacy && blank(it.summary))) err("missing `summary`");
+    if (missing(it.milestone)) err("missing `milestone`");
+    if (missing(it.priority)) err("missing `priority`");
+    if (missing(it.effort)) err("missing `effort`");
+  };
+
+  // A closed item from before adoption: its id is at or below `legacy.through` and its
+  // close date is a real date before `legacy.closedBefore`. The id comes from the
+  // filename (it.id can be absent); the plain prefix makes the digit suffixes
+  // fixed-width, so a lexical compare is exact. Never `Number`: wide ids pass 2^53.
+  const qualifiesAsLegacy = (it, dateField) => {
+    if (!legacy) return false;
+    const suffix = (id) => id.slice(cfg.idPrefix.length);
+    if (suffix(it._file.replace(/\.md$/, "")) > suffix(legacy.through)) return false;
+    return isRealDate(it[dateField]) && it[dateField] < legacy.closedBefore;
+  };
+
+  // The close date: the `YYYY-MM-DD` shape today; with `legacy` it must also be real,
+  // because qualifying depends on it.
+  const closeDateProblem = (value, field) => {
+    if (!isoDate(value)) return `\`${field}\` must be an ISO date (YYYY-MM-DD)`;
+    if (legacy && !isRealDate(value)) return `\`${field}\` must be a real calendar date`;
+    return null;
+  };
+
+  // Make a qualifying item's blank descriptive fields missing, so every renderer sees
+  // the same item. Archived effort display keys would otherwise survive the read, so
+  // they go whatever the effort value; attachEffort sets them again when it resolves.
+  const clearLegacyBlanks = (it) => {
+    for (const k of ["summary", "milestone", "priority", "effort"]) if (blank(it[k]) || it[k] === "") delete it[k];
+    for (const k of ["_effortLabel", "_effortEmoji", "_effortImage"]) delete it[k];
+  };
+
+  // Owner/collaborator validation (SPEC §5.1, §7.2, §8.3). On **every** item the
+  // values must be syntactically valid handles — a handle is charset-constrained even
+  // when historical, so the closed-item exemption is from roster *membership*, not from
+  // being a handle (else a hand-authored `owner: Jane Doe` would pass `--check`).
+  // **Active** items additionally require an ACTIVE roster member; on closed items
+  // membership is not re-checked, so a member who has since gone inactive or left the
+  // roster still validates. Both fields are optional.
+  const validateAssignees = (it, err, active) => {
+    if (it.owner !== undefined && it.owner !== "") {
+      if (!isValidHandle(it.owner)) err(`owner "${it.owner}" is not a valid handle (use letters, digits, ., _, -)`);
+      else if (active && !findActiveMember(roster, it.owner)) err(`owner "${it.owner}" is not an active roster member`);
+    }
+    if (it.collaborators !== undefined) {
+      if (!Array.isArray(it.collaborators)) err("`collaborators` must be a list of handles");
+      else for (const c of it.collaborators) {
+        if (!isValidHandle(c)) err(`collaborator "${c}" is not a valid handle (use letters, digits, ., _, -)`);
+        else if (active && !findActiveMember(roster, c)) err(`collaborator "${c}" is not an active roster member`);
+      }
+    }
+  };
+
+  const checkActive = (it, err) => {
+    checkCommon(it, "active", err);
+    if (!it.summary) err("missing `summary`");
+    if (!cfg.priorities.includes(it.priority)) err(`priority must be one of ${cfg.priorities.join(", ")}`);
+    attachEffort(it, err);
+    if (!cfg.milestones.includes(it.milestone)) err(`milestone must be one of ${cfg.milestones.join(", ")}`);
+    validateAssignees(it, err, true);
+  };
+  return { checkActive, checkCommon, checkHistorical, attachEffort, validateAssignees, qualifiesAsLegacy, closeDateProblem, clearLegacyBlanks };
+}
+
+// Problems an active item would have on re-read; used before a ledger id is claimed.
+export function activeItemErrors(cfg, data, it) {
+  const errors = [];
+  makeValidators(cfg, data.roster, data.ids).checkActive(it, (m) => errors.push(m));
+  return errors;
+}
+
 export function readBacklog(repoRoot, cfg) {
   const p = paths(repoRoot, cfg);
-  const fileRe = new RegExp(`^(${cfg.idPrefix}\\d{${cfg.idWidth}})\\.md$`);
+  const fileRe = new RegExp(`^(${scanIdPattern(cfg)})\\.md$`);
   const errors = [];
 
   // The roster lives at the fixed config home; its load/validation errors are
@@ -477,88 +749,29 @@ export function readBacklog(repoRoot, cfg) {
   // required depends_on with referential checks); their historical enum values
   // (milestone/priority/effort) are NOT re-validated against the current config
   // (SPEC.md §5.1, §8.3).
-  const idRe = new RegExp(`^${cfg.idPrefix}\\d{${cfg.idWidth}}$`);
-  const isoDate = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const { checkActive, checkCommon, checkHistorical, attachEffort, validateAssignees, qualifiesAsLegacy, closeDateProblem, clearLegacyBlanks } = makeValidators(cfg, roster, ids);
 
-  // Resolve `effort` (number or label alias) and attach the display fields used
-  // by rendering. Active items surface a resolution error; closed items resolve
-  // best-effort (historical values are not re-validated — SPEC §5.1, §8.3).
-  const attachEffort = (it, onError) => {
-    const r = resolveEffort(cfg, it.effort);
-    if (r.error) { if (onError) onError(r.error); return; }
-    it.effort = r.value;
-    it._effortLabel = r.label;
-    if (r.emoji) it._effortEmoji = r.emoji;
-    if (r.image) it._effortImage = r.image;
-  };
-
-  const checkCommon = (it, expected, err) => {
-    const fileId = it._file.replace(/\.md$/, "");
-    if (!idRe.test(fileId)) err(`filename must be ${cfg.idPrefix} + ${cfg.idWidth} digits`);
-    if (!it.id) err("missing `id`");
-    else if (it.id !== fileId) err(`id (${it.id}) does not match filename (${fileId})`);
-    if (!it.title) err("missing `title`");
-    if (it.status !== expected) err(`\`status\` must be "${expected}"`);
-    if (it.depends_on === undefined) err("missing `depends_on` (use [] for none)");
-    else for (const d of it.depends_on) if (!ids.has(d)) err(`depends_on ${d} is not a known task id`);
-  };
-
-  // The descriptive metadata is required on closed items too, as a historical
-  // snapshot (SPEC §5.1): its *presence* is enforced here, but its enum membership
-  // is NOT re-validated against the current config (§8.3) — a value that has since
-  // left the config still validates. Call before attachEffort, so a present-but-
-  // unresolvable historical effort (e.g. a retired scale label) counts as present.
-  const checkHistorical = (it, err) => {
-    if (!it.summary) err("missing `summary`");
-    if (it.milestone === undefined || it.milestone === "") err("missing `milestone`");
-    if (it.priority === undefined || it.priority === "") err("missing `priority`");
-    if (it.effort === undefined || it.effort === "") err("missing `effort`");
-  };
-
-  // Owner/collaborator validation (SPEC §5.1, §7.2, §8.3). On **every** item the
-  // values must be syntactically valid handles — a handle is charset-constrained even
-  // when historical, so the closed-item exemption is from roster *membership*, not from
-  // being a handle (else a hand-authored `owner: Jane Doe` would pass `--check`).
-  // **Active** items additionally require an ACTIVE roster member; on closed items
-  // membership is not re-checked, so a member who has since gone inactive or left the
-  // roster still validates. Both fields are optional.
-  const validateAssignees = (it, err, active) => {
-    if (it.owner !== undefined && it.owner !== "") {
-      if (!isValidHandle(it.owner)) err(`owner "${it.owner}" is not a valid handle (use letters, digits, ., _, -)`);
-      else if (active && !findActiveMember(roster, it.owner)) err(`owner "${it.owner}" is not an active roster member`);
-    }
-    if (it.collaborators !== undefined) {
-      if (!Array.isArray(it.collaborators)) err("`collaborators` must be a list of handles");
-      else for (const c of it.collaborators) {
-        if (!isValidHandle(c)) err(`collaborator "${c}" is not a valid handle (use letters, digits, ., _, -)`);
-        else if (active && !findActiveMember(roster, c)) err(`collaborator "${c}" is not an active roster member`);
-      }
-    }
-  };
-
-  for (const it of active) {
-    const err = (m) => errors.push(`active/${it._file}: ${m}`);
-    checkCommon(it, "active", err);
-    if (!it.summary) err("missing `summary`");
-    if (!cfg.priorities.includes(it.priority)) err(`priority must be one of ${cfg.priorities.join(", ")}`);
-    attachEffort(it, err);
-    if (!cfg.milestones.includes(it.milestone)) err(`milestone must be one of ${cfg.milestones.join(", ")}`);
-    validateAssignees(it, err, true);
-  }
+  for (const it of active) checkActive(it, (m) => errors.push(`active/${it._file}: ${m}`));
   for (const it of completed) {
     const err = (m) => errors.push(`completed/${it._file}: ${m}`);
     checkCommon(it, "completed", err);
-    checkHistorical(it, err);
+    const qualifies = qualifiesAsLegacy(it, "completed_on");
+    checkHistorical(it, err, qualifies);
+    if (qualifies) clearLegacyBlanks(it);
     attachEffort(it, null);
-    if (!isoDate(it.completed_on)) err("`completed_on` must be an ISO date (YYYY-MM-DD)");
+    const dateProblem = closeDateProblem(it.completed_on, "completed_on");
+    if (dateProblem) err(dateProblem);
     validateAssignees(it, err, false);
   }
   for (const it of removed) {
     const err = (m) => errors.push(`removed/${it._file}: ${m}`);
     checkCommon(it, "removed", err);
-    checkHistorical(it, err);
+    const qualifies = qualifiesAsLegacy(it, "removed_on");
+    checkHistorical(it, err, qualifies);
+    if (qualifies) clearLegacyBlanks(it);
     attachEffort(it, null);
-    if (!isoDate(it.removed_on)) err("`removed_on` must be an ISO date (YYYY-MM-DD)");
+    const dateProblem = closeDateProblem(it.removed_on, "removed_on");
+    if (dateProblem) err(dateProblem);
     if (!it.removed_reason) err("missing `removed_reason`");
     validateAssignees(it, err, false);
   }
@@ -582,33 +795,52 @@ export function nextId(ids, cfg) {
 // ------------------------------------------------------------- rendering
 function cell(s) { return String(s ?? "").replace(/\|/g, "\\|"); }
 
-function fillMarkers(text, [begin, end], body, where, errors) {
-  const re = new RegExp(`${begin}[\\s\\S]*?${end}`);
-  if (!re.test(text)) { errors.push(`${where}: generated markers not found (${begin} ... ${end})`); return text; }
-  return text.replace(re, `${begin}\n${body}\n${end}`);
+// `literal` (ledger mode only, TRL0037) selects the whole-line marker regex below. The
+// body is always inserted through a callback, so a title holding `$&` or `$1` stays
+// text in every mode.
+// Ledger mode matches each delimiter only as a whole line (trailing spaces and tabs
+// allowed), so a title that holds the end marker as text cannot close the block
+// early (TRL0037). Shared with the init preflight.
+export function ledgerMarkerRe([begin, end]) {
+  return new RegExp(`^${begin}[ \\t]*$[\\s\\S]*?^${end}[ \\t]*$`, "m");
 }
 
-function activeTable(items, cfg) {
+function fillMarkers(text, [begin, end], body, where, errors, literal = false) {
+  const re = literal
+    ? ledgerMarkerRe([begin, end])
+    : new RegExp(`${begin}[\\s\\S]*?${end}`);
+  if (!re.test(text)) { errors.push(`${where}: generated markers not found (${begin} ... ${end})`); return text; }
+  const filled = `${begin}\n${body}\n${end}`;
+  // A callback keeps `$&` or `$1` in a title literal; a replacement string would expand it.
+  return text.replace(re, () => filled);
+}
+
+// Link bases for the table builders. Committed files sit beside their items'
+// folders; local files sit in `.generated/`, one level down (TRL0038).
+const COMMITTED_LINKS = { active: "active/", completed: "tasks/", removed: "" };
+const LOCAL_LINKS = { active: "../active/", completed: "../completed/tasks/", removed: "../removed/" };
+
+function activeTable(items, cfg, base = COMMITTED_LINKS.active) {
   const rank = Object.fromEntries(cfg.priorities.map((p, i) => [p, i]));
   const rows = items.slice()
     .sort((a, b) => (rank[a.priority] - rank[b.priority]) || a.id.localeCompare(b.id))
-    .map((it) => `| [${it.id}](active/${it._file}) | ${cell(it.title)} | ${cell(it.owner ?? "")} | ${it.priority} | ${cell(effortCell(it, cfg))} |`);
+    .map((it) => `| [${it.id}](${base}${it._file}) | ${cell(it.title)} | ${cell(it.owner ?? "")} | ${it.priority} | ${cell(effortCell(it, cfg))} |`);
   return ["| ID | Title | Owner | Priority | Effort |", "| --- | --- | --- | --- | --- |", ...rows].join("\n");
 }
 
-function completedTable(items) {
+function completedTable(items, base = COMMITTED_LINKS.completed) {
   if (!items.length) return "_No completed items yet._";
   const rows = items.slice()
     .sort((a, b) => String(b.completed_on ?? "").localeCompare(String(a.completed_on ?? "")) || a.id.localeCompare(b.id))
-    .map((it) => `| [${it.id}](tasks/${it.id}.md) | ${cell(it.title)} | ${cell(it.summary)} | ${cell(it.completed_on)} |`);
+    .map((it) => `| [${it.id}](${base}${it.id}.md) | ${cell(it.title)} | ${cell(it.summary)} | ${cell(it.completed_on)} |`);
   return ["| ID | Title | Summary | Completed |", "| --- | --- | --- | --- |", ...rows].join("\n");
 }
 
-function removedTable(items) {
+function removedTable(items, base = COMMITTED_LINKS.removed) {
   if (!items.length) return "_No removed items yet._";
   const rows = items.slice()
     .sort((a, b) => String(b.removed_on ?? "").localeCompare(String(a.removed_on ?? "")) || a.id.localeCompare(b.id))
-    .map((it) => `| [${it.id}](${it.id}.md) | ${cell(it.title)} | ${cell(it.summary)} | ${cell(it.removed_on)} | ${cell(it.removed_reason)} |`);
+    .map((it) => `| [${it.id}](${base}${it.id}.md) | ${cell(it.title)} | ${cell(it.summary)} | ${cell(it.removed_on)} | ${cell(it.removed_reason)} |`);
   return ["| ID | Title | Summary | Removed | Reason |", "| --- | --- | --- | --- | --- |", ...rows].join("\n");
 }
 
@@ -631,11 +863,14 @@ function assigneeFields(a) {
   return { owner: a.owner || null, collaborators: a.collaborators ?? [] };
 }
 
-export function buildBacklogJson(cfg, data) {
+// `nextIdOverride` lets a caller outside the git-free core publish a different
+// next id (TRL0037): `undefined` computes the scan value, an explicit `null`
+// is emitted as `null`.
+export function buildBacklogJson(cfg, data, { nextIdOverride } = {}) {
   const backlog = {
     prefix: cfg.idPrefix,
     milestones: cfg.milestones,
-    nextId: nextId(data.ids, cfg),
+    nextId: nextIdOverride === undefined ? nextId(data.ids, cfg) : nextIdOverride,
     counts: { active: data.active.length, completed: data.completed.length, removed: data.removed.length },
     tasks: [
       ...data.active.map((a) => ({ id: a.id, title: a.title, status: "active", milestone: a.milestone, priority: a.priority, effort: a.effort, ...effortFields(a, cfg), depends_on: a.depends_on ?? [], ...assigneeFields(a), summary: a.summary })),
@@ -646,18 +881,44 @@ export function buildBacklogJson(cfg, data) {
   return JSON.stringify(backlog, null, 2) + "\n";
 }
 
+const LOCAL_BLURB = "_Generated by `trellis generate` and ignored by git. Do not edit._";
+// The first lines of each local Markdown output. Import reads them to tell a real
+// generated file from a task that happens to sit at the same path.
+export const LOCAL_TITLES = { index: "Backlog", completed: "Completed tasks", removed: "Removed tasks" };
+export const localHead = (title) => `# ${title}\n\n${LOCAL_BLURB}\n`;
+
 // Compute each generated artifact's path + new content. Pure except for reading
 // the current files (needed to replace content between their markers).
-export function generateArtifacts(repoRoot, cfg, data) {
+export function generateArtifacts(repoRoot, cfg, data, { nextIdOverride } = {}) {
   const p = paths(repoRoot, cfg);
   const errors = [];
-  const next = nextId(data.ids, cfg);
+  const next = nextIdOverride === undefined ? nextId(data.ids, cfg) : nextIdOverride;
+  const literal = cfg.idAllocation === "ledger";
 
-  let block = "";
-  for (const ms of cfg.milestones) {
-    const items = data.active.filter((a) => a.milestone === ms);
-    if (items.length) block += `\n### ${ms}\n\n${activeTable(items, cfg)}\n`;
+  const milestoneBlock = (base) => {
+    let out = "";
+    for (const ms of cfg.milestones) {
+      const items = data.active.filter((a) => a.milestone === ms);
+      if (items.length) out += `\n### ${ms}\n\n${activeTable(items, cfg, base)}\n`;
+    }
+    return out;
+  };
+
+  // Local mode reads no file: each output is wholly generated, so it is a pure
+  // function of the items and needs no markers (TRL0038).
+  if (isLocalMode(cfg)) {
+    const [index, completed, removed, backlog] = artifactSet(repoRoot, cfg).generated.map((e) => e.path);
+    const head = localHead;
+    const files = [
+      { path: index, content: head("Backlog") + milestoneBlock(LOCAL_LINKS.active) },
+      { path: completed, content: `${head("Completed tasks")}\n${completedTable(data.completed, LOCAL_LINKS.completed)}\n` },
+      { path: removed, content: `${head("Removed tasks")}\n${removedTable(data.removed, LOCAL_LINKS.removed)}\n` },
+      { path: backlog, content: buildBacklogJson(cfg, data, { nextIdOverride }) },
+    ];
+    return { files, nextId: next, errors };
   }
+
+  const block = milestoneBlock(COMMITTED_LINKS.active);
   // The README publishes only the milestone tables; the next id lives in
   // backlog.json (SPEC §8.1/§8.2), so `next` below feeds only that artifact and
   // this function's return value (CLI/MCP callers), not the README body.
@@ -670,10 +931,72 @@ export function generateArtifacts(repoRoot, cfg, data) {
   };
 
   const files = [
-    { path: p.readme, content: fillMarkers(readText(p.readme), MARKERS.milestones, readmeBody, relative(repoRoot, p.readme), errors) },
-    { path: p.completedIndex, content: fillMarkers(readText(p.completedIndex), MARKERS.completed, completedTable(data.completed), relative(repoRoot, p.completedIndex), errors) },
-    { path: p.removedIndex, content: fillMarkers(readText(p.removedIndex), MARKERS.removed, removedTable(data.removed), relative(repoRoot, p.removedIndex), errors) },
-    { path: p.backlogJson, content: buildBacklogJson(cfg, data) },
+    { path: p.readme, content: fillMarkers(readText(p.readme), MARKERS.milestones, readmeBody, relative(repoRoot, p.readme), errors, literal) },
+    { path: p.completedIndex, content: fillMarkers(readText(p.completedIndex), MARKERS.completed, completedTable(data.completed), relative(repoRoot, p.completedIndex), errors, literal) },
+    { path: p.removedIndex, content: fillMarkers(readText(p.removedIndex), MARKERS.removed, removedTable(data.removed), relative(repoRoot, p.removedIndex), errors, literal) },
+    { path: p.backlogJson, content: buildBacklogJson(cfg, data, { nextIdOverride }) },
   ];
   return { files, nextId: next, errors };
+}
+
+// ------------------------------------------- local-mode validation (TRL0038)
+// The six generated-marker comments. In local mode no committed file may hold one
+// on a line of its own: that is a half-finished switch from committed mode.
+const MARKER_LINES = new Set(Object.values(MARKERS).flat());
+
+// Reads a file only when it is a regular file (after following a link). A FIFO is
+// opened non-blocking and refused from its fstat, so a README that is a pipe cannot hang.
+function readRegularText(path) {
+  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK || 0));
+  try {
+    if (!fstatSync(fd).isFile()) throw Object.assign(new Error("not a regular file"), { code: "ENOTREG" });
+    return readFileSync(fd, "utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+// Errors for each author-owned file (README and the two index files) that holds a
+// marker line, ignoring trailing spaces, tabs and `\r`. Text that merely mentions
+// a marker is fine. An absent file is skipped; git is never consulted.
+export function markerLineErrors(repoRoot, cfg) {
+  const errors = [];
+  for (const f of artifactSet(repoRoot, cfg).authorOwned) {
+    let text;
+    try {
+      text = readRegularText(f.path);
+    } catch (e) {
+      if (e.code !== "ENOENT" && e.code !== "ENOTDIR") errors.push(`${f.rel}: cannot read (${e.message})`);
+      continue;
+    }
+    const seen = new Set();
+    for (const line of text.split("\n")) {
+      const t = line.replace(/[ \t\r]+$/, "");
+      if (MARKER_LINES.has(t) && !seen.has(t)) {
+        seen.add(t);
+        errors.push(`${f.rel}: holds the generated marker line ${t}, but \`generatedArtifacts\` is "local"; remove the generated block and its markers (the index is generated into ${GENERATED_DIR}/)`);
+      }
+    }
+  }
+  return errors;
+}
+
+// What `check` compares for the mode: committed mode returns the generator's own
+// errors and the files to compare; local mode returns the marker errors and no
+// files, since nothing generated is committed.
+export function checkGenerated(repoRoot, cfg, data) {
+  if (!isLocalMode(cfg)) {
+    const { files, errors } = generateArtifacts(repoRoot, cfg, data);
+    return { errors, files };
+  }
+  return { errors: markerLineErrors(repoRoot, cfg), files: [] };
+}
+
+// The one local-mode validation entry point, shared by CLI `check` and MCP
+// `validate` so they cannot disagree. The caller has already loaded the config, so
+// its errors come first; then the roster and items (readBacklog), then markers,
+// with no early exit on item errors.
+export function validateLocal(repoRoot, cfg) {
+  const data = readBacklog(repoRoot, cfg);
+  return { data, errors: [...data.errors, ...checkGenerated(repoRoot, cfg, data).errors] };
 }

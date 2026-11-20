@@ -14,8 +14,12 @@
 // back to the pre-call state, so the repo is never left invalid or with stale
 // generated files — mirroring init's no-partial-write ethos.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { join, relative, dirname, isAbsolute } from "node:path";
+import {
+  readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, openSync, closeSync, renameSync, copyFileSync,
+  statSync, fchmodSync, unlinkSync,
+} from "node:fs";
+import { randomBytes } from "node:crypto";
+import { join, relative, dirname, basename, isAbsolute } from "node:path";
 import {
   loadConfig,
   readBacklog,
@@ -28,10 +32,19 @@ import {
   parseFrontMatter,
   paths,
   composeFile,
+  activeItemErrors,
+  isLocalMode,
+  isRealDate,
+  validateLocal,
 } from "./backlog.mjs";
-import { applyImport } from "./import.mjs";
+import { applyImport, ImportRefused } from "./import.mjs";
 import { loadProfile } from "./profiles.mjs";
 import { deriveTaskHistory, deriveAllHistory, HistoryError } from "./history.mjs";
+import { outputPreflight, writeArtifactFiles, makeDirs, removeCreatedDirs, stageFile } from "./local-output.mjs";
+
+// Kept as an export of this module for its callers and tests; the owner is local-output.
+export { stageFile };
+import { LedgerError, unsafeText, claim, preview, checkLayout, refuseSymlinkedArtifacts, artifactPaths } from "./ledger.mjs";
 
 // A domain error the transport maps to an MCP tool error (isError result) rather
 // than a protocol failure. `code` is a short slug for programmatic handling.
@@ -53,8 +66,10 @@ function loadCfg(repoRoot) {
 
 // Read ops tolerate per-item errors (they still list what parsed); mutating ops
 // require a clean backlog up front, since you should not mutate an invalid one.
-function loadClean(repoRoot) {
+// `guard(cfg)` runs before the task tree is read (ledger-mode layout refusals).
+function loadClean(repoRoot, guard) {
   const cfg = loadCfg(repoRoot);
+  if (guard) guard(cfg);
   const data = readBacklog(repoRoot, cfg);
   if (data.errors.length) {
     throw new TrellisError(`backlog has errors; fix before mutating: ${data.errors.join("; ")}`, "invalid_backlog");
@@ -64,9 +79,27 @@ function loadClean(repoRoot) {
 
 // The backlog.json shape as an object — parsed from the core's serializer so the
 // tool result is byte-for-byte the same contract clients read from disk.
-function backlogObject(cfg, data) {
-  return JSON.parse(buildBacklogJson(cfg, data));
+function backlogObject(cfg, data, opts) {
+  return JSON.parse(buildBacklogJson(cfg, data, opts));
 }
+
+// ------------------------------------------------------------ id ledger
+// Ledger-mode repos (TRL0037) hand out ids through src/ledger.mjs, never nextId.
+const isLedgerMode = (cfg) => cfg.idAllocation === "ledger";
+
+// A refusal (exit 2) is a bad request; anything else keeps the ledger's own code.
+function ledgerCall(fn) {
+  try {
+    return fn();
+  } catch (e) {
+    if (e instanceof LedgerError) throw new TrellisError(e.message, e.exitCode === 2 ? "invalid_request" : e.code);
+    throw e;
+  }
+}
+
+// The preview `next_id`, `list_tasks` and `regenerate` report in ledger mode; null
+// in scan mode so callers keep the scan value.
+const ledgerPreview = (repoRoot, cfg) => (isLedgerMode(cfg) ? preview(repoRoot, cfg) : null);
 
 // ----------------------------------------------------------- front-matter
 // The serializer (FM_ORDER / emitScalar / serializeFrontMatter / composeFile) lives
@@ -189,11 +222,35 @@ function assertId(id, cfg) {
 }
 
 // ---------------------------------------------------- regenerate (shared)
+// Refuses a bad output before a claim or a write: in local mode a leftover marker,
+// a bad `.generated/` or output path, and (inside a git work tree) an output that
+// is unignored or tracked; in ledger mode a symlinked or non-regular artifact.
+function guardOutputs(repoRoot, cfg) {
+  ledgerCall(() => {
+    outputPreflight(repoRoot, cfg);
+    if (isLedgerMode(cfg)) refuseSymlinkedArtifacts(artifactPaths(repoRoot, cfg));
+  });
+}
+
 // Write any stale artifact; return the repo-relative paths that changed. Pure
-// w.r.t. the item files — only the four generated artifacts are touched.
-function writeArtifacts(repoRoot, cfg, data) {
-  const { files, nextId: next, errors } = generateArtifacts(repoRoot, cfg, data);
+// w.r.t. the item files — only the generated artifacts are touched (the four
+// committed files, or the four under `.generated/` in local mode).
+// `hooks` are test seams (see writeArtifactsStaged).
+// `pv` is the operation's one ledger preview, so the file and the reply always agree.
+function writeArtifacts(repoRoot, cfg, data, hooks = {}, pv = ledgerPreview(repoRoot, cfg)) {
+  // Refuse a bad artifact before anything is rendered.
+  if (isLedgerMode(cfg)) ledgerCall(() => refuseSymlinkedArtifacts(artifactPaths(repoRoot, cfg)));
+  // Local mode publishes the ledger preview in its uncommitted backlog.json.
+  const nextIdOverride = isLocalMode(cfg) && pv ? pv.nextId : undefined;
+  const { files, nextId: next, errors } = generateArtifacts(repoRoot, cfg, data, { nextIdOverride });
   if (errors.length) throw new TrellisError(`generate failed: ${errors.join("; ")}`, "generate_failed");
+  if (isLedgerMode(cfg)) return writeArtifactsStaged(repoRoot, files, next, hooks);
+  // Local mode uses the shared staged writer, which rolls back a failed write.
+  if (isLocalMode(cfg)) {
+    const out = writeArtifactFiles(files);
+    return { changed: out.changed.map((path) => relative(repoRoot, path)), nextId: next, warnings: out.warnings };
+  }
+  // Committed mode keeps its original write, which follows a symlinked artifact.
   // Snapshot prior bytes first so a mid-loop write failure (ENOSPC/EACCES) restores
   // every artifact — honouring the Risk's "never left … with stale generated files."
   const prior = files.map((f) => ({ path: f.path, before: existsSync(f.path) ? readFileSync(f.path, "utf8") : null }));
@@ -218,6 +275,73 @@ function writeArtifacts(repoRoot, cfg, data) {
   }
 }
 
+// Ledger-mode artifact write (TRL0037). A claimed id cannot be released, so the
+// write must either land whole or leave every artifact as it was. Each new file is
+// staged beside its target, each original is copied to a backup, and one rename
+// installs the new bytes, so an artifact is never missing. Any failure before the
+// commit point (the last artifact rename) puts every backup back and removes an
+// artifact that had no original. After it, a failed backup cleanup is only a
+// warning: the item and its generated entries are already consistent.
+// Test seams: `hooks.afterArtifactRename(path, n)` and `hooks.removeBackup(path)`.
+function writeArtifactsStaged(repoRoot, files, next, hooks) {
+  ledgerCall(() => refuseSymlinkedArtifacts(files.map((f) => f.path)));
+  const plan = [];
+  for (const f of files) {
+    const dest = f.path;
+    const exists = existsSync(dest);
+    if ((exists ? readFileSync(dest, "utf8") : null) !== f.content) plan.push({ f, dest, exists, temp: null, backup: null });
+  }
+  const installed = [];
+  // Local mode stages into `.generated/`, which may not exist yet; a rollback
+  // removes it again when this call made it and it is empty.
+  const created = [];
+  try {
+    for (const dir of new Set(files.map((f) => dirname(f.path)))) makeDirs(dir, created);
+    for (const e of plan) {
+      const mode = e.exists ? statSync(e.dest).mode & 0o7777 : 0o666 & ~process.umask();
+      e.temp = stageFile(e.dest, "tmp", e.f.content, mode);
+    }
+    for (const e of plan) {
+      if (e.exists) e.backup = stageFile(e.dest, "bak", readFileSync(e.dest), statSync(e.dest).mode & 0o7777);
+      renameSync(e.temp, e.dest);
+      e.temp = null;
+      installed.push(e);
+      if (hooks.afterArtifactRename) hooks.afterArtifactRename(e.dest, installed.length - 1);
+    }
+  } catch (err) {
+    // A backup that cannot be put back is the only copy of the original, so it is
+    // kept and named in the error instead of being deleted.
+    const kept = [];
+    for (const e of installed.reverse()) {
+      try {
+        if (e.backup) renameSync(e.backup, e.dest); else rmSync(e.dest, { force: true });
+      } catch {
+        if (e.backup) { kept.push(`${e.backup} (original of ${e.dest})`); e.backup = null; }
+      }
+    }
+    for (const e of plan) {
+      for (const leftover of [e.temp, e.backup]) {
+        if (leftover) { try { rmSync(leftover, { force: true }); } catch { /* best-effort */ } }
+      }
+    }
+    removeCreatedDirs(created);
+    if (kept.length) {
+      throw new TrellisError(`${err.message}; could not restore every artifact, backups kept at: ${kept.join(", ")}`, "generate_failed");
+    }
+    throw err;
+  }
+  const warnings = [];
+  for (const e of plan) {
+    if (!e.backup) continue;
+    try {
+      if (hooks.removeBackup) hooks.removeBackup(e.backup); else rmSync(e.backup, { force: true });
+    } catch (err) {
+      warnings.push(`could not remove the backup ${e.backup}: ${err.message}`);
+    }
+  }
+  return { changed: plan.map((e) => relative(repoRoot, e.f.path)), nextId: next, warnings };
+}
+
 // ================================================================= tools
 
 // list_tasks — the backlog header + tasks, optionally filtered. counts/nextId
@@ -225,11 +349,12 @@ function writeArtifacts(repoRoot, cfg, data) {
 export function listTasks(repoRoot, { status, milestone } = {}) {
   const cfg = loadCfg(repoRoot);
   const data = readBacklog(repoRoot, cfg);
-  const backlog = backlogObject(cfg, data);
+  const pv = ledgerPreview(repoRoot, cfg);
+  const backlog = backlogObject(cfg, data, pv ? { nextIdOverride: pv.nextId } : undefined);
   let tasks = backlog.tasks;
   if (status) tasks = tasks.filter((t) => t.status === status);
   if (milestone) tasks = tasks.filter((t) => t.milestone === milestone);
-  return { ...backlog, tasks };
+  return { ...backlog, tasks, ...(pv ? { nextIdNote: pv.note } : {}) };
 }
 
 // get_task — the structured entry plus the raw Markdown body and file path.
@@ -246,9 +371,12 @@ export function getTask(repoRoot, { id } = {}) {
   return { ...entry, body: body.replace(/\n*$/, "\n"), file: relative(repoRoot, file) };
 }
 
-// next_id — the id a new task would receive.
+// next_id — the id a new task would receive. In ledger mode it is a preview only:
+// it never claims, and another writer may take the id first.
 export function nextIdOp(repoRoot) {
   const cfg = loadCfg(repoRoot);
+  const pv = ledgerPreview(repoRoot, cfg);
+  if (pv) return { nextId: pv.nextId, preview: true, note: pv.note };
   const data = readBacklog(repoRoot, cfg);
   return { nextId: nextId(data.ids, cfg) };
 }
@@ -258,6 +386,11 @@ export function nextIdOp(repoRoot) {
 export function validateOp(repoRoot) {
   const { cfg, warnings, errors: cfgErrors } = loadConfig(repoRoot);
   if (cfgErrors.length) return { ok: false, errors: cfgErrors, warnings };
+  // Local mode shares one validator with the CLI `check`, so they cannot disagree.
+  if (isLocalMode(cfg)) {
+    const { errors } = validateLocal(repoRoot, cfg);
+    return { ok: errors.length === 0, errors, warnings };
+  }
   const data = readBacklog(repoRoot, cfg);
   const gen = generateArtifacts(repoRoot, cfg, data); // computes only; the CLI writes
   const errors = [...data.errors, ...gen.errors];
@@ -268,13 +401,27 @@ export function validateOp(repoRoot) {
 // than generating from bad input.
 export function regenerateOp(repoRoot) {
   const { cfg, data } = loadClean(repoRoot);
-  const { changed, nextId: next } = writeArtifacts(repoRoot, cfg, data);
-  return { changed, nextId: next, counts: backlogObject(cfg, data).counts };
+  guardOutputs(repoRoot, cfg);
+  // In committed mode the files on disk keep the scan value; only the reply carries the ledger preview.
+  const pv = ledgerPreview(repoRoot, cfg);
+  const { changed, nextId: next, warnings } = writeArtifacts(repoRoot, cfg, data, {}, pv);
+  const counts = backlogObject(cfg, data).counts;
+  if (pv) return { changed, nextId: pv.nextId, note: pv.note, counts, ...(warnings && warnings.length ? { warnings } : {}) };
+  return { changed, nextId: next, counts, ...(warnings && warnings.length ? { warnings } : {}) };
+}
+
+// claim_id — claim the next id from the local id ledger (ledger mode only). The id
+// stays claimed even if the caller never writes an item for it.
+export function claimIdOp(repoRoot, { title } = {}) {
+  const cfg = loadCfg(repoRoot);
+  const out = ledgerCall(() => claim(repoRoot, cfg, { title }));
+  return { id: out.id, tip: out.tip };
 }
 
 // create_task — assign the next id, write active/<id>.md, then re-read + validate
 // + regenerate. Rolls back (removes the new file) if the result does not validate.
-export function createTask(repoRoot, args = {}) {
+// `hooks` are test seams: `afterOpen({fd, file})` plus the writeArtifacts hooks.
+export function createTask(repoRoot, args = {}, hooks = {}) {
   const title = oneLine(args.title, "title");
   const summary = oneLine(args.summary, "summary");
   const milestone = oneLine(args.milestone, "milestone");
@@ -288,7 +435,10 @@ export function createTask(repoRoot, args = {}) {
   }
   const depends_on = [...new Set(rawDeps)];
 
-  const { cfg, data } = loadClean(repoRoot);
+  // In ledger mode the layout guard runs before the task tree is read, so an
+  // unsupported layout is `invalid_request` even when an item in it is malformed.
+  const { cfg, data } = loadClean(repoRoot, (c) => { if (isLedgerMode(c)) ledgerCall(() => checkLayout(repoRoot, c)); });
+  const ledgerMode = isLedgerMode(cfg);
   // Resolve a number or a case-insensitive scale label to the canonical number,
   // which is what we store in front-matter (SPEC §6.2).
   const effort = resolveEffort(cfg, args.effort);
@@ -305,7 +455,36 @@ export function createTask(repoRoot, args = {}) {
   const owner = resolveOwnerArg(args.owner, data.roster);
   const collaborators = resolveCollaboratorsArg(args.collaborators, data.roster);
 
-  const id = nextId(data.ids, cfg);
+  // A claimed id is never released, so in ledger mode every input the re-read would
+  // reject is checked before claiming, not after.
+  if (ledgerMode) {
+    for (const [field, value] of [["title", title], ["summary", summary], ["milestone", milestone], ["priority", priority], ["owner", owner]]) {
+      if (value !== undefined && unsafeText(value)) throw new TrellisError(`\`${field}\` must be a single line with no control or line-separator characters`, "invalid_request");
+    }
+    for (const d of depends_on) {
+      if (!data.ids.has(d)) throw new TrellisError(`depends_on ${d} is not a known task id`, "invalid_request");
+    }
+    if (!cfg.milestones.includes(milestone)) throw new TrellisError(`milestone must be one of ${cfg.milestones.join(", ")}`, "invalid_request");
+    if (!cfg.priorities.includes(priority)) throw new TrellisError(`priority must be one of ${cfg.priorities.join(", ")}`, "invalid_request");
+  }
+  // Compose and re-parse the item as the re-read will, with a stand-in id of the
+  // right shape, so a value that does not survive the round trip fails before the claim.
+  if (ledgerMode) {
+    const probe = cfg.idPrefix + "9".repeat(cfg.idWidth);
+    const probeFm = { id: probe, title, status: "active", milestone, priority, effort: effort.value, depends_on, summary };
+    if (owner) probeFm.owner = owner;
+    if (collaborators.length) probeFm.collaborators = collaborators;
+    const parseErrors = [];
+    const parsed = parseFrontMatter(composeFile(probeFm, ""), "new item", parseErrors);
+    const problems = parsed ? [...parseErrors, ...activeItemErrors(cfg, data, { ...parsed, _file: `${probe}.md` })] : parseErrors;
+    if (problems.length) throw new TrellisError(`the new item would not validate: ${problems.join("; ")}`, "invalid_request");
+  }
+  // A bad output (a symlink, or in local mode a leftover marker or an unignored or
+  // tracked output) is refused by the write, so it must fail before the claim too.
+  guardOutputs(repoRoot, cfg);
+  // Ledger mode claims the id, and never falls back to the scan: a fresh clone
+  // would hand out an id another worktree holds. The claim is never undone.
+  const id = ledgerMode ? ledgerCall(() => claim(repoRoot, cfg, { title })).id : nextId(data.ids, cfg);
   const fm = { id, title, status: "active", milestone, priority, effort: effort.value, depends_on, summary };
   if (owner) fm.owner = owner;
   if (collaborators.length) fm.collaborators = collaborators;
@@ -313,16 +492,35 @@ export function createTask(repoRoot, args = {}) {
   const file = join(paths(repoRoot, cfg).active, `${id}.md`);
 
   // The write lives inside the try so a failure at any point — the item write, the
-  // re-validate, or regenerate — rolls the brand-new file back.
+  // re-validate, or regenerate — rolls the brand-new file back. Ledger mode creates
+  // the file exclusively and removes it only if this call created it, so an existing
+  // item (even one a case-insensitive filesystem aliases) is never touched.
+  let fd;
+  let owned = !ledgerMode;
   try {
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, composeFile(fm, body));
+    if (ledgerMode) {
+      try {
+        fd = openSync(file, "wx");
+      } catch (e) {
+        if (e.code === "EEXIST") throw new TrellisError(`${id} already has an item file; the id stays claimed`, "conflict");
+        throw e;
+      }
+      owned = true;
+      if (hooks.afterOpen) hooks.afterOpen({ fd, file });
+      writeFileSync(fd, composeFile(fm, body));
+      closeSync(fd);
+      fd = undefined;
+    } else {
+      writeFileSync(file, composeFile(fm, body));
+    }
     const data2 = readBacklog(repoRoot, cfg);
     if (data2.errors.length) throw new TrellisError(`created task is invalid: ${data2.errors.join("; ")}`, "invalid_backlog");
-    writeArtifacts(repoRoot, cfg, data2);
-    return { created: backlogObject(cfg, data2).tasks.find((t) => t.id === id) };
+    const { warnings } = writeArtifacts(repoRoot, cfg, data2, hooks);
+    return { created: backlogObject(cfg, data2).tasks.find((t) => t.id === id), ...(warnings && warnings.length ? { warnings } : {}) };
   } catch (e) {
-    try { rmSync(file, { force: true }); } catch { /* best-effort */ }
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* best-effort */ } }
+    if (owned) { try { rmSync(file, { force: true }); } catch { /* best-effort */ } }
     throw e;
   }
 }
@@ -330,7 +528,7 @@ export function createTask(repoRoot, args = {}) {
 // move_task — active → completed/removed: move the file, update front-matter, and
 // prepend the closeout note. Rolls back (restore source, remove target) on a
 // validation failure.
-export function moveTask(repoRoot, args = {}) {
+export function moveTask(repoRoot, args = {}, hooks = {}) {
   const to = args.to;
   if (to !== "completed" && to !== "removed") throw new TrellisError("`to` must be \"completed\" or \"removed\"");
   const date = args.date === undefined ? todayISO() : args.date;
@@ -338,7 +536,11 @@ export function moveTask(repoRoot, args = {}) {
   const reason = to === "removed" ? oneLine(args.reason, "reason") : undefined;
 
   const { cfg } = loadClean(repoRoot);
+  // With `legacy` a close date must be real, so refuse before anything is moved or written.
+  if (cfg.legacy && !isRealDate(date)) throw new TrellisError("`date` must be a real calendar date (YYYY-MM-DD)");
   const id = assertId(args.id, cfg); // validate the id format before building any path
+  // A bad output is refused before the move touches any file.
+  guardOutputs(repoRoot, cfg);
   const p = paths(repoRoot, cfg);
   const src = join(p.active, `${id}.md`);
   if (!existsSync(src)) {
@@ -368,8 +570,8 @@ export function moveTask(repoRoot, args = {}) {
     rmSync(src, { force: true });
     const data2 = readBacklog(repoRoot, cfg);
     if (data2.errors.length) throw new TrellisError(`move produced an invalid backlog: ${data2.errors.join("; ")}`, "invalid_backlog");
-    writeArtifacts(repoRoot, cfg, data2);
-    return { moved: backlogObject(cfg, data2).tasks.find((t) => t.id === id), counts: backlogObject(cfg, data2).counts };
+    const { warnings } = writeArtifacts(repoRoot, cfg, data2, hooks);
+    return { moved: backlogObject(cfg, data2).tasks.find((t) => t.id === id), counts: backlogObject(cfg, data2).counts, ...(warnings && warnings.length ? { warnings } : {}) };
   } catch (e) {
     try { writeFileSync(src, original); } catch { /* best-effort */ } // restore the source…
     try { rmSync(target, { force: true }); } catch { /* best-effort */ } // …and undo the target write
@@ -409,7 +611,13 @@ export function importOp(repoRoot, args = {}) {
   const source = isAbsolute(src) ? src : join(repoRoot, src);
   if (args.idFloor != null && (!Number.isInteger(args.idFloor) || args.idFloor < 0)) throw new TrellisError("`idFloor` must be a non-negative integer");
   const dryRun = !args.apply;
-  const { summary } = applyImport(repoRoot, source, mapping, { dryRun, preserveIds: args.preserveIds === true, idFloor: args.idFloor });
+  let summary;
+  try {
+    ({ summary } = applyImport(repoRoot, source, mapping, { dryRun, preserveIds: args.preserveIds === true, idFloor: args.idFloor }));
+  } catch (e) {
+    if (e instanceof ImportRefused) throw new TrellisError(e.message, "invalid_request");
+    throw e;
+  }
   if (summary.errors.length) throw new TrellisError(summary.errors.join("; "), "import_failed");
   return { ...summary, dryRun };
 }
@@ -441,6 +649,7 @@ export const OPS = {
   list_tasks: listTasks,
   get_task: getTask,
   next_id: nextIdOp,
+  claim_id: claimIdOp,
   create_task: createTask,
   move_task: moveTask,
   validate: validateOp,

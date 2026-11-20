@@ -7,15 +7,18 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, statSync, lstatSync, symlinkSync, realpathSync, chmodSync, cpSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
-import { planImport, applyImport } from "../src/import.mjs";
+import { planImport, applyImport, importFailureLines, ImportRefused } from "../src/import.mjs";
 import { loadProfile, listProfiles } from "../src/profiles.mjs";
-import { loadConfig, readBacklog, generateArtifacts, parseFrontMatter, nextId } from "../src/backlog.mjs";
+import { loadConfig, readBacklog, generateArtifacts, parseFrontMatter, nextId, validateLocal, localHead, LOCAL_TITLES } from "../src/backlog.mjs";
+import { testSeams as outputSeams } from "../src/local-output.mjs";
+import { testSeams as importSeams } from "../src/import.mjs";
+import { initRefFormat } from "./git-support.mjs";
 
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const fixtures = join(projectRoot, "test", "fixtures");
@@ -999,5 +1002,670 @@ test("stripIdPrefix is opt-in — without the flag the numbered title is kept ve
     assert.equal(itemByFile(plan, "002-design-espalier.md").fm.title, "002. Design the Espalier MCP server");
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ------------------------------------------------------ ledger-mode refusals
+// A ledger-mode target (TRL0037): import and init --force/--import refuse before any
+// write. `snapshotAll` lists every file with its bytes, so "wrote nothing" is exact.
+function snapshotAll(root) {
+  const out = {};
+  const walk = (d) => {
+    for (const name of readdirSync(d)) {
+      if (name === ".git") continue;
+      const abs = join(d, name);
+      if (statSync(abs).isDirectory()) walk(abs);
+      else out[relative(root, abs)] = readFileSync(abs, "utf8");
+    }
+  };
+  walk(root);
+  return out;
+}
+function ledgerTarget(root) {
+  const cfgPath = join(root, "trellis", "backlog.config.json");
+  const cfg = { ...JSON.parse(readFileSync(cfgPath, "utf8")), idAllocation: "ledger" };
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+  return root;
+}
+
+test("import --dry-run and --apply refuse in ledger mode with exit 2 and write nothing", () => {
+  const root = ledgerTarget(initTarget());
+  try {
+    const script = join(projectRoot, "scripts", "trellis-import.mjs");
+    const before = snapshotAll(root);
+    for (const extra of [[], ["--dry-run"], ["--apply"]]) {
+      const r = spawnSync(process.execPath, [script, legacySrc, "--profile", "taproot-ai-backlog", "--target", root, ...extra], { encoding: "utf8" });
+      assert.equal(r.status, 2, extra.join(" "));
+      assert.match(r.stderr, /ledger/);
+      assert.match(r.stderr, /Import before switching/);
+      assert.deepEqual(snapshotAll(root), before);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("applyImport throws a typed ImportRefused in ledger mode, for preview and apply", () => {
+  const root = ledgerTarget(initTarget());
+  try {
+    for (const dryRun of [true, false]) {
+      assert.throws(() => applyImport(root, legacySrc, mapping, { dryRun }), (e) => e instanceof ImportRefused);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ------------------------------------------- local generated artifacts (TRL0038)
+const initScript = join(projectRoot, "scripts", "trellis-init.mjs");
+const importScript = join(projectRoot, "scripts", "trellis-import.mjs");
+const git = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+
+// A target in local mode: a scaffold turned into `generatedArtifacts: "local"`, with the
+// committed index files removed (they are author-owned and optional there). `configOnly`
+// leaves just the config. `inGit: false` leaves it outside any work tree.
+function localTarget({ inGit = true, ignore = true, configOnly = false } = {}) {
+  const root = realpathSync(initTarget());
+  const cfgPath = join(root, "trellis", "backlog.config.json");
+  writeFileSync(cfgPath, JSON.stringify({ ...JSON.parse(readFileSync(cfgPath, "utf8")), generatedArtifacts: "local" }, null, 2) + "\n");
+  for (const f of ["README.md", "backlog.json", "completed/index.md", "removed/index.md"]) rmSync(join(root, "trellis", f), { force: true });
+  if (configOnly) for (const d of ["active", "completed", "removed"]) rmSync(join(root, "trellis", d), { recursive: true, force: true });
+  if (inGit) git(root, "init", "-q", ...initRefFormat, "-b", "main");
+  if (ignore) writeFileSync(join(root, ".gitignore"), "trellis/.generated/\n");
+  return root;
+}
+// Files and folders with their bytes, so "unchanged" compares the whole tree.
+function tree(root) {
+  const out = {};
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.name === ".git") continue;
+      const abs = join(d, e.name);
+      if (e.isDirectory()) { out[relative(root, abs)] = "<dir>"; walk(abs); }
+      else out[relative(root, abs)] = lstatSync(abs).isSymbolicLink() ? "<link>" : readFileSync(abs, "utf8");
+    }
+  };
+  walk(root);
+  return out;
+}
+const withSeams = (fn) => { try { return fn(); } finally { outputSeams.beforeWrite = null; importSeams.afterItemCreate = null; } };
+const refusedImport = (root, opts = {}) => assert.throws(() => applyImport(root, legacySrc, mapping, opts), (e) => e instanceof ImportRefused);
+const LEFTOVER = "# Backlog\n\n<!-- BEGIN GENERATED:MILESTONES -->\n<!-- END GENERATED:MILESTONES -->\n";
+
+test("local import writes .generated/ through the shared writer, no committed index, and check passes", () => {
+  const root = localTarget();
+  try {
+    assert.equal(existsSync(join(root, "trellis", ".generated")), false);
+    let writes = 0;
+    outputSeams.beforeWrite = () => { writes++; };
+    const { summary } = withSeams(() => applyImport(root, legacySrc, mapping, { dryRun: false }));
+    assert.deepEqual(summary.errors, []);
+    assert.equal(writes, 4, "all four outputs go through writeArtifactFiles");
+    assert.deepEqual(summary.generated.map((p) => p.replace(/\\/g, "/")).sort(), ["index.md", "completed.md", "removed.md", "backlog.json"].map((n) => `trellis/.generated/${n}`).sort());
+    for (const n of ["index.md", "completed.md", "removed.md", "backlog.json"]) assert.ok(existsSync(join(root, "trellis", ".generated", n)), n);
+    for (const f of ["README.md", "backlog.json", "completed/index.md", "removed/index.md"]) assert.equal(existsSync(join(root, "trellis", f)), false, f);
+    const { cfg } = loadConfig(root);
+    assert.deepEqual(validateLocal(root, cfg).errors, []);
+    execFileSync(process.execPath, [join(projectRoot, "scripts", "backlog-readme.mjs"), "--check", "--target", root]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("generated artifact paths are skipped in both target modes, but a real task in a .generated folder imports", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-gensrc-"));
+  mkdirSync(join(src, ".generated"));
+  cpSync(join(trellisSrc, "active", "TR0001.md"), join(src, ".generated", "TR0001.md"));
+  for (const n of ["index", "completed", "removed"]) writeFileSync(join(src, ".generated", `${n}.md`), `${localHead(LOCAL_TITLES[n])}\n| ID |\n`);
+  const dotMapping = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.md" } } };
+  const committed = initTarget();
+  const local = localTarget();
+  try {
+    for (const target of [committed, local]) {
+      const plan = planImport(target, src, dotMapping, {});
+      assert.deepEqual(plan.errors, []);
+      assert.equal(plan.counts.total, 1, "only the real task; the three generated tables are skipped");
+    }
+  } finally {
+    for (const d of [src, committed, local]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("a task at .generated/index.md without the local header imports, and a header-bearing file in any .generated folder is skipped", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-gensrc-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    mkdirSync(join(src, "planning", ".generated"), { recursive: true });
+    cpSync(join(trellisSrc, "active", "TR0001.md"), join(src, ".generated", "index.md"));
+    writeFileSync(join(src, "planning", ".generated", "index.md"), `${localHead(LOCAL_TITLES.index)}\n| ID |\n`);
+    const at = (dir) => ({ ...loadProfile("trellis").mapping, sources: { active: { dirs: [dir], file: "*.md" } } });
+    const real = planImport(root, src, at(".generated"), {});
+    assert.deepEqual(real.errors, []);
+    assert.equal(real.counts.total, 1, "the real task is imported");
+    const nested = planImport(root, src, at("planning/.generated"), {});
+    assert.equal(nested.counts.total, 0, "the generated file is skipped");
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a mapped source-root backlog.json is an ordinary file; one under .generated is skipped", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-genjson-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    writeFileSync(join(src, "backlog.json"), "Plain notes in a file the user mapped.\n");
+    writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ prefix: "X", milestones: [], nextId: "X0001", counts: { active: 0, completed: 0, removed: 0 }, tasks: [] }) + "\n");
+    const at = (dir) => ({ ...loadProfile("trellis").mapping, sources: { active: { dirs: [dir], file: "*.json" } } });
+    const plain = planImport(root, src, at("."), {});
+    assert.equal(plain.counts.total, 1, "the source-root backlog.json is not excluded by name (it was before round 3)");
+    assert.equal(planImport(root, src, at(".generated"), {}).counts.total, 0, "the generated copy is skipped");
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a .generated/backlog.json without the generated shape imports as an ordinary file", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-genjson2-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.json" } } };
+    for (const body of ["{}\n", "[1]\n", "not json\n", JSON.stringify({ prefix: "X", milestones: [], nextId: "X1", tasks: [] })]) {
+      writeFileSync(join(src, ".generated", "backlog.json"), body);
+      assert.equal(planImport(root, src, at, {}).counts.total, 1, `imported: ${body.trim()}`);
+    }
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a foreign export with id and status but no title imports as an ordinary file, and counts must match the tasks", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-genjson3-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.json" } } };
+    const wrap = (tasks, counts) => JSON.stringify({ prefix: "X", milestones: [], nextId: "X0002", counts, tasks });
+    const FULL = { id: "X0001", title: "T", status: "active", milestone: "Alpha", priority: "High", effort: 3, depends_on: [], owner: null, collaborators: [], summary: "S" };
+    const foreign = [
+      wrap([{ id: "X0001", status: "active" }], { active: 1, completed: 0, removed: 0 }),
+      wrap([FULL], { active: 0, completed: 0, removed: 0 }),
+      wrap([FULL], { active: 0, completed: 1, removed: 0 }),
+      // Matching counts, but only id, title and status (round 8).
+      wrap([{ id: "X0001", title: "T", status: "active" }], { active: 1, completed: 0, removed: 0 }),
+      wrap([{ ...FULL, depends_on: "X0002" }], { active: 1, completed: 0, removed: 0 }),
+      wrap([{ ...FULL, owner: 7 }], { active: 1, completed: 0, removed: 0 }),
+    ];
+    for (const body of foreign) {
+      writeFileSync(join(src, ".generated", "backlog.json"), body);
+      assert.equal(planImport(root, src, at, {}).counts.total, 1, `imported: ${body}`);
+    }
+    writeFileSync(join(src, ".generated", "backlog.json"), wrap([FULL], { active: 1, completed: 0, removed: 0 }));
+    assert.equal(planImport(root, src, at, {}).counts.total, 0, "a matching generated export is skipped");
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a source root symlinked to an external .generated folder still skips generated Markdown", { skip: process.platform === "win32" }, () => {
+  const ext = realpathSync(mkdtempSync(join(tmpdir(), "trellis-gensym-")));
+  const root = initTarget();
+  try {
+    mkdirSync(join(ext, ".generated"));
+    writeFileSync(join(ext, ".generated", "index.md"), `${localHead(LOCAL_TITLES.index)}\n| ID |\n`);
+    symlinkSync(join(ext, ".generated"), join(ext, "linked"));
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["."], file: "*.md" } } };
+    assert.equal(planImport(root, join(ext, "linked"), at, {}).counts.total, 0, "the generated file is skipped through the link");
+  } finally { rmSync(ext, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an imported item with a large body is written whole", () => {
+  const root = initTarget();
+  const src = realpathSync(mkdtempSync(join(tmpdir(), "trellis-bigsrc-")));
+  try {
+    mkdirSync(join(src, "active"));
+    const big = "line of body text\n".repeat(200000);
+    writeFileSync(join(src, "active", "TR0001.md"), readFileSync(join(trellisSrc, "active", "TR0001.md"), "utf8").trimEnd() + "\n\n" + big);
+    const { summary } = applyImport(root, src, { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["active"], file: "*.md" } } });
+    assert.deepEqual(summary.errors, []);
+    const written = readFileSync(join(root, summary.created[0]), "utf8");
+    assert.ok(written.endsWith(big), "the whole body reached the file");
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(src, { recursive: true, force: true }); }
+});
+
+test("a leftover README marker refuses local import, apply and init --import, leaving the target unchanged", () => {
+  const root = localTarget();
+  writeFileSync(join(root, "trellis", "README.md"), LEFTOVER);
+  try {
+    const before = tree(root);
+    refusedImport(root, { dryRun: false });
+    refusedImport(root, { dryRun: true });
+    assert.deepEqual(tree(root), before);
+    const cli = spawnSync(process.execPath, [importScript, legacySrc, "--profile", "taproot-ai-backlog", "--target", root, "--apply"], { encoding: "utf8" });
+    assert.equal(cli.status, 2, cli.stderr);
+    // init --import refuses through the same handler before it scaffolds anything.
+    const ini = spawnSync(process.execPath, [initScript, root, "--import", legacySrc, "--profile", "taproot-ai-backlog"], { encoding: "utf8" });
+    assert.equal(ini.status, 2, ini.stderr);
+    assert.match(ini.stderr, /GENERATED:MILESTONES/);
+    assert.deepEqual(tree(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("local import refuses a bad .generated output (symlink or directory) before any write", { skip: process.platform === "win32" }, () => {
+  for (const kind of ["symlink", "directory"]) {
+    const root = localTarget();
+    try {
+      const dir = join(root, "trellis", ".generated");
+      mkdirSync(dir);
+      if (kind === "symlink") { writeFileSync(join(root, "elsewhere.md"), "x\n"); symlinkSync(join(root, "elsewhere.md"), join(dir, "index.md")); }
+      else mkdirSync(join(dir, "index.md"));
+      const before = tree(root);
+      refusedImport(root);
+      assert.deepEqual(tree(root), before, kind);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("local import refuses an unignored or tracked output, and skips the git half outside a work tree", () => {
+  const unignored = localTarget({ ignore: false });
+  const tracked = localTarget();
+  const plain = localTarget({ inGit: false, ignore: false });
+  try {
+    const before = tree(unignored);
+    assert.throws(() => applyImport(unignored, legacySrc, mapping), (e) => e instanceof ImportRefused && /trellis\/\.generated\//.test(e.message));
+    assert.deepEqual(tree(unignored), before);
+    // A dry run runs only the marker scan, so it does not mind the missing ignore rule.
+    assert.deepEqual(applyImport(unignored, legacySrc, mapping, { dryRun: true }).summary.errors, []);
+
+    mkdirSync(join(tracked, "trellis", ".generated"));
+    writeFileSync(join(tracked, "trellis", ".generated", "index.md"), "old\n");
+    git(tracked, "add", "-f", "trellis/.generated/index.md");
+    refusedImport(tracked);
+
+    assert.deepEqual(applyImport(plain, legacySrc, mapping).summary.errors, []);
+    assert.ok(existsSync(join(plain, "trellis", ".generated", "backlog.json")));
+  } finally { for (const r of [unignored, tracked, plain]) rmSync(r, { recursive: true, force: true }); }
+});
+
+test("a forced git discovery error makes local import refuse with the target unchanged", { skip: process.platform === "win32" }, () => {
+  const root = localTarget();
+  const bin = realpathSync(mkdtempSync(join(tmpdir(), "trellis-shim-")));
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  writeFileSync(join(bin, "git"), `#!/bin/sh\nfor a in "$@"; do\n  if [ "$a" = "--show-prefix" ]; then echo "fatal: detected dubious ownership" >&2; exit 128; fi\ndone\nexec "${realGit}" "$@"\n`);
+  chmodSync(join(bin, "git"), 0o755);
+  const oldPath = process.env.PATH;
+  try {
+    const before = tree(root);
+    process.env.PATH = `${bin}:${oldPath}`;
+    assert.throws(() => applyImport(root, legacySrc, mapping), (e) => e instanceof ImportRefused && /dubious ownership/.test(e.message));
+    process.env.PATH = oldPath;
+    assert.deepEqual(tree(root), before);
+  } finally { process.env.PATH = oldPath; rmSync(bin, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a failed first local import leaves no new .generated/ and restores the target", () => {
+  for (const at of [0, 3]) {
+    const root = localTarget();
+    try {
+      const before = tree(root);
+      outputSeams.beforeWrite = (_p, i) => { if (i === at) throw new Error("forced failure"); };
+      const { summary } = withSeams(() => applyImport(root, legacySrc, mapping));
+      assert.match(summary.errors.join(), /forced failure/);
+      assert.deepEqual(tree(root), before, `failure at write ${at}`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("a failed import into a config-only target leaves the whole tree as it was", () => {
+  const cases = {
+    "after the item write": () => { outputSeams.beforeWrite = (_p, i) => { if (i === 1) throw new Error("forced failure"); }; },
+    "during the item write": () => { importSeams.afterItemCreate = () => { throw new Error("forced failure"); }; },
+  };
+  for (const [name, arm] of Object.entries(cases)) {
+    const root = localTarget({ configOnly: true });
+    try {
+      const before = tree(root);
+      arm();
+      const { summary } = withSeams(() => applyImport(root, legacySrc, mapping));
+      assert.match(summary.errors.join(), /forced failure/, name);
+      assert.deepEqual(tree(root), before, name);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+  // Without a failure the same target imports and validates.
+  const root = localTarget({ configOnly: true });
+  try {
+    assert.deepEqual(applyImport(root, legacySrc, mapping).summary.errors, []);
+    const { cfg } = loadConfig(root);
+    assert.deepEqual(validateLocal(root, cfg).errors, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a mapping that includes .generated/ never feeds generated tables into item validation", () => {
+  const root = localTarget();
+  const src = realpathSync(mkdtempSync(join(tmpdir(), "trellis-gensrc-")));
+  try {
+    mkdirSync(join(src, "active"));
+    cpSync(join(trellisSrc, "active", "TR0001.md"), join(src, "active", "TR0001.md"));
+    mkdirSync(join(src, ".generated"));
+    for (const n of ["index", "completed", "removed"]) writeFileSync(join(src, ".generated", `${n}.md`), `${localHead(LOCAL_TITLES[n])}\n| ID |\n`);
+    writeFileSync(join(src, "README.md"), "# Readme\n");
+    const custom = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["active", ".generated", "."], file: "*.md" } } };
+    const plan = planImport(root, src, custom);
+    assert.deepEqual(plan.errors, []);
+    assert.equal(plan.counts.total, 1, "only the real item: .generated/*.md and README.md are skipped");
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(src, { recursive: true, force: true }); }
+});
+
+test("committed-mode import still writes the committed artifacts", () => {
+  const root = initTarget();
+  try {
+    const { summary } = applyImport(root, legacySrc, mapping);
+    assert.deepEqual(summary.errors, []);
+    assert.deepEqual(summary.generated, ["trellis/README.md", "trellis/completed/index.md", "trellis/removed/index.md", "trellis/backlog.json"]);
+    assert.equal(existsSync(join(root, "trellis", ".generated")), false);
+    assertCheckClean(root);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a local import that fails before generation leaves untouched artifacts alone, with no restore write", () => {
+  const root = localTarget();
+  try {
+    const gen = join(root, "trellis", ".generated");
+    mkdirSync(gen);
+    const old = new Date("2020-01-01T00:00:00Z");
+    for (const n of ["index.md", "completed.md", "removed.md", "backlog.json"]) { writeFileSync(join(gen, n), `old ${n}\n`); utimesSync(join(gen, n), old, old); }
+    const before = tree(root);
+    importSeams.afterItemCreate = () => { throw new Error("forced failure"); };
+    const { summary } = withSeams(() => applyImport(root, legacySrc, mapping));
+    assert.match(summary.errors.join(), /forced failure/);
+    assert.deepEqual(tree(root), before);
+    for (const n of ["index.md", "completed.md", "removed.md", "backlog.json"]) assert.equal(statSync(join(gen, n)).mtimeMs, old.getTime(), `${n} was not rewritten`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("import and init --import refuse a mapped source file that is a local output, writing nothing", { skip: process.platform === "win32" }, () => {
+  const mapFile = (dirs) => JSON.stringify({ ...loadProfile("trellis").mapping, sources: { active: { dirs, file: "*.md" } } });
+  const make = () => {
+    const root = localTarget();
+    const gen = join(root, "trellis", ".generated");
+    mkdirSync(gen);
+    writeFileSync(join(gen, "index.md"), `${localHead(LOCAL_TITLES.index)}\nold\n`);
+    return root;
+  };
+  // Directly mapped, and mapped through a symlink in another folder.
+  for (const how of ["direct", "symlink"]) {
+    const root = make();
+    const dirs = how === "direct" ? ["trellis/.generated"] : ["linked"];
+    const mapDir = mkdtempSync(join(tmpdir(), "trellis-map-"));
+    try {
+      if (how === "symlink") { mkdirSync(join(root, "linked")); symlinkSync(join(root, "trellis", ".generated", "index.md"), join(root, "linked", "notes.md")); }
+      const before = tree(root);
+      assert.throws(() => applyImport(root, root, JSON.parse(mapFile(dirs))), (e) => e instanceof ImportRefused && /generated (output|folder)/.test(e.message), how);
+      assert.deepEqual(tree(root), before);
+      const mapPath = join(mapDir, "map.json");
+      writeFileSync(mapPath, mapFile(dirs));
+      const cli = spawnSync(process.execPath, [importScript, root, "--mapping", mapPath, "--target", root, "--apply"], { encoding: "utf8" });
+      assert.equal(cli.status, 2, cli.stderr);
+      assert.match(cli.stderr, /generated (output|folder)/);
+      const ini = spawnSync(process.execPath, [initScript, root, "--import", root, "--mapping", mapPath], { encoding: "utf8" });
+      assert.equal(ini.status, 2, ini.stderr);
+      assert.match(ini.stderr, /generated (output|folder)/);
+      assert.deepEqual(tree(root), before, "init --import scaffolded nothing");
+    } finally { rmSync(mapDir, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+// ------------------------------------------------------- review round 5 (TRL0038)
+test("init --import in local mode generates no output before the import checks run", { skip: process.platform === "win32" }, () => {
+  const root = localTarget();
+  const mapDir = mkdtempSync(join(tmpdir(), "trellis-map-"));
+  try {
+    const gen = join(root, "trellis", ".generated");
+    assert.equal(existsSync(gen), false);
+    const map = JSON.stringify({ ...loadProfile("trellis").mapping, sources: { active: { dirs: ["trellis/.generated"], file: "*.md" } } });
+    const mapPath = join(mapDir, "map.json");
+    writeFileSync(mapPath, map);
+    const ini = spawnSync(process.execPath, [initScript, root, "--import", root, "--mapping", mapPath], { encoding: "utf8" });
+    // The mapping overlaps the target's future .generated folder, so it is refused and nothing is imported.
+    assert.match(ini.stderr, /generated folder/);
+    assert.deepEqual(readdirSync(join(root, "trellis", "active")).filter((n) => /index|completed|removed/.test(n)), []);
+  } finally { rmSync(mapDir, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a mapped file reaching an output through another case spelling is refused by identity", { skip: process.platform === "win32" }, () => {
+  const root = localTarget();
+  try {
+    const gen = join(root, "trellis", ".generated");
+    mkdirSync(gen);
+    writeFileSync(join(gen, "index.md"), `${localHead(LOCAL_TITLES.index)}\nold\n`);
+    if (!existsSync(join(root, "TRELLIS", ".generated", "index.md"))) return; // case-sensitive volume
+    const map = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["TRELLIS/.generated"], file: "*.md" } } };
+    const before = tree(root);
+    assert.throws(() => applyImport(root, root, map), (e) => e instanceof ImportRefused && /generated (output|folder)/.test(e.message));
+    assert.deepEqual(tree(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a .generated/backlog.json with the five keys but wrong types imports as an ordinary file", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-genjson3-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.json" } } };
+    const base = { prefix: "X", milestones: [], nextId: "X1", counts: { active: 0, completed: 0, removed: 0 }, tasks: [] };
+    for (const bad of [{ prefix: 1 }, { milestones: "x" }, { nextId: 5 }, { counts: [] }, { counts: { active: "0", completed: 0, removed: 0 } }, { tasks: {} }]) {
+      writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, ...bad }));
+      assert.equal(planImport(root, src, at, {}).counts.total, 1, `imported: ${JSON.stringify(bad)}`);
+    }
+    writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, nextId: null }));
+    assert.equal(planImport(root, src, at, {}).counts.total, 0, "the real generated shape is skipped");
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+// ------------------------------------------------------- review round 6 (TRL0038)
+test("a .generated/backlog.json whose tasks lack an id and status imports as an ordinary file", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-genjson4-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.json" } } };
+    const base = { prefix: "X", milestones: [], nextId: "X1", counts: { active: 0, completed: 0, removed: 0 }, tasks: [] };
+    const bad = [{ tasks: [{ name: "Legacy task" }] }, { tasks: ["x"] }, { tasks: [{ id: "X1", status: 3 }] }, { counts: { active: -1, completed: 0, removed: 0 } }, { counts: { active: 1.5, completed: 0, removed: 0 } }];
+    for (const b of bad) {
+      writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, ...b }));
+      assert.equal(planImport(root, src, at, {}).counts.total, 1, `imported: ${JSON.stringify(b)}`);
+    }
+    writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, counts: { active: 1, completed: 0, removed: 0 }, tasks: [{ ...{ id: "X1", title: "T", status: "active", milestone: "Alpha", priority: "High", effort: 3, depends_on: [], owner: null, collaborators: [], summary: "S" } }] }));
+    assert.equal(planImport(root, src, at, {}).counts.total, 0, "the real generated shape is skipped");
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a source root that is itself .generated skips local artifacts by the file's own parent folder", () => {
+  const parent = mkdtempSync(join(tmpdir(), "trellis-genroot-"));
+  const src = join(parent, ".generated");
+  const root = initTarget();
+  try {
+    mkdirSync(src);
+    cpSync(join(trellisSrc, "active", "TR0001.md"), join(src, "TR0001.md"));
+    writeFileSync(join(src, "index.md"), `${localHead(LOCAL_TITLES.index)}\n| ID |\n`);
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["."], file: "*.md" } } };
+    assert.equal(planImport(root, src, at, {}).counts.total, 1, "only the real item");
+  } finally { rmSync(parent, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("init --import reports a mapping loader error before scaffolding anything", () => {
+  const root = mkdtempSync(join(tmpdir(), "trellis-badmap-"));
+  const mapDir = mkdtempSync(join(tmpdir(), "trellis-map-"));
+  try {
+    const mapPath = join(mapDir, "map.json");
+    writeFileSync(mapPath, "{ not json");
+    const ini = spawnSync(process.execPath, [initScript, root, "--import", root, "--mapping", mapPath], { encoding: "utf8" });
+    assert.equal(ini.status, 2, ini.stderr);
+    assert.deepEqual(readdirSync(root), [], "nothing was scaffolded");
+  } finally { rmSync(mapDir, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+// ------------------------------------------------------- review round 8 (TRL0038)
+test("a mapping aimed at the target's .generated folder is refused before anything is read or written", () => {
+  const root = localTarget();
+  try {
+    const gen = join(root, "trellis", ".generated");
+    mkdirSync(gen);
+    const full = { id: "TAP0001", title: "T", status: "active", milestone: "Alpha", priority: "High", effort: 3, depends_on: [], owner: null, collaborators: [], summary: "S" };
+    writeFileSync(join(gen, "backlog.json"), JSON.stringify({ prefix: "TAP", milestones: [], nextId: null, counts: { active: 1, completed: 0, removed: 0 }, tasks: [full] }));
+    const at = (dirs) => ({ ...loadProfile("trellis").mapping, sources: { active: { dirs, file: "*.md" } } });
+    // The folder itself, a folder holding it and a folder inside it all overlap.
+    for (const [src, dirs] of [[root, ["trellis/.generated"]], [root, ["trellis"]], [gen, ["."]], [join(root, "trellis"), ["."]]]) {
+      const before = tree(root);
+      assert.throws(() => applyImport(root, src, at(dirs)), (e) => e instanceof ImportRefused && /generated folder/.test(e.message), `${src} ${dirs}`);
+      assert.deepEqual(tree(root), before);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ------------------------------------------------------- review round 9 (TRL0038)
+test("a target folder named ..planning is not a parent traversal: a mapped source root holding it is refused", () => {
+  const root = localTarget();
+  try {
+    const cfgPath = join(root, "trellis", "backlog.config.json");
+    writeFileSync(cfgPath, JSON.stringify({ ...JSON.parse(readFileSync(cfgPath, "utf8")), tasksDir: "..planning" }, null, 2) + "\n");
+    writeFileSync(join(root, ".gitignore"), "..planning/.generated/\n");
+    for (const d of ["active", "completed", "removed"]) mkdirSync(join(root, "..planning", d), { recursive: true });
+    mkdirSync(join(root, "..planning", ".generated"));
+    const full = { id: "TAP0001", title: "T", status: "active", milestone: "Alpha", priority: "High", effort: 3, depends_on: [], owner: null, collaborators: [], summary: "S" };
+    writeFileSync(join(root, "..planning", ".generated", "backlog.json"), JSON.stringify({ prefix: "TAP", milestones: [], nextId: null, counts: { active: 1, completed: 0, removed: 0 }, tasks: [full] }));
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["."], file: "*.md" } } };
+    const before = tree(root);
+    assert.throws(() => applyImport(root, root, at), (e) => e instanceof ImportRefused && /generated folder/.test(e.message));
+    assert.deepEqual(tree(root), before);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a foreign export whose completed or removed tasks lack the close fields imports as an ordinary file", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-genjson5-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.json" } } };
+    const task = (status, extra) => ({ id: "X0001", title: "T", status, milestone: "Alpha", priority: "High", effort: 3, depends_on: [], owner: null, collaborators: [], summary: "S", ...extra });
+    const wrap = (status, extra) => JSON.stringify({ prefix: "X", milestones: [], nextId: "X0002", counts: { active: 0, completed: 0, removed: 0, [status]: 1 }, tasks: [task(status, extra)] });
+    for (const body of [wrap("completed", {}), wrap("removed", {}), wrap("removed", { removed_on: "2026-01-01" }), wrap("completed", { completed_on: 5 })]) {
+      writeFileSync(join(src, ".generated", "backlog.json"), body);
+      assert.equal(planImport(root, src, at, {}).counts.total, 1, `imported: ${body}`);
+    }
+    for (const body of [wrap("completed", { completed_on: "2026-01-01" }), wrap("removed", { removed_on: "2026-01-01", removed_reason: "Gone." })]) {
+      writeFileSync(join(src, ".generated", "backlog.json"), body);
+      assert.equal(planImport(root, src, at, {}).counts.total, 0, `skipped: ${body}`);
+    }
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an incomplete import rollback is carried into the summary", { skip: process.platform === "win32" || (process.getuid && process.getuid() === 0) }, () => {
+  const root = localTarget();
+  const gen = join(root, "trellis", ".generated");
+  try {
+    // Locks .generated/ before write 1, so the file written at 0 cannot be removed again.
+    outputSeams.beforeWrite = (_p, i) => { if (i === 1) { chmodSync(gen, 0o555); throw new Error("forced failure"); } };
+    const { summary } = withSeams(() => applyImport(root, legacySrc, mapping));
+    assert.match(summary.errors.join(), /forced failure/);
+    assert.ok(summary.rollback.length > 0 && summary.rollback.some((r) => /index\.md/.test(r)), summary.rollback.join("; "));
+  } finally { if (existsSync(gen)) chmodSync(gen, 0o755); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a clean rollback leaves the summary's rollback list empty", () => {
+  const root = localTarget();
+  try {
+    importSeams.afterItemCreate = () => { throw new Error("forced failure"); };
+    const { summary } = withSeams(() => applyImport(root, legacySrc, mapping));
+    assert.deepEqual(summary.rollback, []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ------------------------------------------------------ review round 10 (TRL0038)
+test("a source root spelled in another case that holds the target's .generated is refused on a case-insensitive volume", (t) => {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "trellis-case-")));
+  try {
+    mkdirSync(join(parent, "case-probe"));
+    if (!existsSync(join(parent, "CASE-PROBE"))) { t.skip("the volume is case-sensitive"); return; }
+    const root = join(parent, "trellis");
+    mkdirSync(root);
+    const { summary } = applyScaffold(root, { prefix: "TAP" }, {}, projectRoot);
+    assert.deepEqual(summary.errors, []);
+    const cfgPath = join(root, "trellis", "backlog.config.json");
+    writeFileSync(cfgPath, JSON.stringify({ ...JSON.parse(readFileSync(cfgPath, "utf8")), generatedArtifacts: "local" }, null, 2) + "\n");
+    for (const f of ["README.md", "backlog.json", "completed/index.md", "removed/index.md"]) rmSync(join(root, "trellis", f), { force: true });
+    git(root, "init", "-q", ...initRefFormat, "-b", "main");
+    writeFileSync(join(root, ".gitignore"), "trellis/.generated/\n");
+    const gen = join(root, "trellis", ".generated");
+    mkdirSync(gen);
+    writeFileSync(join(gen, "backlog.json"), JSON.stringify({ prefix: "TAP", milestones: [], nextId: null, counts: { active: 0, completed: 0, removed: 0 }, tasks: [] }));
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["."], file: "*.md" } } };
+    const before = tree(root);
+    assert.throws(() => applyImport(root, join(parent, "TRELLIS"), at), (e) => e instanceof ImportRefused && /generated folder/.test(e.message));
+    assert.deepEqual(tree(root), before);
+  } finally { rmSync(parent, { recursive: true, force: true }); }
+});
+
+test("a mapping with an extra sources key imports in local mode, the key ignored", () => {
+  const root = localTarget();
+  try {
+    const at = { ...mapping, sources: { ...mapping.sources, note: { file: "*.md" } } };
+    const { summary } = withSeams(() => applyImport(root, legacySrc, at, { dryRun: false }));
+    assert.deepEqual(summary.errors, []);
+    assert.ok(summary.imported.length > 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the import failure banner says the import did not complete and lists the rollback leftovers", () => {
+  const base = { created: [], generated: [], errors: ["boom"], rollback: [] };
+  assert.match(importFailureLines("Import into /t", "/t", base)[0], /wrote nothing/);
+  const lines = importFailureLines("Import into /t", "/t", { ...base, rollback: ["trellis/active/TAP0001.md"] });
+  assert.match(lines[0], /did not complete/);
+  assert.ok(lines.some((l) => l.includes("trellis/active/TAP0001.md")));
+});
+
+// ---------------------------------------------------- legacy cutoff (TRL0039)
+const LEGACY_ITEMS = join(fixtures, "legacy-adoption");
+
+// An initialized TAP target holding the legacy-adoption items, with or without the
+// `legacy` config. The generated files are rewritten so the target is --check-green
+// whenever its items validate.
+function legacyImportTarget({ legacy }) {
+  const root = initTarget();
+  const cfgPath = join(root, "trellis", "backlog.config.json");
+  const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+  if (legacy) cfg.legacy = { through: "TAP0004", closedBefore: "2026-11-19" };
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+  cpSync(LEGACY_ITEMS, join(root, "trellis"), { recursive: true });
+  const loaded = loadConfig(root).cfg;
+  for (const f of generateArtifacts(root, loaded, readBacklog(root, loaded)).files) writeFileSync(f.path, f.content);
+  return root;
+}
+
+test("a target with legacy imports a populated source and leaves its blank items alone", () => {
+  const root = legacyImportTarget({ legacy: true });
+  try {
+    const before = snapshot(join(root, "trellis", "completed", "tasks"));
+    const { summary } = applyImport(root, trellisSrc, loadProfile("trellis").mapping, { dryRun: false });
+    assert.deepEqual(summary.errors, []);
+    for (const [rel, text] of Object.entries(before)) {
+      assert.equal(readFileSync(join(root, "trellis", "completed", "tasks", rel), "utf8"), text, `${rel} untouched`);
+    }
+    assertCheckClean(root);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the same target without legacy is refused with the missing-field errors", () => {
+  const root = legacyImportTarget({ legacy: false });
+  try {
+    const plan = planImport(root, trellisSrc, loadProfile("trellis").mapping);
+    assert.match(plan.errors.join("\n"), /missing `summary`/);
+    assert.match(plan.errors.join("\n"), /missing `milestone`/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("legacy does not relax a source item's milestone requirement, even at a preserved id below through", () => {
+  const root = legacyImportTarget({ legacy: true });
+  const src = mkdtempSync(join(tmpdir(), "trellis-import-src-"));
+  try {
+    mkdirSync(join(src, "completed", "tasks"), { recursive: true });
+    writeFileSync(
+      join(src, "completed", "tasks", "TAP0001.md"),
+      "---\nid: TAP0001\ntitle: Old source item\nstatus: completed\npriority: Medium\neffort: 2\ncompleted_on: 2026-06-01\ndepends_on: []\nsummary: A closed source item.\n---\n\nBody.\n",
+    );
+    const plan = planImport(root, src, loadProfile("trellis").mapping, { preserveIds: true });
+    assert.ok(plan.idMap.some((m) => m.sourceId === "TAP0001" && m.newId === "TAP0001"), "the id is preserved");
+    assert.match(plan.errors.join("\n"), /missing `milestone`/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(src, { recursive: true, force: true });
   }
 });
