@@ -123,7 +123,7 @@ if (isCheck) {
 } else {
   if (local) {
     try {
-      writeArtifactFiles(files);
+      for (const w of writeArtifactFiles(files).warnings) console.warn(`warning: ${w}`);
     } catch (e) {
       console.error(`Could not write the generated files: ${e.message}`);
       process.exit(1);

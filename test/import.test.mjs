@@ -1169,6 +1169,39 @@ test("a .generated/backlog.json without the generated shape imports as an ordina
   } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("a foreign export with id and status but no title imports as an ordinary file, and counts must match the tasks", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-genjson3-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.json" } } };
+    const wrap = (tasks, counts) => JSON.stringify({ prefix: "X", milestones: [], nextId: "X0002", counts, tasks });
+    const foreign = [
+      wrap([{ id: "X0001", status: "active" }], { active: 1, completed: 0, removed: 0 }),
+      wrap([{ id: "X0001", title: "T", status: "active" }], { active: 0, completed: 0, removed: 0 }),
+      wrap([{ id: "X0001", title: "T", status: "active" }], { active: 0, completed: 1, removed: 0 }),
+    ];
+    for (const body of foreign) {
+      writeFileSync(join(src, ".generated", "backlog.json"), body);
+      assert.equal(planImport(root, src, at, {}).counts.total, 1, `imported: ${body}`);
+    }
+    writeFileSync(join(src, ".generated", "backlog.json"), wrap([{ id: "X0001", title: "T", status: "active" }], { active: 1, completed: 0, removed: 0 }));
+    assert.equal(planImport(root, src, at, {}).counts.total, 0, "a matching generated export is skipped");
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a source root symlinked to an external .generated folder still skips generated Markdown", { skip: process.platform === "win32" }, () => {
+  const ext = realpathSync(mkdtempSync(join(tmpdir(), "trellis-gensym-")));
+  const root = initTarget();
+  try {
+    mkdirSync(join(ext, ".generated"));
+    writeFileSync(join(ext, ".generated", "index.md"), `${localHead(LOCAL_TITLES.index)}\n| ID |\n`);
+    symlinkSync(join(ext, ".generated"), join(ext, "linked"));
+    const at = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["."], file: "*.md" } } };
+    assert.equal(planImport(root, join(ext, "linked"), at, {}).counts.total, 0, "the generated file is skipped through the link");
+  } finally { rmSync(ext, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("an imported item with a large body is written whole", () => {
   const root = initTarget();
   const src = realpathSync(mkdtempSync(join(tmpdir(), "trellis-bigsrc-")));
@@ -1425,7 +1458,7 @@ test("a .generated/backlog.json whose tasks lack an id and status imports as an 
       writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, ...b }));
       assert.equal(planImport(root, src, at, {}).counts.total, 1, `imported: ${JSON.stringify(b)}`);
     }
-    writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, tasks: [{ id: "X1", status: "active" }] }));
+    writeFileSync(join(src, ".generated", "backlog.json"), JSON.stringify({ ...base, counts: { active: 1, completed: 0, removed: 0 }, tasks: [{ id: "X1", title: "T", status: "active" }] }));
     assert.equal(planImport(root, src, at, {}).counts.total, 0, "the real generated shape is skipped");
   } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });

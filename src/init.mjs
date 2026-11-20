@@ -601,7 +601,7 @@ export function applyScaffold(targetRoot, opts = {}, { dryRun = false, deferGene
         summary.errors.push(`generate failed: ${errors.join("; ")}`);
       } else {
         try {
-          if (local) writeArtifactFiles(files);
+          if (local) summary.warnings.push(...writeArtifactFiles(files).warnings);
           else for (const f of files) writeFileSync(f.path, f.content);
           summary.generated.push(...GENERATED);
         } catch (e) {

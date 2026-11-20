@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ledgerTest, initRefFormat } from "./git-support.mjs";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, renameSync, existsSync, symlinkSync, realpathSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, renameSync, statSync, existsSync, symlinkSync, realpathSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -254,10 +254,10 @@ test("writeArtifactFiles makes .generated/, and a failure removes the one it cre
       assert.equal(existsSync(c.dir), false, `failure at write ${n} leaves no .generated/`);
     }
     testSeams.beforeWrite = null;
-    const changed = writeArtifactFiles(files);
+    const { changed } = writeArtifactFiles(files);
     assert.equal(changed.length, 4);
     assert.equal(readFileSync(join(c.dir, "removed.md"), "utf8"), "content 2\n");
-    assert.deepEqual(writeArtifactFiles(files), [], "an identical rerun changes nothing");
+    assert.deepEqual(writeArtifactFiles(files).changed, [], "an identical rerun changes nothing");
   } finally { testSeams.beforeWrite = null; c.cleanup(); }
 });
 
@@ -447,4 +447,57 @@ test("a failed write whose staging cleanup also fails names the staging file", (
     // A numeric body makes the write itself fail.
     assert.throws(() => installStaged([{ path: join(c.dir, "index.md"), content: 42 }]), (e) => /could not remove the staging file .*\.tmp: stuck/.test(e.message) && e.failed.some((f) => /\.tmp is still there/.test(f)));
   } finally { testSeams.unlink = null; c.cleanup(); }
+});
+
+// ------------------------------------------------------- review round 7 (TRL0038)
+test("a nested directory git refuses to inspect refuses under a non-git target, and an outside answer still skips", { skip: process.platform === "win32" }, () => {
+  const c = localRepo({ inGit: false, tasksDir: "planning" });
+  try {
+    mkdirSync(join(c.root, "planning"), { recursive: true });
+    const nested = join(c.root, "planning");
+    withGitShim("--show-prefix", `    case "$*" in *"-C ${nested} "*) echo "fatal: detected dubious ownership in repository at '${nested}'" >&2; exit 128;; esac`, () => {
+      refused(() => verifyOutputPaths(c.root, c.cfg), /dubious ownership/);
+    });
+    assert.equal(verifyOutputPaths(c.root, c.cfg).inside, false);
+  } finally { c.cleanup(); }
+});
+
+test("the destination is never absent while a file is installed", () => {
+  const c = localRepo({ inGit: false });
+  try {
+    mkdirSync(c.dir, { recursive: true });
+    const dest = join(c.dir, "index.md");
+    writeFileSync(dest, "old\n");
+    chmodSync(dest, 0o640);
+    const seen = [];
+    testSeams.rename = (from, to) => {
+      seen.push(readFileSync(dest, "utf8"));
+      renameSync(from, to);
+    };
+    installStaged([{ path: dest, content: "new\n" }]);
+    assert.deepEqual(seen, ["old\n"], "a reader before the final rename sees the old file");
+    assert.equal(readFileSync(dest, "utf8"), "new\n");
+    assert.deepEqual(readdirSync(c.dir), ["index.md"], "the backup is removed");
+    if (process.platform !== "win32") assert.equal(statSync(dest).mode & 0o777, 0o640);
+  } finally { testSeams.rename = null; c.cleanup(); }
+});
+
+test("a backup that cannot be removed after the install is returned as a warning", () => {
+  const c = localRepo({ inGit: false });
+  try {
+    mkdirSync(c.dir, { recursive: true });
+    const dest = join(c.dir, "index.md");
+    writeFileSync(dest, "old\n");
+    // The seam makes the first backup removal fail by replacing it with a non-empty directory.
+    testSeams.rename = (from, to) => {
+      renameSync(from, to);
+      for (const n of readdirSync(c.dir)) {
+        if (n.endsWith(".bak")) { rmSync(join(c.dir, n)); mkdirSync(join(c.dir, n)); writeFileSync(join(c.dir, n, "x"), "x"); }
+      }
+    };
+    const out = writeArtifactFiles([{ path: dest, content: "new\n" }]);
+    assert.deepEqual(out.changed, [dest]);
+    assert.equal(out.warnings.length, 1);
+    assert.match(out.warnings[0], /could not remove the backup .*\.bak/);
+  } finally { testSeams.rename = null; c.cleanup(); }
 });

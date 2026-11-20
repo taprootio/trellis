@@ -6,7 +6,7 @@
 // writer and the ignore-line formatter. It is kept out of the core
 // (src/backlog.mjs) so that `check` never depends on git (SPEC §8.3).
 
-import { closeSync, existsSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants, copyFileSync, existsSync, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join, normalize, posix as posixPath, relative, sep } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -25,7 +25,7 @@ export class OutputRefused extends LedgerError {
 // Test seams: `beforeWrite` runs before each file is written (path and index);
 // `rename` replaces the rename used to install files and back them up; `unlink` replaces
 // the removal of a staging file after a failed write.
-export const testSeams = { beforeWrite: null, rename: null, unlink: null };
+export const testSeams = { beforeWrite: null, rename: null, unlink: null, copy: null };
 
 const firstLine = (s) => String(s || "").trim().split("\n")[0] || "git error";
 const posix = (rel) => rel.split(sep).join("/");
@@ -110,8 +110,10 @@ export function verifyOutputPaths(repoRoot, cfg) {
     for (const e of outputs) {
       let dir = dirname(e.path);
       while (!existsSync(dir)) dir = dirname(dir);
-      const t = probe(dir, ["rev-parse", "--show-toplevel"]);
-      if (t.status === 0) {
+      // Classify like the target: only a confirmed outside answer skips; any other failure
+      // (ownership, permission, an odd answer) refuses.
+      if (discoverGit(dir) === "inside") {
+        const t = probe(dir, ["rev-parse", "--show-toplevel"]);
         throw new OutputRefused(`${posix(relative(repoRoot, dir)) || "."} is inside a git work tree (${t.stdout.replace(/\n$/, "")}) although the target is not one, so git cannot say whether ${posix(e.rel)} is ignored. Remove the nested checkout or move the backlog root out of it`);
       }
     }
@@ -273,8 +275,8 @@ export function stageFile(dest, ext, content, mode) {
 const move = (from, to) => (testSeams.rename || renameSync)(from, to);
 
 // Installs files through staged copies and backups. Each replacement is staged beside its
-// destination, the original is renamed to a unique backup, and the stage is renamed into
-// place. A failure renames every backup back and removes files that had no original. A
+// destination, the original is copied to a unique backup, and the stage is renamed over
+// the destination, so the destination is never absent. A failure renames every backup back over the destination and removes files that had no original. A
 // backup is recorded only after its rename succeeds. One that cannot go back is kept and
 // named in the thrown error. `entries` are `{ path, content, skip? }`; `hooks.before(path, i)`
 // runs ahead of each entry and `hooks.after()` once all are in. Returns the installed paths
@@ -292,8 +294,15 @@ export function installStaged(entries, hooks = {}, failureText = "could not rest
       if (hooks.before) hooks.before(p.entry.path, i);
       if (p.entry.skip) return;
       if (existsSync(p.entry.path)) {
+        // Copy, never move: the destination stays in place so a reader never sees it absent.
         const backup = join(dirname(p.entry.path), `.${basename(p.entry.path)}.${process.pid}-${randomBytes(6).toString("hex")}.bak`);
-        move(p.entry.path, backup);
+        try {
+          (testSeams.copy || copyFileSync)(p.entry.path, backup, constants.COPYFILE_EXCL);
+          chmodSync(backup, statSync(p.entry.path).mode & 0o7777);
+        } catch (ce) {
+          try { rmSync(backup, { force: true }); } catch { /* the copy error is the one to report */ }
+          throw ce;
+        }
         p.backup = backup;
         installed.push(p);
       }
@@ -344,13 +353,14 @@ export function installStaged(entries, hooks = {}, failureText = "could not rest
 // Writes each changed file, making its folder first, through `installStaged`. A failure
 // restores changed files, removes new ones, then removes the folders this call created
 // when they are empty, so a failed run leaves the tree as it was. Returns the absolute
-// paths it changed.
+// paths it changed and any backup it could not remove, as `{ changed, warnings }`.
 export function writeArtifactFiles(files) {
   const created = [];
   try {
     for (const dir of new Set(files.map((f) => dirname(f.path)))) makeDirs(dir, created);
     const entries = files.map((f) => ({ path: f.path, content: f.content, skip: existsSync(f.path) && readFileSync(f.path, "utf8") === f.content }));
-    return installStaged(entries, { before: (path, i) => { if (testSeams.beforeWrite) testSeams.beforeWrite(path, i); } }).installed;
+    const out = installStaged(entries, { before: (path, i) => { if (testSeams.beforeWrite) testSeams.beforeWrite(path, i); } });
+    return { changed: out.installed, warnings: out.leftover };
   } catch (e) {
     removeCreatedDirs(created);
     throw e;

@@ -246,8 +246,8 @@ function writeArtifacts(repoRoot, cfg, data, hooks = {}, pv = ledgerPreview(repo
   if (isLedgerMode(cfg)) return writeArtifactsStaged(repoRoot, files, next, hooks);
   // Local mode uses the shared staged writer, which rolls back a failed write.
   if (isLocalMode(cfg)) {
-    const changed = writeArtifactFiles(files).map((path) => relative(repoRoot, path));
-    return { changed, nextId: next };
+    const out = writeArtifactFiles(files);
+    return { changed: out.changed.map((path) => relative(repoRoot, path)), nextId: next, warnings: out.warnings };
   }
   // Committed mode keeps its original write, which follows a symlinked artifact.
   // Snapshot prior bytes first so a mid-loop write failure (ENOSPC/EACCES) restores
@@ -406,7 +406,7 @@ export function regenerateOp(repoRoot) {
   const { changed, nextId: next, warnings } = writeArtifacts(repoRoot, cfg, data, {}, pv);
   const counts = backlogObject(cfg, data).counts;
   if (pv) return { changed, nextId: pv.nextId, note: pv.note, counts, ...(warnings && warnings.length ? { warnings } : {}) };
-  return { changed, nextId: next, counts };
+  return { changed, nextId: next, counts, ...(warnings && warnings.length ? { warnings } : {}) };
 }
 
 // claim_id — claim the next id from the local id ledger (ledger mode only). The id

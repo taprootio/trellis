@@ -543,17 +543,14 @@ test("a file that is not valid UTF-8 refuses the switch before any edit, naming 
   }
 });
 
-test("a failed original-to-backup rename records no backup, so the restore reports a clean rollback", () => {
+test("a failed original-to-backup copy records no backup, so the restore reports a clean rollback", () => {
   const f = fixture();
   try {
     const before = tree(f.root);
-    outputSeams.rename = (from, to) => {
-      if (to.endsWith(".bak")) throw new Error("rename refused");
-      renameSync(from, to);
-    };
-    assert.throws(() => switchToLocal(f.root), /every edited file was restored: rename refused/);
+    outputSeams.copy = () => { throw new Error("copy refused"); };
+    assert.throws(() => switchToLocal(f.root), /every edited file was restored: copy refused/);
     assert.deepEqual(tree(f.root), before);
-  } finally { outputSeams.rename = null; f.cleanup(); }
+  } finally { outputSeams.copy = null; f.cleanup(); }
 });
 
 // ------------------------------------------------------------ round 5

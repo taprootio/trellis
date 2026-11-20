@@ -336,7 +336,9 @@ function hasBacklogShape(abs) {
       && !!counts && typeof counts === "object" && !Array.isArray(counts)
       && ["active", "completed", "removed"].every((k) => Number.isInteger(counts[k]) && counts[k] >= 0)
       && Array.isArray(obj.tasks)
-      && obj.tasks.every((t) => !!t && typeof t === "object" && !Array.isArray(t) && typeof t.id === "string" && typeof t.status === "string");
+      && obj.tasks.every((t) => !!t && typeof t === "object" && !Array.isArray(t) && typeof t.id === "string" && typeof t.title === "string" && typeof t.status === "string")
+      && obj.tasks.length === ["active", "completed", "removed"].reduce((n, k) => n + counts[k], 0)
+      && ["active", "completed", "removed"].every((k) => obj.tasks.filter((t) => t.status === k).length === counts[k]);
   } catch { return false; }
 }
 function isGeneratedArtifact(rel, abs) {
@@ -344,9 +346,14 @@ function isGeneratedArtifact(rel, abs) {
   if (COMMITTED_ARTIFACTS.has(parts.join("/"))) return true;
   // The folder is the source file's own parent, not a mapping-relative segment: a source
   // root that is itself `.generated` (dirs ["."]) has no such segment in `rel`.
-  const inGenerated = basename(dirname(resolve(abs))) === GENERATED_DIR;
-  if (parts[parts.length - 1] === "backlog.json" && inGenerated) return hasBacklogShape(abs);
-  const head = LOCAL_HEADS.get(parts[parts.length - 1]);
+  // Resolve symlinks first: a source root linked to an external `.generated` folder is
+  // still a generated folder.
+  let real;
+  try { real = realpathSync(abs); } catch { real = resolve(abs); }
+  const inGenerated = basename(dirname(real)) === GENERATED_DIR;
+  const name = basename(real);
+  if (name === "backlog.json" && inGenerated) return hasBacklogShape(abs);
+  const head = LOCAL_HEADS.get(name);
   if (!head || !inGenerated) return false;
   try { return readFileSync(abs, "utf8").replace(/\r\n/g, "\n").startsWith(head); } catch { return false; }
 }
@@ -840,7 +847,7 @@ export function applyImport(targetRoot, sourceRoot, mapping, { dryRun = false, g
     // Local mode runs in scan mode only, so the override is `undefined` (the scan value).
     const { files, errors } = generateArtifacts(targetRoot, plan.cfg, data, { nextIdOverride: local ? previewNextId(targetRoot, plan.cfg) : undefined });
     if (errors.length) throw new Error(`generate failed: ${errors.join("; ")}`);
-    if (local) writeArtifactFiles(files);
+    if (local) summary.warnings.push(...writeArtifactFiles(files).warnings);
     else for (const f of files) writeFileSync(f.path, f.content);
 
     summary.imported = plan.items.map((i) => i.newId);
