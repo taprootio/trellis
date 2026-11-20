@@ -159,17 +159,21 @@ function requireLedgerMode(cfg) {
 }
 
 const CONTROL = /[\x00-\x1f\x7f]/;
+// Every claim rewrites the whole claims.tsv, so titles are kept short.
+export const MAX_TITLE_LENGTH = 200;
 
 // Titles are one line with no tabs or control characters, so they cannot forge a row.
 export function ledgerTitle(value) {
   if (typeof value !== "string" || !value.trim()) throw refuse("`title` is required", "invalid_request");
   if (CONTROL.test(value)) throw refuse("`title` must be a single line with no tabs or control characters", "invalid_request");
-  return value.trim();
+  const t = value.trim();
+  if (t.length > MAX_TITLE_LENGTH) throw refuse(`\`title\` must be at most ${MAX_TITLE_LENGTH} characters`, "invalid_request");
+  return t;
 }
 
 // Titles read from item files are cleaned instead of refused.
 function cleanTitle(value) {
-  const t = String(value ?? "").replace(/[\x00-\x1f\x7f]+/g, " ").trim();
+  const t = String(value ?? "").replace(/[\x00-\x1f\x7f]+/g, " ").trim().slice(0, MAX_TITLE_LENGTH).trim();
   return t || "-";
 }
 
@@ -470,6 +474,7 @@ const rowText = (r) => `${r.id}\t${r.date}\t${r.kind}\t${r.branch}\t${r.title}\n
 // just before the swap, so a test can make a competing writer win.
 function appendRow(repoRoot, cfg, makeRow, { beforeUpdate, message }) {
   const ref = refOf(cfg);
+  let lastError = "";
   for (let attempt = 1; attempt <= MAX_CLAIM_ATTEMPTS; attempt++) {
     const ledger = requireLedger(repoRoot, cfg);
     const row = makeRow(ledger);
@@ -477,13 +482,13 @@ function appendRow(repoRoot, cfg, makeRow, { beforeUpdate, message }) {
     if (beforeUpdate) beforeUpdate({ attempt, ref });
     const r = moveRef(repoRoot, ref, next, ledger.tip, `${message} ${row.id}`);
     if (r.status === 0) return { row, tip: next, attempts: attempt };
-    // Lost the swap only if the tip moved; otherwise it is a real git failure.
+    // A competing writer may have moved the tip, or may still hold <ref>.lock with the
+    // tip unchanged; both are retried. Only a ledger that vanished or broke stops now.
+    lastError = firstLine(r.stderr);
     const again = readLedger(repoRoot, cfg);
-    if (!again.tip || again.tip === ledger.tip) {
-      throw new LedgerError(`git update-ref ${ref} failed: ${firstLine(r.stderr)}`);
-    }
+    if (!again.tip) throw new LedgerError(`git update-ref ${ref} failed: ${lastError}`);
   }
-  throw new LedgerError(`could not update ${ref} after ${MAX_CLAIM_ATTEMPTS} attempts; other writers kept winning`, "conflict");
+  throw new LedgerError(`could not update ${ref} after ${MAX_CLAIM_ATTEMPTS} attempts; other writers kept winning (last error: ${lastError})`, "conflict");
 }
 
 // Claims the next id. Returns `{id, tip, attempts}`.

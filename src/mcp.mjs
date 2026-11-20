@@ -368,11 +368,11 @@ export function validateOp(repoRoot) {
 // than generating from bad input.
 export function regenerateOp(repoRoot) {
   const { cfg, data } = loadClean(repoRoot);
-  const { changed, nextId: next } = writeArtifacts(repoRoot, cfg, data);
+  const { changed, nextId: next, warnings } = writeArtifacts(repoRoot, cfg, data);
   const counts = backlogObject(cfg, data).counts;
   // The files on disk keep the scan value; only the reply carries the ledger preview.
   const pv = ledgerPreview(repoRoot, cfg);
-  if (pv) return { changed, nextId: pv.nextId, note: pv.note, counts };
+  if (pv) return { changed, nextId: pv.nextId, note: pv.note, counts, ...(warnings && warnings.length ? { warnings } : {}) };
   return { changed, nextId: next, counts };
 }
 
@@ -421,6 +421,12 @@ export function createTask(repoRoot, args = {}, hooks = {}) {
   const owner = resolveOwnerArg(args.owner, data.roster);
   const collaborators = resolveCollaboratorsArg(args.collaborators, data.roster);
 
+  // A claimed id is never released, so in ledger mode every input the re-read would
+  // reject is checked before claiming, not after.
+  if (ledgerMode) {
+    if (!cfg.milestones.includes(milestone)) throw new TrellisError(`milestone must be one of ${cfg.milestones.join(", ")}`, "invalid_request");
+    if (!cfg.priorities.includes(priority)) throw new TrellisError(`priority must be one of ${cfg.priorities.join(", ")}`, "invalid_request");
+  }
   // Ledger mode claims the id, and never falls back to the scan: a fresh clone
   // would hand out an id another worktree holds. The claim is never undone.
   const id = ledgerMode ? ledgerCall(() => claim(repoRoot, cfg, { title })).id : nextId(data.ids, cfg);

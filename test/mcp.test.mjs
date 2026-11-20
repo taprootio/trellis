@@ -587,6 +587,16 @@ test("claim_id refuses in scan mode and with a tab in the title", () => {
   } finally { d.cleanup(); }
 });
 
+test("create_task in ledger mode checks milestone and priority before claiming", () => {
+  const c = ledgerRepo();
+  try {
+    const t = refTip(c.root);
+    throwsTrellis(() => createTask(c.root, { ...VALID, milestone: "Nope" }), "invalid_request");
+    throwsTrellis(() => createTask(c.root, { ...VALID, priority: "Urgent" }), "invalid_request");
+    assert.equal(refTip(c.root), t, "no id was claimed");
+  } finally { c.cleanup(); }
+});
+
 test("create_task in ledger mode fails with the seed message when the ref is absent, and never scans", () => {
   const c = ledgerRepo({ seeded: false });
   try {

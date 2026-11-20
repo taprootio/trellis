@@ -141,6 +141,25 @@ test("a lost compare-and-swap retries (beforeUpdate)", () => {
   });
 });
 
+test("a claim that hits a held ref lock with the tip unchanged retries", () => {
+  withClone(({ root, cfg }) => {
+    seed(root, cfg);
+    const common = git(root, "rev-parse", "--path-format=absolute", "--git-common-dir");
+    const lock = join(common, "refs", "trellis", "ids.lock");
+    const mine = claim(root, cfg, {
+      title: "mine",
+      // Attempt 1: another writer holds the lock, so update-ref fails with the tip
+      // unchanged. Attempt 2: the lock is gone and the claim lands.
+      beforeUpdate: ({ attempt }) => {
+        if (attempt === 1) writeFileSync(lock, "");
+        else rmSync(lock, { force: true });
+      },
+    });
+    assert.equal(mine.attempts, 2);
+    assert.equal(mine.id, "DEMO0001");
+  });
+});
+
 test("retries run out with exit 1 when every attempt loses", () => {
   withClone(({ root, cfg, lane }) => {
     const other = lane("lane");
@@ -380,7 +399,7 @@ test("claim exits 2 in scan mode, and refuses a title that could forge a row", (
     seed(root, cfg);
     const t = tip(root);
     assertRefused(() => claim(root, { ...cfg, idAllocation: "scan" }, { title: "x" }), "invalid_request");
-    for (const title of ["a\nb", "a\tb", "a\rb", "a\x00b", "", "   ", undefined]) {
+    for (const title of ["a\nb", "a\tb", "a\rb", "a\x00b", "", "   ", undefined, "x".repeat(201)]) {
       assertRefused(() => claim(root, cfg, { title }), "invalid_request");
     }
     assert.equal(tip(root), t);
