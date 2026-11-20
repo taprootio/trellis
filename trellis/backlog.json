@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0042",
   "counts": {
-    "active": 10,
-    "completed": 31,
+    "active": 9,
+    "completed": 32,
     "removed": 0
   },
   "tasks": [
@@ -130,22 +130,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Once the ledger, local-artifact, legacy-archive and good-agent-aware init changes ship in 0.3.0, onboard ../taproot in place with only the published package and record every friction point."
-    },
-    {
-      "id": "TRL0039",
-      "title": "Accept closed items that predate a repo's adoption",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "High",
-      "effort": 2,
-      "effortLabel": "Goldfish",
-      "effortEmoji": "🐠",
-      "depends_on": [
-        "TRL0038"
-      ],
-      "owner": "jereme",
-      "collaborators": [],
-      "summary": "Add an optional legacy cutoff (an inclusive id and an exclusive close date) under which completed and removed items may omit the descriptive metadata (summary, milestone, priority, effort), so a long-lived backlog can adopt Trellis in place without inventing history while new closures stay strict."
     },
     {
       "id": "TRL0040",
@@ -702,6 +686,23 @@
       "owner": "jereme",
       "collaborators": [],
       "summary": "Add an opt-in mode in which the generated index, completed and removed tables and backlog.json are written to an ignored folder instead of being committed, so parallel branches stop conflicting on them; local `check` validates config, roster and items, scans for leftover markers, and skips freshness comparisons.",
+      "completed_on": "2026-11-20"
+    },
+    {
+      "id": "TRL0039",
+      "title": "Accept closed items that predate a repo's adoption",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 2,
+      "effortLabel": "Goldfish",
+      "effortEmoji": "🐠",
+      "depends_on": [
+        "TRL0038"
+      ],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Add an optional legacy cutoff (an inclusive id and an exclusive close date) under which completed and removed items may omit the descriptive metadata (summary, milestone, priority, effort), so a long-lived backlog can adopt Trellis in place without inventing history while new closures stay strict.",
       "completed_on": "2026-11-20"
     }
   ]

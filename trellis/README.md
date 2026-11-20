@@ -14,7 +14,6 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 | --- | --- | --- | --- | --- |
 | [TRL0005](active/TRL0005.md) | Build the local viewer (`trellis serve`) | jereme | High | Swordfish · 8 |
 | [TRL0011](active/TRL0011.md) | Test suite and CI for CLI and MCP server |  | High | Tuna · 5 |
-| [TRL0039](active/TRL0039.md) | Accept closed items that predate a repo's adoption | jereme | High | 🐠 Goldfish · 2 |
 | [TRL0040](active/TRL0040.md) | Onboard a repo that already runs good-agent and its own CI | jereme | High | 🐡 Trout · 3 |
 | [TRL0041](active/TRL0041.md) | Viewer — worktree overlay and open ledger claims | jereme | High | Swordfish · 8 |
 | [TRL0019](active/TRL0019.md) | MCP server HTTP transport (port/host) + per-repo resource addressing |  | Medium | Tuna · 5 |
