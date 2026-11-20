@@ -8,8 +8,8 @@
   ],
   "nextId": "TRL0042",
   "counts": {
-    "active": 11,
-    "completed": 30,
+    "active": 10,
+    "completed": 31,
     "removed": 0
   },
   "tasks": [
@@ -130,22 +130,6 @@
       "owner": null,
       "collaborators": [],
       "summary": "Once the ledger, local-artifact, legacy-archive and good-agent-aware init changes ship in 0.3.0, onboard ../taproot in place with only the published package and record every friction point."
-    },
-    {
-      "id": "TRL0038",
-      "title": "Keep generated backlog artifacts out of git",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "High",
-      "effort": 5,
-      "effortLabel": "Tuna",
-      "effortImage": "assets/effort/tuna.svg",
-      "depends_on": [
-        "TRL0037"
-      ],
-      "owner": "jereme",
-      "collaborators": [],
-      "summary": "Add an opt-in mode in which the generated index, completed and removed tables and backlog.json are written to an ignored folder instead of being committed, so parallel branches stop conflicting on them; local `check` validates config, roster and items, scans for leftover markers, and skips freshness comparisons."
     },
     {
       "id": "TRL0039",
@@ -701,6 +685,23 @@
       "owner": "jereme",
       "collaborators": [],
       "summary": "Add an opt-in id ledger on a local orphan branch that every worktree of a clone shares, so `trellis claim` and the MCP create path hand out each id exactly once even when several sessions write stories at the same time.",
+      "completed_on": "2026-11-20"
+    },
+    {
+      "id": "TRL0038",
+      "title": "Keep generated backlog artifacts out of git",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 5,
+      "effortLabel": "Tuna",
+      "effortImage": "assets/effort/tuna.svg",
+      "depends_on": [
+        "TRL0037"
+      ],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "Add an opt-in mode in which the generated index, completed and removed tables and backlog.json are written to an ignored folder instead of being committed, so parallel branches stop conflicting on them; local `check` validates config, roster and items, scans for leftover markers, and skips freshness comparisons.",
       "completed_on": "2026-11-20"
     }
   ]
