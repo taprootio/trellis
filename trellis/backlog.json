@@ -24,7 +24,8 @@
       "effortEmoji": "🦈",
       "depends_on": [
         "TRL0001",
-        "TRL0037"
+        "TRL0037",
+        "TRL0040"
       ],
       "owner": "jereme",
       "collaborators": [],
