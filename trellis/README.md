@@ -12,7 +12,7 @@ per-item files in `active/`, then run `npm run backlog:readme`.
 
 | ID | Title | Owner | Priority | Effort |
 | --- | --- | --- | --- | --- |
-| [TRL0005](active/TRL0005.md) | Build the local viewer (`trellis serve`) | jereme | High | Swordfish · 8 |
+| [TRL0005](active/TRL0005.md) | Build the local viewer (`trellis serve`) | jereme | High | 🦈 Shark · 13 |
 | [TRL0011](active/TRL0011.md) | Test suite and CI for CLI and MCP server |  | High | Tuna · 5 |
 | [TRL0037](active/TRL0037.md) | Claim task ids from a local git ledger | jereme | High | Tuna · 5 |
 | [TRL0038](active/TRL0038.md) | Keep generated backlog artifacts out of git | jereme | High | Tuna · 5 |

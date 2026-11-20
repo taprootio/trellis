@@ -19,8 +19,9 @@
       "status": "active",
       "milestone": "v1",
       "priority": "High",
-      "effort": 8,
-      "effortLabel": "Swordfish",
+      "effort": 13,
+      "effortLabel": "Shark",
+      "effortEmoji": "🦈",
       "depends_on": [
         "TRL0001",
         "TRL0037"
@@ -155,7 +156,9 @@
       "effort": 5,
       "effortLabel": "Tuna",
       "effortImage": "assets/effort/tuna.svg",
-      "depends_on": [],
+      "depends_on": [
+        "TRL0037"
+      ],
       "owner": "jereme",
       "collaborators": [],
       "summary": "Add an opt-in mode in which the generated index, completed and removed tables and backlog.json are written to an ignored folder instead of being committed, so parallel branches stop conflicting on them and `check` only validates the item files."
@@ -169,7 +172,9 @@
       "effort": 2,
       "effortLabel": "Goldfish",
       "effortEmoji": "🐠",
-      "depends_on": [],
+      "depends_on": [
+        "TRL0038"
+      ],
       "owner": "jereme",
       "collaborators": [],
       "summary": "Add an optional id cutoff below which completed and removed items may omit the descriptive metadata (summary, milestone, priority, effort), so a long-lived backlog can adopt Trellis without inventing history while new closures stay strict."
@@ -183,7 +188,11 @@
       "effort": 3,
       "effortLabel": "Trout",
       "effortEmoji": "🐡",
-      "depends_on": [],
+      "depends_on": [
+        "TRL0037",
+        "TRL0038",
+        "TRL0039"
+      ],
       "owner": "jereme",
       "collaborators": [],
       "summary": "Let `trellis init` skip the parts an established repo already owns (CI workflow, PR template, process playbooks) and write a compact AGENTS.md block that defers the loops to good-agent's skills, refusing to push AGENTS.md past Codex's 32 KiB budget."
