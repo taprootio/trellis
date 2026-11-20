@@ -621,7 +621,8 @@ export function planScaffold(targetRoot, opts = {}, sourceRoot) {
   const agentsAbs = join(targetRoot, "AGENTS.md");
   const parts = { ledger: !!keptCfg && keptCfg.idAllocation === "ledger", skip: omitted };
   const mode = local ? "local" : "committed";
-  const block = byDetection ? compactBlock(o, root, mode, parts) : agentsBlock(o, root, mode, parts);
+  // Nothing is rendered under `--skip agents`, so a huge id width costs nothing there.
+  const block = omit.has("AGENTS.md") ? null : byDetection ? compactBlock(o, root, mode, parts) : agentsBlock(o, root, mode, parts);
   // A result over Codex's byte budget is printed for the owner instead of written.
   const planAgents = (content, action) => {
     const bytesNeeded = Buffer.byteLength(content);

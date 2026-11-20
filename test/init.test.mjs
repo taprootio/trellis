@@ -2221,3 +2221,11 @@ test("applyScaffold refuses skip playbooks with withPlaybooks and writes nothing
     assert.deepEqual(readdirSync(root), []);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("--skip agents renders no block, so a huge id width still dry-runs", () => {
+  const root = tempRepo();
+  try {
+    const r = cliRun(root, ["--prefix", "DEMO", "--id-width", "1000000000", "--skip", "agents", "--dry-run"]);
+    assert.equal(r.status, 0, r.stderr.slice(0, 300));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

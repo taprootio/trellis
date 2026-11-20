@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, symlinkSync, readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -555,5 +555,29 @@ test("a directory at .github/pull_request_template.md leaves the template resour
     mkdirSync(join(root, ".github", "pull_request_template.md"));
     assert.equal(listResources(root).find((r) => r.uri === "trellis://template/pull-request").available, false);
     assert.throws(() => readResource(root, "trellis://template/pull-request"), (e) => e instanceof TrellisError && e.code === "not_found");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("the PR template lookup sorts candidates by code unit, so directory order never decides", () => {
+  const root = bareRepo({ template: false });
+  try {
+    writeFileSync(join(root, ".github", "pull_request_template.txt"), "txt\n");
+    writeFileSync(join(root, ".github", "Pull_Request_Template.md"), "upper\n");
+    assert.ok(!readdirSync(join(root, ".github")).includes("pull_request_template.md"), "the exact lowercase name is absent from the listing");
+    assert.ok(textOf(root, "pr-draft").includes(".github/Pull_Request_Template.md"));
+    assert.equal(readResource(root, "trellis://template/pull-request").text, "upper\n");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a directory at a playbook path hands off instead of failing, and AGENTS.md as a directory is not pointed at", () => {
+  const root = freshRepo();
+  try {
+    rmSync(join(root, "trellis", "playbooks", "code-review.md"));
+    mkdirSync(join(root, "trellis", "playbooks", "code-review.md"));
+    assert.equal(textOf(root, "code-review").split("\n")[0], PROMPT_TOKENS.handoff);
+    rmSync(join(root, "AGENTS.md"));
+    mkdirSync(join(root, "AGENTS.md"));
+    const text = textOf(root, "work-task");
+    assert.ok(!text.slice(0, text.indexOf(PLAYBOOK_SEPARATOR)).includes("trellis://conventions"));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

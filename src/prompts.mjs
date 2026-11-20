@@ -80,12 +80,12 @@ function resourceByUri(uri) {
   return r;
 }
 
-// list_resources — the catalog, each flagged `available` iff its file exists in
-// this repo. (SPEC.md, for one, is absent in onboarded repos until packaging
-// bundles a canonical copy — TRL0010.)
 // A resource is served only from a regular file, so a directory at its path is unavailable.
 const isFile = (abs) => { try { return statSync(abs).isFile(); } catch { return false; } };
 
+// list_resources — the catalog, each flagged `available` iff it is a regular file in
+// this repo. (SPEC.md, for one, is absent in onboarded repos until packaging
+// bundles a canonical copy — TRL0010.)
 export function listResources(repoRoot) {
   return RESOURCES.map((r) => {
     const { uri, name, title, description, mimeType, rel } = resolveResource(repoRoot, r);
@@ -153,7 +153,7 @@ function conventionsPreamble(repoRoot, cfg, cfgErrors) {
     : `ids are \`${cfg.idPrefix}\` + ${cfg.idWidth} digits; milestones are ${cfg.milestones.join(" → ")}; priorities are ${cfg.priorities.join(", ")}`;
   // Without an AGENTS.md the conventions resource is unavailable, so point at the repo's own
   // instructions and the published spec instead.
-  if (!existsSync(join(repoRoot, "AGENTS.md"))) {
+  if (!isFile(join(repoRoot, "AGENTS.md"))) {
     return "Ground in this repo's own conventions first: follow its own canonical instructions "
       + "(such as a CONTRIBUTING file) and the Trellis spec, https://github.com/taprootio/trellis/blob/main/SPEC.md. "
       + `The repo's conventions govern — ${vocab}.`;
@@ -271,7 +271,7 @@ export function buildPrompt(repoRoot, name, args = {}) {
   const { cfg, errors: cfgErrors } = loadConfig(repoRoot);
 
   const abs = join(repoRoot, p.playbook);
-  if (!existsSync(abs)) {
+  if (!isFile(abs)) {
     const text = missingPlaybook(repoRoot, p, args, cfg, cfgErrors);
     return { description: p.description, messages: [{ role: "user", content: { type: "text", text } }] };
   }
