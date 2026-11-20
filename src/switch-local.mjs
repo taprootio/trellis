@@ -4,14 +4,16 @@
 // the removal commands this prints for the legacy generated files.
 //
 // Every check and every new file is computed in memory first. Then the edited files
-// are written (the config last), and any failure restores them all, so a rerun starts
-// clean and a finished switch is a no-op.
+// are installed through staged files and backups (the config last), and any failure puts
+// them all back, so a rerun starts clean and a finished switch is a no-op.
 
-import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { existsSync, lstatSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { DEFAULT_TASKS_DIR, GENERATED_DIR, MARKERS, SPEC_VERSION, artifactSet, loadConfig, paths } from "./backlog.mjs";
 import { AGENTS_MARKERS, artifactBullet, completedSkeleton, removedSkeleton } from "./init.mjs";
-import { OutputRefused, checkOutputFiles, discoverGit, gitPrefix, ignoreLineFor, probe, verifyOutputPaths } from "./local-output.mjs";
+import { stageFile } from "./mcp.mjs";
+import { OutputRefused, checkOutputFiles, discoverGit, foldsCase, gitPrefix, ignoreLineFor, probe, verifyOutputPaths } from "./local-output.mjs";
 
 // Test seam: runs before each file write (with its path and index) and after the last one.
 export const testSeams = { beforeWrite: null, afterWrites: null };
@@ -63,13 +65,14 @@ function stripBlock(text, [begin, end]) {
   return text.slice(0, from) + text.slice(to);
 }
 
-// True when `needle` fills whole lines of `text`: it starts a line and ends one.
-function hasWholeLines(text, needle) {
+// The index of the first copy of `needle` that fills whole lines of `text` (it starts a
+// line and ends one), or -1. A customized copy earlier in the text is not a match.
+function findWholeLines(text, needle) {
   for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + 1)) {
     const after = text[i + needle.length];
-    if ((i === 0 || text[i - 1] === "\n") && (after === undefined || after === "\n")) return true;
+    if ((i === 0 || text[i - 1] === "\n") && (after === undefined || after === "\n")) return i;
   }
-  return false;
+  return -1;
 }
 
 // Checks that a file holds either no generated marker or exactly one well-formed pair
@@ -138,7 +141,10 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
     refuse(`${unignored.map(posix).join(", ")} ${unignored.length > 1 ? "are" : "is"} not ignored by git. Add this line to the .gitignore at the repository root, then run again:\n  ${ignoreLineFor(cfg.tasksDir, gitPrefix(repoRoot))}`);
   }
   const dirRel = rel(set.dir);
-  const underGenerated = git(repoRoot, ["ls-files", "-z", "--", `./${dirRel}`]).split("\0").filter(Boolean);
+  // On a case-insensitive filesystem `.GENERATED/` is the same folder, so compare folded.
+  const fold = foldsCase(repoRoot) ? (p) => p.toLowerCase() : (p) => p;
+  const underGenerated = git(repoRoot, ["ls-files", "-z", "--", `./${posix(relative(repoRoot, dirname(set.dir)))}`]).split("\0").filter(Boolean)
+    .filter((p) => fold(p).startsWith(`${fold(dirRel)}/`));
   if (underGenerated.length) {
     refuse(`${underGenerated.join(", ")} ${underGenerated.length > 1 ? "are" : "is"} tracked by git, but local mode keeps ${dirRel}/ out of git. Untrack ${underGenerated.length > 1 ? "them" : "it"} (git rm --cached), then run again`);
   }
@@ -181,7 +187,10 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
     const stripped = stripBlock(text, own);
     // An index file holding only Trellis's own skeleton around the block is generated only:
     // it stays byte for byte as it is, and the user removes it with the printed command.
-    if (skeleton !== null && (stripped.trim() === "" || stripped.trim() === stripBlock(skeleton, own).trim())) {
+    // Whitespace-only is blank. Otherwise only line endings are normalized, so an indented
+    // heading (a code block) is authored text and the file is edited, not removed.
+    const eol = (t) => t.replace(/\r\n/g, "\n");
+    if (skeleton !== null && (stripped.trim() === "" || eol(stripped) === eol(stripBlock(skeleton, own)))) {
       requireClean(r, "would be removed");
       removals.push({ rel: r, why: "generated only" });
       continue;
@@ -204,10 +213,11 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
       const block = text.slice(bi, ei);
       const committed = artifactBullet(root, "committed");
       const local = artifactBullet(root, "local");
-      if (hasWholeLines(block, committed)) {
+      const at = findWholeLines(block, committed);
+      if (at !== -1) {
         requireClean("AGENTS.md", "holds the Trellis block the switch updates");
-        edits.push({ path: agentsPath, rel: "AGENTS.md", before: text, after: text.slice(0, bi) + block.replace(committed, () => local) + text.slice(ei), why: "updated the generated-files bullet" });
-      } else if (!hasWholeLines(block, local)) {
+        edits.push({ path: agentsPath, rel: "AGENTS.md", before: text, after: text.slice(0, bi) + block.slice(0, at) + local + block.slice(at + committed.length) + text.slice(ei), why: "updated the generated-files bullet" });
+      } else if (findWholeLines(block, local) === -1) {
         warnings.push(`AGENTS.md: the generated-files bullet in the Trellis block differs from Trellis's own text, so it was left alone. Edit it by hand to say the index is generated into ${root}/${GENERATED_DIR}/ and that no committed file is generated`);
       }
     }
@@ -232,20 +242,35 @@ export function switchToLocal(repoRoot, { dryRun = false } = {}) {
   const result = { edits: edits.map((e) => ({ rel: e.rel, why: e.why })), removals, warnings, dryRun };
   if (dryRun || !edits.length) return result;
 
-  // 7. Write the edits (config last); any failure restores every file it touched.
-  const touched = [];
+  // 7. Install the edits (config last). Each replacement is staged beside its file, the
+  // original is renamed to a unique backup, and the stage is renamed into place. A failure
+  // renames every backup back; a backup that cannot go back is kept and named.
+  const staged = [];
+  const backups = [];
+  const kept = [];
   try {
-    edits.forEach((e, i) => {
-      if (testSeams.beforeWrite) testSeams.beforeWrite(e.path, i);
-      touched.push(e);
-      writeFileSync(e.path, e.after);
+    for (const e of edits) staged.push({ e, temp: stageFile(e.path, "tmp", e.after, statSync(e.path).mode & 0o7777), backup: null });
+    staged.forEach((st, i) => {
+      if (testSeams.beforeWrite) testSeams.beforeWrite(st.e.path, i);
+      st.backup = join(dirname(st.e.path), `.${basename(st.e.path)}.${process.pid}-${randomBytes(6).toString("hex")}.bak`);
+      backups.push(st);
+      renameSync(st.e.path, st.backup);
+      renameSync(st.temp, st.e.path);
+      st.temp = null;
     });
     if (testSeams.afterWrites) testSeams.afterWrites();
   } catch (e) {
-    for (const t of touched.reverse()) {
-      try { writeFileSync(t.path, t.before); } catch { /* best-effort restore */ }
+    for (const st of backups.reverse()) {
+      try { renameSync(st.backup, st.e.path); st.backup = null; } catch { kept.push(`${st.backup} (original of ${st.e.rel})`); }
     }
+    for (const st of staged) {
+      if (st.temp) { try { rmSync(st.temp, { force: true }); } catch { /* best-effort cleanup */ } }
+    }
+    if (kept.length) throw new Error(`the switch failed and could not restore every file; originals kept at: ${kept.join(", ")}: ${e.message}`);
     throw new Error(`the switch failed and every edited file was restored: ${e.message}`);
+  }
+  for (const st of backups) {
+    try { rmSync(st.backup, { force: true }); } catch (e) { warnings.push(`could not remove the backup ${st.backup}: ${e.message}`); }
   }
   return result;
 }

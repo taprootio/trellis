@@ -80,6 +80,13 @@ export function ignoreLineFor(tasksDir, prefix = "") {
   return `${escaped}/${GENERATED_DIR}/`;
 }
 
+// True when git found a case-insensitive filesystem (`git init` probes it into
+// `core.ignorecase`). Read-only, so nothing is written into the repository.
+export function foldsCase(repoRoot) {
+  const r = probe(repoRoot, ["config", "--type=bool", "core.ignorecase"]);
+  return r.status === 0 && r.stdout.trim() === "true";
+}
+
 // The shared output-path verifier: `check-ignore -q --no-index` per output (0 is
 // ignored, 1 is not, 128 is a git error to report) and literal `ls-files` for
 // tracked outputs. Returns `{ inside: false }` when git does not apply.
@@ -92,9 +99,14 @@ export function verifyOutputPaths(repoRoot, cfg) {
     if (r.status === 1) unignored.push(e.rel);
     else if (r.status !== 0) throw new OutputRefused(`git check-ignore failed for ${e.rel}: ${r.error ? r.error.message : firstLine(r.stderr)}`);
   }
-  const ls = probe(repoRoot, ["ls-files", "-z", "--", ...outputs.map((e) => `./${posix(e.rel)}`)], { literal: true });
+  // List each output's folder, then match the expected paths case-insensitively where the
+  // filesystem is, so a tracked `.generated/INDEX.md` counts as the output it aliases.
+  const fold = foldsCase(repoRoot) ? (p) => p.toLowerCase() : (p) => p;
+  const folders = [...new Set(outputs.map((e) => `./${posix(dirname(e.rel))}`))];
+  const ls = probe(repoRoot, ["ls-files", "-z", "--", ...folders], { literal: true });
   if (ls.status !== 0) throw new OutputRefused(`git ls-files failed: ${ls.error ? ls.error.message : firstLine(ls.stderr)}`);
-  const tracked = ls.stdout.split("\0").filter(Boolean);
+  const expected = new Set(outputs.map((e) => fold(posix(e.rel))));
+  const tracked = ls.stdout.split("\0").filter(Boolean).filter((p) => expected.has(fold(p)));
   return { inside: true, unignored, tracked };
 }
 

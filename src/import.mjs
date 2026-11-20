@@ -40,7 +40,7 @@
 // the stored title (TRL0029); it is set on the numeric-prefix profiles, off elsewhere.
 
 import { readFileSync, readdirSync, writeFileSync, existsSync, rmSync, statSync, openSync, closeSync } from "node:fs";
-import { join, relative, dirname, isAbsolute, sep } from "node:path";
+import { join, relative, dirname, isAbsolute, sep, basename } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   loadConfig,
@@ -56,6 +56,9 @@ import {
   isLocalMode,
   markerLineErrors,
   CONFIG_DIR,
+  GENERATED_DIR,
+  LOCAL_TITLES,
+  localHead,
 } from "./backlog.mjs";
 import { OutputRefused, makeDirs, outputPreflight, previewNextId, removeCreatedDirs, writeArtifactFiles } from "./local-output.mjs";
 
@@ -305,13 +308,26 @@ function buildBody(raw, newId, title) {
 // importable item — a `*.md` glob would otherwise pull them in and fail validation. Both
 // the committed files and the local `.generated/` files are listed, whatever the
 // target's mode (the source's own mode is unknown), and derived from `artifactSet` so
-// the names have one owner. Matched by exact PATH, not basename or folder, so a real
-// task named `active/index.md` or kept in a `.generated/` folder still imports.
-const GENERATED_ARTIFACTS = new Set(
-  ["committed", "local"].flatMap((mode) => artifactSet(".", { tasksDir: ".", generatedArtifacts: mode }).generated)
-    .map((e) => e.rel.split(sep).join("/")),
+// the names have one owner. The committed names match by exact PATH, so a real task
+// named `active/index.md` still imports.
+// A local file is recognized by its own header (the heading and the "generated" note the
+// local generator writes), wherever its `.generated/` folder sits, so a real task that
+// is named `index.md` in a `.generated/` folder still imports.
+const COMMITTED_ARTIFACTS = new Set(
+  artifactSet(".", { tasksDir: ".", generatedArtifacts: "committed" }).generated.map((e) => e.rel.split(sep).join("/")),
 );
-const isGeneratedArtifact = (rel) => GENERATED_ARTIFACTS.has(rel.split(/[/\\]/).join("/"));
+const LOCAL_HEADS = new Map(
+  artifactSet(".", { tasksDir: ".", generatedArtifacts: "local" }).generated
+    .filter((e) => LOCAL_TITLES[e.key])
+    .map((e) => [basename(e.path), localHead(LOCAL_TITLES[e.key])]),
+);
+function isGeneratedArtifact(rel, abs) {
+  const parts = rel.split(/[/\\]/);
+  if (COMMITTED_ARTIFACTS.has(parts.join("/"))) return true;
+  const head = LOCAL_HEADS.get(parts[parts.length - 1]);
+  if (!head || parts[parts.length - 2] !== GENERATED_DIR) return false;
+  try { return readFileSync(abs, "utf8").replace(/\r\n/g, "\n").startsWith(head); } catch { return false; }
+}
 
 function listFiles(dir, re) {
   if (!existsSync(dir)) return null; // null = dir absent (a warning), [] = present-but-empty
@@ -335,7 +351,7 @@ function discoverSources(sourceRoot, mapping, warnings) {
       if (files === null) { warnings.push(`source dir not found, skipped: ${d}`); continue; }
       for (const f of files) {
         const rel = relative(sourceRoot, join(dir, f));
-        if (isGeneratedArtifact(rel)) continue; // a Trellis generated artifact at its known path — not a task
+        if (isGeneratedArtifact(rel, join(dir, f))) continue; // a Trellis generated artifact at its known path — not a task
         hits.push({ status, dir, file: join(dir, f), basename: f.replace(/\.[^.]+$/, ""), rel });
       }
     }

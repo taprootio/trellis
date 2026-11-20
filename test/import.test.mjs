@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { applyScaffold } from "../src/init.mjs";
 import { planImport, applyImport, ImportRefused } from "../src/import.mjs";
 import { loadProfile, listProfiles } from "../src/profiles.mjs";
-import { loadConfig, readBacklog, generateArtifacts, parseFrontMatter, nextId, validateLocal } from "../src/backlog.mjs";
+import { loadConfig, readBacklog, generateArtifacts, parseFrontMatter, nextId, validateLocal, localHead, LOCAL_TITLES } from "../src/backlog.mjs";
 import { testSeams as outputSeams } from "../src/local-output.mjs";
 import { testSeams as importSeams } from "../src/import.mjs";
 import { initRefFormat } from "./git-support.mjs";
@@ -1110,7 +1110,7 @@ test("generated artifact paths are skipped in both target modes, but a real task
   const src = mkdtempSync(join(tmpdir(), "trellis-gensrc-"));
   mkdirSync(join(src, ".generated"));
   cpSync(join(trellisSrc, "active", "TR0001.md"), join(src, ".generated", "TR0001.md"));
-  for (const n of ["index", "completed", "removed"]) writeFileSync(join(src, ".generated", `${n}.md`), `# ${n}\n\n| ID |\n`);
+  for (const n of ["index", "completed", "removed"]) writeFileSync(join(src, ".generated", `${n}.md`), `${localHead(LOCAL_TITLES[n])}\n| ID |\n`);
   const dotMapping = { ...loadProfile("trellis").mapping, sources: { active: { dirs: [".generated"], file: "*.md" } } };
   const committed = initTarget();
   const local = localTarget();
@@ -1123,6 +1123,23 @@ test("generated artifact paths are skipped in both target modes, but a real task
   } finally {
     for (const d of [src, committed, local]) rmSync(d, { recursive: true, force: true });
   }
+});
+
+test("a task at .generated/index.md without the local header imports, and a header-bearing file in any .generated folder is skipped", () => {
+  const src = mkdtempSync(join(tmpdir(), "trellis-gensrc-"));
+  const root = initTarget();
+  try {
+    mkdirSync(join(src, ".generated"), { recursive: true });
+    mkdirSync(join(src, "planning", ".generated"), { recursive: true });
+    cpSync(join(trellisSrc, "active", "TR0001.md"), join(src, ".generated", "index.md"));
+    writeFileSync(join(src, "planning", ".generated", "index.md"), `${localHead(LOCAL_TITLES.index)}\n| ID |\n`);
+    const at = (dir) => ({ ...loadProfile("trellis").mapping, sources: { active: { dirs: [dir], file: "*.md" } } });
+    const real = planImport(root, src, at(".generated"), {});
+    assert.deepEqual(real.errors, []);
+    assert.equal(real.counts.total, 1, "the real task is imported");
+    const nested = planImport(root, src, at("planning/.generated"), {});
+    assert.equal(nested.counts.total, 0, "the generated file is skipped");
+  } finally { rmSync(src, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });
 
 test("an imported item with a large body is written whole", () => {
@@ -1253,7 +1270,7 @@ test("a mapping that includes .generated/ never feeds generated tables into item
     mkdirSync(join(src, "active"));
     cpSync(join(trellisSrc, "active", "TR0001.md"), join(src, "active", "TR0001.md"));
     mkdirSync(join(src, ".generated"));
-    for (const n of ["index", "completed", "removed"]) writeFileSync(join(src, ".generated", `${n}.md`), `# ${n}\n\n| ID |\n`);
+    for (const n of ["index", "completed", "removed"]) writeFileSync(join(src, ".generated", `${n}.md`), `${localHead(LOCAL_TITLES[n])}\n| ID |\n`);
     writeFileSync(join(src, "README.md"), "# Readme\n");
     const custom = { ...loadProfile("trellis").mapping, sources: { active: { dirs: ["active", ".generated", "."], file: "*.md" } } };
     const plan = planImport(root, src, custom);

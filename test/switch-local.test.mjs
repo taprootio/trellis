@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, renameSync, writeFileSync, rmSync, existsSync, 
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { applyScaffold, shouldPromptVocab, DEFAULTS } from "../src/init.mjs";
+import { applyScaffold, shouldPromptVocab, DEFAULTS, completedSkeleton, artifactBullet } from "../src/init.mjs";
 import { switchToLocal, testSeams } from "../src/switch-local.mjs";
 import { OutputRefused, ignoreLineFor } from "../src/local-output.mjs";
 import { initRefFormat } from "./git-support.mjs";
@@ -150,6 +150,54 @@ test("a tracked, markerless, blank index file is author-owned: kept, with no rem
     assert.equal(r.status, 0, r.stderr);
     assert.equal(readFileSync(f.T("removed", "index.md"), "utf8"), "");
     assert.deepEqual(commandsOf(r.stdout), [rm(f.root, "trellis/backlog.json")]);
+  } finally { f.cleanup(); }
+});
+
+test("an index whose scaffold heading is indented into a code block is author-owned: edited, with no removal command", () => {
+  const f = fixture();
+  try {
+    writeFileSync(f.T("completed", "index.md"), completedSkeleton().replace("# Completed tasks", "    # Completed tasks"));
+    f.commit();
+    const r = runSwitch(f.root);
+    assert.equal(r.status, 0, r.stderr);
+    const text = readFileSync(f.T("completed", "index.md"), "utf8");
+    assert.match(text, /^    # Completed tasks$/m);
+    assert.doesNotMatch(text, /GENERATED/);
+    assert.equal(commandsOf(r.stdout).some((c) => c.includes("completed/index.md")), false);
+  } finally { f.cleanup(); }
+});
+
+test("a whitespace-only index file is blank, so it is author-owned and kept", () => {
+  const f = fixture();
+  try {
+    writeFileSync(f.T("removed", "index.md"), "  \n\n");
+    f.commit();
+    assert.equal(runSwitch(f.root).status, 0);
+    assert.equal(readFileSync(f.T("removed", "index.md"), "utf8"), "  \n\n");
+  } finally { f.cleanup(); }
+});
+
+test("the printed removal commands come with a note to run them without GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE", () => {
+  const f = fixture();
+  try {
+    assert.match(runSwitch(f.root).stdout, /no GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE set/);
+  } finally { f.cleanup(); }
+});
+
+test("the bullet replacement hits the exact line, not an earlier customized copy of its text", () => {
+  const f = fixture();
+  try {
+    const path = join(f.root, "AGENTS.md");
+    const committed = artifactBullet("trellis", "committed");
+    const text = readFileSync(path, "utf8");
+    assert.ok(text.includes(committed));
+    const custom = `${committed} Ask the owner.\n`;
+    writeFileSync(path, text.replace(committed, () => custom + committed));
+    f.commit();
+    assert.equal(runSwitch(f.root).status, 0);
+    const after = readFileSync(path, "utf8");
+    assert.ok(after.includes(custom), "the customized copy is untouched");
+    assert.ok(after.includes(artifactBullet("trellis", "local")));
   } finally { f.cleanup(); }
 });
 
@@ -448,4 +496,14 @@ test("a forced failure after the edits restores every edited file and the config
       assert.equal(switchToLocal(f.root).edits.length, 3, "a rerun starts clean");
     } finally { testSeams.beforeWrite = null; testSeams.afterWrites = null; f.cleanup(); }
   }
+});
+
+test("a failure after the first install puts every original back and leaves no stage or backup file", () => {
+  const f = fixture();
+  try {
+    const before = tree(f.root);
+    testSeams.beforeWrite = (path, i) => { if (i === 1) throw new Error("forced failure"); };
+    assert.throws(() => switchToLocal(f.root), /every edited file was restored: forced failure/);
+    assert.deepEqual(tree(f.root), before);
+  } finally { testSeams.beforeWrite = null; f.cleanup(); }
 });

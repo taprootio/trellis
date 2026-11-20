@@ -99,6 +99,19 @@ for (const [mode, over] of MODES) {
     } finally { c.cleanup(); }
   });
 
+  test(`preflight refuses an output tracked under a case alias (${mode})`, (t) => {
+    const c = localRepo({ cfg: over });
+    try {
+      const probeFile = join(c.root, "probe.x");
+      writeFileSync(probeFile, "x");
+      if (!existsSync(join(c.root, "PROBE.X"))) return t.skip("case-sensitive filesystem");
+      mkdirSync(c.dir);
+      writeFileSync(join(c.dir, "INDEX.md"), "# Backlog\n");
+      git(c.root, "add", "-f", "trellis/.generated/INDEX.md");
+      refused(() => outputPreflight(c.root, c.cfg), /is tracked/);
+    } finally { c.cleanup(); }
+  });
+
   test(`preflight refuses a leftover marker (${mode})`, () => {
     const c = localRepo({ cfg: over });
     try {

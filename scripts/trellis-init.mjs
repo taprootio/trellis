@@ -266,7 +266,7 @@ function runSwitch(targetRoot, dryRun) {
   }
   for (const w of r.warnings) console.warn(`  warning: ${w}`);
   if (r.removals.length) {
-    console.log("Legacy generated files are still tracked. Run these from the repo root to delete them (the switch never runs git rm):");
+    console.log("Legacy generated files are still tracked. Run these from a shell that has no GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE set, to delete them (the switch never runs git rm):");
     for (const x of r.removals) console.log(`  ${x.command}`);
   }
   console.log("Nothing was staged or committed. Next: run any commands above, then `trellis init` (no --force), `trellis generate` and `trellis check`.");
