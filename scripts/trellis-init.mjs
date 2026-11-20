@@ -214,7 +214,10 @@ function report(targetRoot, summary, dryRun) {
   if (!dryRun) {
     console.log(`Done. For a fresh backlog, add a task under ${summary.root}/active/, then \`npx @taprootio/trellis generate\`.`);
     console.log(`If you are importing an existing backlog, run \`npx @taprootio/trellis import ...\` before creating any new task so imported ids keep the first available range.`);
-    console.log(`Then enable branch protection so the \`backlog\` check gates merges — see trellis/branch-protection.md.`);
+    // The final step follows the parts that were skipped: no `backlog` job without `ci`, no recipe link without `branch-protection`.
+    const noCi = summary.omitted.includes("ci"), noGuide = summary.omitted.includes("branch-protection");
+    const gate = noCi ? "Then require `trellis check` through your existing CI (SPEC §10) so it gates merges" : "Then enable branch protection so the `backlog` check gates merges";
+    console.log(`${gate}${noGuide ? "." : " — see trellis/branch-protection.md."}`);
   }
 }
 

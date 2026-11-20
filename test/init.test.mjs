@@ -2040,3 +2040,83 @@ test("a size-guard block over 64 KiB reaches a pipe whole", () => {
     assert.equal(existsSync(agentsPath(root)), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ------------------------------ init output, guide, pr-draft (TRL0040)
+const DONE_LINES = (stdout) => stdout.slice(stdout.indexOf("Done.")).split("\n");
+// The text of a `## ` section, from its heading to the next `## ` heading.
+const sectionOf = (text, heading) => {
+  const from = text.indexOf(`\n${heading}\n`) + 1;
+  assert.ok(from > 0, heading);
+  const next = text.indexOf("\n## ", from + heading.length);
+  return text.slice(from, next === -1 ? undefined : next);
+};
+
+test("the completion message follows --skip ci and --skip branch-protection", () => {
+  const root = tempRepo();
+  try {
+    const real = cliRun(root, ["--prefix", "DEMO", "--skip", "ci"]);
+    assert.equal(real.status, 0, real.stderr);
+    const ciDone = DONE_LINES(real.stdout).join("\n");
+    assert.ok(ciDone.includes("trellis check"));
+    assert.ok(!ciDone.includes("`backlog`"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+
+  const bp = tempRepo();
+  try {
+    const r = cliRun(bp, ["--prefix", "DEMO", "--skip", "branch-protection"]);
+    assert.equal(r.status, 0, r.stderr);
+    const done = DONE_LINES(r.stdout).join("\n");
+    assert.ok(!done.includes("branch-protection.md"));
+    assert.ok(done.includes("`backlog`"), "the job still exists, so the gate line names it");
+  } finally { rmSync(bp, { recursive: true, force: true }); }
+});
+
+test("the one universal branch-protection guide names the owner's CI status and offers backlog only as an example", () => {
+  const root = tempRepo();
+  try {
+    // The guide is scaffolded by `--skip ci` alone, which also shows it was not omitted.
+    applyScaffold(root, { prefix: "DEMO", skip: ["ci"] }, {}, sourceRoot);
+    const guide = readFileSync(join(root, "trellis", "branch-protection.md"), "utf8");
+    assert.equal(guide, readFileSync(join(sourceRoot, "templates", "trellis", "branch-protection.md"), "utf8"));
+    assert.equal(guide, readFileSync(join(sourceRoot, "trellis", "branch-protection.md"), "utf8"));
+
+    assert.ok(guide.slice(0, guide.indexOf("\n## ")).includes("your CI status"), "intro");
+    assert.ok(sectionOf(guide, "## GitHub").includes("your CI status"), "setup");
+    assert.ok(sectionOf(guide, "## Verify the gate").includes("your CI status"), "verify");
+    assert.ok(guide.includes('"contexts": ["<your-ci-status>"]'));
+    assert.ok(guide.includes("Use PUT only to create a new protection rule"));
+    assert.ok(guide.includes("if you installed Trellis's workflow"));
+    assert.ok(guide.includes("gh api"));
+
+    // `backlog` lives only in the bounded example section.
+    const example = /^### Example: if you installed Trellis's workflow\n[\s\S]*?(?=^## )/m.exec(guide);
+    assert.ok(example, "the example section exists");
+    assert.match(example[0], /`backlog`/);
+    assert.match(example[0], /not `?Backlog Hygiene/);
+    assert.doesNotMatch(guide.replace(example[0], ""), /backlog/i);
+    assert.doesNotMatch(guide.match(/^## The required-check context.*$/m)[0], /backlog/i);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("both pr-draft.md copies carry the two branches, and no PR template points at the playbook", () => {
+  for (const rel of ["trellis/playbooks/pr-draft.md", "templates/trellis/playbooks/pr-draft.md"]) {
+    const text = readFileSync(join(sourceRoot, rel), "utf8");
+    for (const h of ["## With a PR template", "## Without a PR template", "## Title and attribution (both branches)"]) assert.ok(text.includes(`\n${h}\n`), `${rel}: ${h}`);
+    const withT = sectionOf(text, "## With a PR template");
+    const without = sectionOf(text, "## Without a PR template");
+    const intro = text.slice(0, text.indexOf("\n## "));
+    const SECTIONS = /Summary, Task, Changes, Verification, Follow-ups/;
+    assert.match(withT, SECTIONS);
+    assert.match(withT, /pull_request_template/);
+    assert.doesNotMatch(without, /pull_request_template/);
+    assert.doesNotMatch(without + intro + sectionOf(text, "## Title and attribution (both branches)"), SECTIONS);
+    assert.doesNotMatch(intro, /pull_request_template/);
+    assert.ok(without.includes("AGENTS.md") && without.includes("CONTRIBUTING"));
+    assert.ok(without.includes("# <ID>: <summary>"));
+  }
+  for (const rel of [".github/pull_request_template.md", "templates/.github/pull_request_template.md"]) {
+    const text = readFileSync(join(sourceRoot, rel), "utf8");
+    assert.ok(!text.includes("trellis/playbooks/pr-draft.md"), rel);
+    assert.match(text, /attribution policy \(AGENTS\.md\)/i);
+  }
+});
