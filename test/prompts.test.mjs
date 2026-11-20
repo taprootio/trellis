@@ -525,7 +525,7 @@ test("the PR template lookup prefers .github/pull_request_template.md, and a lon
     mkdirSync(join(root, "docs"));
     writeFileSync(join(root, "docs", "pull_request_template.md"), "docs\n");
     writeFileSync(join(root, "PULL_REQUEST_TEMPLATE.md"), "variant\n");
-    writeFileSync(join(root, ".github", "pull_request_template.txt"), "txt\n");
+    writeFileSync(join(root, ".github", "PULL_REQUEST_TEMPLATE.txt"), "txt\n");
     writeFileSync(join(root, ".github", "pull_request_template.md"), "exact\n");
     assert.ok(textOf(root, "pr-draft").includes(".github/pull_request_template.md"));
     assert.equal(readResource(root, "trellis://template/pull-request").text, "exact\n");
@@ -547,4 +547,13 @@ test("the PR template lookup prefers .github/pull_request_template.md, and a lon
     assert.equal(listResources(many).find((r) => r.uri === "trellis://template/pull-request").available, false);
     assert.throws(() => readResource(many, "trellis://template/pull-request"), (e) => e instanceof TrellisError && e.code === "not_found");
   } finally { rmSync(one, { recursive: true, force: true }); rmSync(many, { recursive: true, force: true }); }
+});
+
+test("a directory at .github/pull_request_template.md leaves the template resource unavailable, without EISDIR", () => {
+  const root = bareRepo({ template: false });
+  try {
+    mkdirSync(join(root, ".github", "pull_request_template.md"));
+    assert.equal(listResources(root).find((r) => r.uri === "trellis://template/pull-request").available, false);
+    assert.throws(() => readResource(root, "trellis://template/pull-request"), (e) => e instanceof TrellisError && e.code === "not_found");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

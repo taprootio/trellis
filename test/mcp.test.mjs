@@ -1301,3 +1301,8 @@ test("the MCP wire advertises and returns the PR template's mimeType for .md and
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
 });
+
+test("the MCP startup banner reports a numeric resource count", () => {
+  const r = spawnSync(process.execPath, [join(sourceRoot, "scripts", "trellis-mcp.mjs"), "--repo", sourceRoot], { input: "", encoding: "utf8", timeout: 20000 });
+  assert.match(r.stderr, /, \d+ resources\)/);
+});

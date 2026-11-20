@@ -184,7 +184,7 @@ function reportDetection(summary) {
     if (summary.playbooksOmittedBy === "detection") console.log("  playbooks left out because of it; add them by running `" + restoreCommand(summary) + "` from the target repository");
     else if (summary.playbooksOmittedBy === "skip") console.log("  playbooks left out by --skip playbooks");
   } else if (summary.playbooksOmittedBy === "skip") {
-    console.log(`  ${INIT_TOKENS.blockNotUpdated} To add the playbooks later, run \`${restoreCommand(summary)}\` from the target repository; the TRELLIS block is not updated, so add the playbook pointers by hand`);
+    console.log(`${INIT_TOKENS.blockNotUpdated} To add the playbooks later, run \`${restoreCommand(summary)}\` from the target repository; the TRELLIS block is not updated, so add the playbook pointers by hand`);
   }
 }
 

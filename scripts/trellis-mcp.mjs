@@ -175,7 +175,7 @@ function registerResources(server, defaultRoot) {
       },
     );
   }
-  return available.size;
+  return available.length;
 }
 
 // Prompts are bound to the server's repo, exactly like resources — deliberately

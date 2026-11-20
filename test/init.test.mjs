@@ -1777,7 +1777,7 @@ test("a repo that is not detected and skips the playbooks is told how to add the
   try {
     const r = cliRun(root, ["--skip", "playbooks"]);
     assert.equal(r.status, 0, r.stderr);
-    const line = tokenLine(r.stdout.replace(/^ +/gm, ""), INIT_TOKENS.blockNotUpdated);
+    const line = tokenLine(r.stdout, INIT_TOKENS.blockNotUpdated);
     assert.ok(line, "the recovery line is present");
     assert.ok(line.includes("trellis init --with-playbooks"));
   } finally { rmSync(root, { recursive: true, force: true }); }

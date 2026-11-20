@@ -18,7 +18,8 @@ The repo has a PR template (`pull_request_template.md` or `.txt`, in `.github/`,
 or `docs/`, or a `PULL_REQUEST_TEMPLATE/` folder of templates in any of those). Use
 the one you find there; the description conforms to it.
 
-Also gather the PR template from where the repo keeps it.
+Also gather the PR template from where the repo keeps it. When it exists, the
+scaffolded location is [`.github/pull_request_template.md`](../../.github/pull_request_template.md).
 
 > Generate a pull-request **title** and **description** for the current branch,
 > based only on its actual commits and diff (do not invent changes).

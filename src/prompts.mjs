@@ -83,10 +83,13 @@ function resourceByUri(uri) {
 // list_resources — the catalog, each flagged `available` iff its file exists in
 // this repo. (SPEC.md, for one, is absent in onboarded repos until packaging
 // bundles a canonical copy — TRL0010.)
+// A resource is served only from a regular file, so a directory at its path is unavailable.
+const isFile = (abs) => { try { return statSync(abs).isFile(); } catch { return false; } };
+
 export function listResources(repoRoot) {
   return RESOURCES.map((r) => {
     const { uri, name, title, description, mimeType, rel } = resolveResource(repoRoot, r);
-    return { uri, name, title, description, mimeType, available: existsSync(join(repoRoot, rel)) };
+    return { uri, name, title, description, mimeType, available: isFile(join(repoRoot, rel)) };
   });
 }
 
@@ -105,7 +108,7 @@ function resolveResource(repoRoot, r) {
 export function readResource(repoRoot, uri) {
   const r = resolveResource(repoRoot, resourceByUri(uri));
   const abs = join(repoRoot, r.rel);
-  if (!existsSync(abs)) {
+  if (!isFile(abs)) {
     throw new TrellisError(`resource ${uri} is unavailable in this repo (no ${r.rel})`, "not_found");
   }
   return { uri: r.uri, mimeType: r.mimeType, text: readFileSync(abs, "utf8") };
@@ -207,7 +210,7 @@ function instruction(repoRoot, name, args, cfg, cfgErrors) {
 function findPrTemplate(repoRoot) {
   // A symlink counts when its target is a regular file.
   const isRegularFile = (rel) => { try { return statSync(join(repoRoot, rel)).isFile(); } catch { return false; } };
-  const entries = (dir) => { try { return readdirSync(join(repoRoot, dir), { withFileTypes: true }); } catch { return []; } };
+  const entries = (dir) => { try { return readdirSync(join(repoRoot, dir), { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)); } catch { return []; } };
   // The file the resource always served wins, whatever else sits beside it.
   if (isRegularFile(".github/pull_request_template.md") && entries(".github").some((e) => e.name === "pull_request_template.md")) return ".github/pull_request_template.md";
   for (const dir of [".github", ".", "docs"]) {
