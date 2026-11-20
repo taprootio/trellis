@@ -285,8 +285,9 @@ custom **effort scale** for display.
   `effortLabel`, and `effortEmoji`/`effortImage` when present — so consumers
   render without reading the config. Three cases differ: an identity scale emits no
   display fields; a closed item whose historical `effort` no longer resolves under
-  the current scale (for example a retired label) keeps that string as written, with
-  no display fields; and a qualifying closed item under `legacy` (§5.1) whose `effort`
+  the current scale keeps its original value and type as written (a retired number
+  such as `8` stays the number 8, a retired label stays a string), with no display
+  fields; and a qualifying closed item under `legacy` (§5.1) whose `effort`
   is missing or blank has no number, so `backlog.json` carries `null` and no label,
   emoji or image (§8.2).
 
@@ -299,7 +300,9 @@ custom **effort scale** for display.
   preferred; images are optional and live under `<tasksDir>/assets/effort/`
   (default `trellis/assets/effort/`).
 - A qualifying closed item under `legacy` (§5.1) may omit any of `summary`,
-  `milestone`, `priority` and `effort`; its table cell is then empty.
+  `milestone`, `priority` and `effort`. The completed and removed tables have no
+  milestone, priority or effort column, so only the Summary cell is empty; the four
+  nullable fields belong to the `backlog.json` contract (§8.2).
 - The array form `effort: [1, 2, 3, 5, 8, 13, 21]` is shorthand for
   `{ "values": [ … ], "scale": "fibonacci" }` and remains valid.
 
@@ -561,7 +564,7 @@ artifact under `<tasksDir>/.generated/` and nothing generated is committed:
   generate` first, or use the MCP `list_tasks` tool.
 - **Nulls.** `.generated/backlog.json` carries the same nulls and omissions for
   qualifying closed items under `legacy` (§8.2), and the generated tables the same
-  empty cells.
+  empty Summary cell.
 - **Migration.** `trellis init --switch-to-local` moves a committed-mode repo over:
   it strips the generated blocks from `README.md` and the index files, sets the
   config, and prints the `git rm` commands for the legacy generated files. It never

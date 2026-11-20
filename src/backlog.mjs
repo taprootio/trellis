@@ -786,8 +786,9 @@ export function nextId(ids, cfg) {
 // ------------------------------------------------------------- rendering
 function cell(s) { return String(s ?? "").replace(/\|/g, "\\|"); }
 
-// `literal` (ledger mode only, TRL0037) inserts the body through a callback, so a
-// title holding `$&` or `$1` is text. Scan mode keeps its exact bytes.
+// `literal` (ledger mode only, TRL0037) selects the whole-line marker regex below. The
+// body is always inserted through a callback, so a title holding `$&` or `$1` stays
+// text in every mode.
 // Ledger mode matches each delimiter only as a whole line (trailing spaces and tabs
 // allowed), so a title that holds the end marker as text cannot close the block
 // early (TRL0037). Shared with the init preflight.

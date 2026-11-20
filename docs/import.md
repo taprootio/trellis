@@ -85,11 +85,11 @@ an import.
    against an empty default tree.
 2. Add `depends_on: []` to any item that lacks it: it stays required.
 3. Run `npx @taprootio/trellis init` **without** `--force`. `init --force` is refused
-   (exit 2, nothing written) once the config has `legacy`, because the replacement
-   config would drop it. Rerun the same command without `--force`,
-   keeping `--retire-source` or `--import`: when scaffolding, `--force` would drop
-   `legacy`; with `--retire-source`, `--force` has no use, since that step only stages
-   the removal of the source. Without `--force`, `init`
+   (exit 2, nothing written) once the config has `legacy`. Rerun the same command
+   without `--force`, keeping `--retire-source` or `--import`. The reason depends on
+   the command: when scaffolding, the replacement config would drop `legacy`; with
+   `--retire-source`, `--force` has no use, since that step only stages the removal of
+   the source. Without `--force`, `init`
    refreshes stale generated sections and creates missing scaffold files in committed
    mode; do not delete an existing README or index, which can lose authored text. In
    local mode it writes `.generated/` and does not create the README or index files,
