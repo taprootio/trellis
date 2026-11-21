@@ -151,6 +151,32 @@ test("a subtree holding a symlinked task's target, replaced outside the task fol
   } finally { repo.cleanup(); }
 });
 
+test("a symlinked task whose target is deleted, then restored, is picked up again", { ...posixOnly, timeout: 15000 }, async () => {
+  const repo = makeRepo();
+  try {
+    repo.add("active", "DEMO0001", { title: "AAAAA" });
+    const link = repo.itemPath("active", "DEMO0001");
+    const original = readFileSync(link, "utf8");
+    const target = join(repo.root, "docs", "pool", "real.md");
+    rmSync(link);
+    mkdirSync(join(repo.root, "docs", "pool"), { recursive: true });
+    writeFileSync(target, original);
+    symlinkSync(target, link);
+    await live({ demo: repo }, async (ctx) => {
+      assert.equal(titles((await getJson(ctx.port, "/api/backlogs/demo")).json), "AAAAA");
+      rmSync(target);
+      await ctx.events.next("demo"); // the deletion's own message, so it cannot be mistaken for the restore's
+      assert.equal(titles((await getJson(ctx.port, "/api/backlogs/demo")).json), "");
+      // The rebuild above saw a dangling link. Restoring the target must send its own message
+      // (not just be found by the next request), so wait for one beyond those already seen.
+      const before = ctx.events.seen.length;
+      writeFileSync(target, original.replace("AAAAA", "ZZZZZ"));
+      do { await ctx.events.next("demo"); } while (ctx.events.seen.length <= before);
+      assert.equal(titles((await getJson(ctx.port, "/api/backlogs/demo")).json), "ZZZZZ");
+    });
+  } finally { repo.cleanup(); }
+});
+
 ledgerTest("creating the ledger ref, then two claims in a row with no task edits, each send a message", async () => {
   const repo = makeRepo({ cfg: { ...BASE_CFG, idAllocation: "ledger" }, items: [{ status: "active", id: "DEMO0001" }] });
   try {
@@ -277,7 +303,7 @@ ledgerTest("a ledger backlog also watches the directories that hold the ref's fi
 });
 
 test("events invalidate the named path or directory; generated files and unrelated ref names are ignored", () => {
-  const repo = makeRepo({ cfg: { ...BASE_CFG, idAllocation: "ledger" }, items: [{ status: "active", id: "DEMO0001" }] });
+  const repo = makeRepo({ cfg: { ...BASE_CFG, idAllocation: "ledger" }, items: [{ status: "active", id: "DEMO0001" }, { status: "completed", id: "DEMO0002" }, { status: "removed", id: "DEMO0003" }] });
   try {
     const b = createBacklog({ id: "demo", name: "Demo", path: repo.root });
     const invalidated = [];
@@ -286,18 +312,58 @@ test("events invalidate the named path or directory; generated files and unrelat
     const changed = [];
     const watchers = createWatchers([b], (id) => changed.push(id), { watch: fake.watch, debounceMs: 5 });
     watchers.start();
-    const active = fake.calls.find((c) => c.dir === repo.folder("active"));
-    for (const name of ["README.md", "backlog.json", "history.json", "index.md", ".generated"]) active.cb("change", name);
-    assert.deepEqual(invalidated, []);
+    const at = (dir) => fake.calls.find((c) => c.dir === dir);
+    const tasks = join(repo.root, "trellis");
+    for (const name of ["README.md", "backlog.json", "history.json"]) at(tasks).cb("change", name);
+    at(join(tasks, "completed")).cb("change", "index.md");
+    at(join(tasks, "removed")).cb("change", "index.md");
+    assert.deepEqual(invalidated, [], "the backlog's own generated files are ignored");
+    // The same names elsewhere are not generated files: a task folder, or any non-artifact path.
+    at(repo.folder("active")).cb("change", "README.md");
+    at(tasks).cb("change", "index.md");
+    assert.deepEqual(invalidated, [join(repo.folder("active"), "README.md"), join(tasks, "index.md")]);
+    invalidated.length = 0;
+    const active = at(repo.folder("active"));
     active.cb("rename", "DEMO0001.md");
     active.cb("rename", null);
     assert.deepEqual(invalidated, [join(repo.folder("active"), "DEMO0001.md"), repo.folder("active")]);
-    const git = fake.calls.find((c) => c.dir === join(repo.root, ".git"));
+    const git = at(join(repo.root, ".git"));
     git.cb("rename", "index");
     git.cb("rename", "HEAD.lock");
     assert.equal(invalidated.length, 2, "only packed-refs matters in the git directory");
     git.cb("rename", "packed-refs");
     assert.equal(invalidated.length, 3);
+    watchers.close();
+  } finally { repo.cleanup(); }
+});
+
+test("a ledger ref whose file is named like an artifact still refreshes", () => {
+  const repo = makeRepo({ cfg: { ...BASE_CFG, idAllocation: "ledger", idLedgerRef: "refs/trellis/index.md" }, items: [{ status: "active", id: "DEMO0001" }] });
+  try {
+    mkdirSync(join(repo.root, ".git", "refs", "trellis"), { recursive: true });
+    const b = createBacklog({ id: "demo", name: "Demo", path: repo.root });
+    const invalidated = [];
+    b.reader.invalidate = (p) => invalidated.push(p);
+    const fake = fakeWatch();
+    const watchers = createWatchers([b], () => {}, { watch: fake.watch, debounceMs: 5 });
+    watchers.start();
+    const holder = fake.calls.find((c) => c.dir === join(repo.root, ".git", "refs", "trellis"));
+    assert.ok(holder, "the ref's folder is watched");
+    holder.cb("change", "index.md");
+    assert.equal(invalidated.length, 1);
+    watchers.close();
+  } finally { repo.cleanup(); }
+});
+
+test("a config with errors is not trusted for watch paths: a numeric idLedgerRef does not throw, and the config folder stays watched", () => {
+  const repo = makeRepo({ cfg: { ...BASE_CFG, idAllocation: "ledger", idLedgerRef: 5 }, items: [{ status: "active", id: "DEMO0001" }] });
+  try {
+    const b = createBacklog({ id: "demo", name: "Demo", path: repo.root });
+    const plan = [...watchPlan(b).keys()];
+    assert.ok(plan.includes(join(repo.root, "trellis")));
+    const fake = fakeWatch();
+    const watchers = createWatchers([b], () => {}, { watch: fake.watch, debounceMs: 5 });
+    watchers.start();
     watchers.close();
   } finally { repo.cleanup(); }
 });

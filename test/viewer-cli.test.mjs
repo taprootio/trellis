@@ -165,6 +165,13 @@ test("a non-loopback bind prints the warning, a loopback one does not, and the p
         assert.equal((await request(v6.port, { hostname: "::1", host: `[::1]:${v6.port}`, path: "/" })).status, 200);
       } finally { await v6.close(); }
     }
+    // An unabbreviated ::1 is loopback by address, whatever the bind string looks like.
+    const mark = sb.err().length;
+    const long = await runServe(["--repo", repo.root, "--port", "0", "--bind", "0:0:0:0:0:0:0:1"], sb.base);
+    if (typeof long === "number") t.diagnostic("IPv6 loopback unavailable here");
+    else {
+      try { assert.equal(sb.err().slice(mark), ""); } finally { await long.close(); }
+    }
     const alias = await runServe(["--repo", repo.root, "--port", "0", "--bind", "127.0.0.2"], sb.base);
     if (typeof alias === "number") t.diagnostic("127.0.0.2 unavailable here");
     else {

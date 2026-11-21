@@ -360,8 +360,7 @@ test("an id check never throws on a prefix that is not a valid regex, and a dire
     const cfg = { specVersion: "2.5", idPrefix: "R[", idWidth: 4, milestones: ["Alpha"], priorities: ["High"], effort: [1] };
     writeFileSync(join(root, "trellis", "backlog.config.json"), JSON.stringify(cfg));
     assert.ok(textOf(root, "work-task", { id: "R[0001" }).includes("R[0001"));
-    // The uncompilable prefix is a config error, so the id check is skipped instead of throwing.
-    assert.ok(textOf(root, "work-task", { id: "R[0002x" }).includes("R[0002x"));
+    assert.throws(() => textOf(root, "work-task", { id: "R[0002x" }), (e) => e instanceof TrellisError && e.code === "invalid_request");
   } finally { rmSync(root, { recursive: true, force: true }); }
 
   const dirRoot = mkdtempSync(join(tmpdir(), "trellis-prompts-"));

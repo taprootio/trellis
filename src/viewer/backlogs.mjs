@@ -127,8 +127,10 @@ export function createBacklog(entry, { hooks, git } = {}) {
     }
     const canonical = new Map(); // id -> copy
     for (const [id, list] of copies) {
-      const eligible = list.filter((c) => c.read && c.read.syntaxErrors.length === 0);
-      const pool = eligible.length ? eligible : list;
+      // An id with no cleanly parsed copy is not a task: its syntax diagnostics stay, but a
+      // half-parsed file is never published.
+      const pool = list.filter((c) => c.read && c.read.syntaxErrors.length === 0);
+      if (!pool.length) continue;
       const pick = STATUS_ORDER.map((s) => pool.find((c) => c.status === s)).find(Boolean);
       canonical.set(id, pick);
       for (const c of list) if (c !== pick) diagnostics.push({ path: realRel(c.where), message: `duplicate of ${id}; the canonical copy is ${realRel(pick.where)}` });
@@ -154,7 +156,7 @@ export function createBacklog(entry, { hooks, git } = {}) {
     for (const status of ["active", "completed", "removed"]) {
       for (const item of data[status]) {
         const c = canonical.get(fileIdOf(item));
-        if (c.item !== item) continue;
+        if (!c || c.item !== item) continue;
         picked[status].push({ ...item, id: c.id });
         order.push(c);
       }
@@ -169,7 +171,7 @@ export function createBacklog(entry, { hooks, git } = {}) {
     }
     const json = JSON.parse(buildBacklogJson(cfg, picked, { nextIdOverride: nextId }));
     const taskPaths = new Map();
-    for (const list of copies.values()) for (const c of list) if (c.read) taskPaths.set(normalize(c.read.path), c.id);
+    for (const list of copies.values()) for (const c of list) if (c.read && canonical.has(c.id)) taskPaths.set(normalize(c.read.path), c.id);
 
     const tasks = new Map();
     json.tasks.forEach((record, i) => {

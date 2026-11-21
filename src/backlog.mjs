@@ -136,8 +136,10 @@ export function artifactSet(repoRoot, cfg) {
 // ----------------------------------------------------------------- config
 // `readText(path)` returns the text, `null` when the file is absent, or `{ skip: reason }`
 // when a caller (the viewer) refused it. The default is today's plain read.
+// A directory or unreadable file is a skip, so the loaders report it instead of throwing.
 export function defaultReadText(path) {
-  return existsSync(path) ? readFileSync(path, "utf8") : null;
+  if (!existsSync(path)) return null;
+  try { return readFileSync(path, "utf8"); } catch (e) { return { skip: e.code || e.message }; }
 }
 
 export function loadConfig(repoRoot, { readText = defaultReadText } = {}) {
@@ -178,7 +180,7 @@ export function validateConfig(cfg) {
   // Scan mode interpolates the prefix unescaped into a RegExp, so one that does not compile
   // (such as `[`) is a config error here instead of a throw in readBacklog.
   if (typeof cfg.idPrefix === "string" && cfg.idPrefix && !scanPatternCompiles(cfg)) {
-    errors.push("config: `idPrefix` does not form a valid id pattern");
+    errors.push(ID_PATTERN_ERROR);
   }
   validateIdAllocation(cfg, errors);
   validateLegacy(cfg, errors);
@@ -625,9 +627,16 @@ function defaultReadItem(path, where) {
 // The scan-mode id pattern, as readBacklog reads it from the config (the prefix is not
 // escaped). The one owner for item checks, filenames and the MCP prompts (TRL0040).
 export const scanIdPattern = (cfg) => `${cfg.idPrefix}\\d{${cfg.idWidth}}`;
+// Both regexes built from the prefix must compile: a prefix like `)T(` fits the filename one
+// (inside its capture group) but not the bare id one.
 function scanPatternCompiles(cfg) {
-  try { new RegExp(`^(${scanIdPattern(cfg)})\\.md$`); return true; } catch { return false; }
+  try {
+    new RegExp(`^(${scanIdPattern(cfg)})\\.md$`);
+    new RegExp(`^${scanIdPattern(cfg)}$`);
+    return true;
+  } catch { return false; }
 }
+export const ID_PATTERN_ERROR = "config: `idPrefix` does not form a valid id pattern";
 
 // The per-item checks, shared by readBacklog and the ledger create preflight (TRL0037).
 function makeValidators(cfg, roster, ids) {

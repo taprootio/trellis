@@ -1375,3 +1375,22 @@ test("splitFrontMatter splits on the rule parseFrontMatter uses", () => {
   assert.equal(parseFrontMatter("---\na: 1\n", "x", errors), null);
   assert.equal(errors.length, 1);
 });
+
+test("a directory at backlog.config.json or team.json is a structured error with the default reader", () => {
+  withRepo(ARRAY_CFG, {}, (root) => {
+    const dirs = join(root, "trellis", "team.json");
+    mkdirSync(dirs);
+    const roster = loadRoster(root);
+    assert.equal(roster.errors.length, 1);
+    assert.match(roster.errors[0], /^team\.json was skipped \(/);
+    rmSync(join(root, "trellis", "backlog.config.json"));
+    mkdirSync(join(root, "trellis", "backlog.config.json"));
+    const cfg = loadConfig(root);
+    assert.equal(cfg.cfg, null);
+    assert.match(cfg.errors[0], /^backlog\.config\.json was skipped \(/);
+  });
+});
+
+test("an idPrefix that fits the filename pattern but not the bare id pattern is a config error", () => {
+  assert.ok(configErrors({ ...ARRAY_CFG, idPrefix: ")T(" }).some((e) => e.includes("idPrefix")));
+});

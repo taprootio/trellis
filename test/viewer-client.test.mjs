@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { effortView } from "../viewer/effort.mjs";
 import {
   defaultFilters, parseQuery, serializeQuery, parseLocation, normalizeOwner,
-  visibleRows, filterRows, buildRows, taskPath, listPath,
+  visibleRows, filterRows, buildRows, taskPath, listPath, bodyLinkPath, taskFields,
 } from "../viewer/filters.mjs";
 import { createStore, connectEvents, backlogViews, attentionItems } from "../viewer/state.mjs";
 
@@ -262,4 +262,26 @@ test("leaving the task view invalidates its pending response", async () => {
   net.calls[0].resolve({ status: 200, body: taskFx["active-with-body"].response });
   await tick();
   assert.equal(store.state.task, null);
+});
+
+test("a task link in a body keeps the current filters, and only task links are taken in-app", () => {
+  const filters = { ...defaultFilters(), statuses: ["completed"], q: "x y" };
+  const path = bodyLinkPath("/b/demo/task/DEMO0002", filters);
+  assert.equal(path, "/b/demo/task/DEMO0002?status=completed&q=x+y");
+  assert.deepEqual(parseLocation(...path.split(/(?=\?)/)).filters, filters);
+  assert.equal(bodyLinkPath("/b/demo", filters), null);
+  assert.equal(bodyLinkPath("/assets/demo/a.png", filters), null);
+  assert.equal(bodyLinkPath("/b/demo/task/DEMO0002/extra", filters), null);
+});
+
+test("the task view lists the standard text fields, hiding empty ones and the authored id", () => {
+  const closed = {
+    id: "DEMO0009", status: "removed", milestone: "Alpha", priority: "High", owner: null, collaborators: ["ann", "bo"], summary: "Why.",
+    completed_on: "2026-01-01", removed_on: "2026-02-01", removed_reason: "Superseded.", effort: 3,
+  };
+  assert.deepEqual(taskFields(closed, "demo").map(([k]) => k), [
+    "Backlog", "Status", "Milestone", "Priority", "Collaborators", "Summary", "Completed on", "Removed on", "Removed reason",
+  ]);
+  assert.equal(taskFields(closed, "demo").find(([k]) => k === "Collaborators")[1], "ann, bo");
+  assert.deepEqual(taskFields({ id: "A", status: "active", collaborators: [] }, "demo"), [["Backlog", "demo"], ["Status", "active"]]);
 });

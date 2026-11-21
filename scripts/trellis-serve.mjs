@@ -130,7 +130,9 @@ export async function runServe(argv, {
   }
   out(`trellis viewer: ${handle.url}`);
   out(configNote);
-  if (!isLoopbackBind(bind)) err(`warning: listening on ${bind}; the backlogs are exposed beyond this machine`);
+  // Judge the address the socket got, not the bind string: a name or alias can resolve anywhere.
+  const bound = handle.server.address().address;
+  if (!isLoopbackBind(bound)) err(`warning: listening on ${bound}; the backlogs are exposed beyond this machine`);
   return handle;
 }
 

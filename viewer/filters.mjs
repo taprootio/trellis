@@ -76,6 +76,24 @@ export function taskPath(backlogId, id, filters) {
   return `/b/${encodeURIComponent(backlogId)}/task/${encodeURIComponent(id)}${serializeQuery(filters)}`;
 }
 
+// The in-app path for a task link in a rendered body (`/b/<id>/task/<ID>`), carrying the
+// current filters so Back reaches the filtered list. Null for any other path.
+export function bodyLinkPath(pathname, filters) {
+  const { task } = parseLocation(pathname);
+  return task ? taskPath(task.backlog, task.id, filters) : null;
+}
+
+// The task view's text fields as [label, text] pairs, empty ones left out. The authored id is
+// not here (the heading shows the record id), and effort has its own rendering.
+export function taskFields(record, backlogName) {
+  const collaborators = Array.isArray(record.collaborators) ? record.collaborators.join(", ") : "";
+  return [
+    ["Backlog", backlogName], ["Status", record.status], ["Milestone", record.milestone], ["Priority", record.priority],
+    ["Owner", record.owner], ["Collaborators", collaborators], ["Summary", record.summary],
+    ["Completed on", record.completed_on], ["Removed on", record.removed_on], ["Removed reason", record.removed_reason],
+  ].map(([k, v]) => [k, toText(v)]).filter(([, v]) => v !== "");
+}
+
 const collator = new Intl.Collator("en", { numeric: true });
 
 // One row per task across every loaded backlog, tagged with its sort position.

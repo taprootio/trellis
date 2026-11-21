@@ -4,7 +4,7 @@
 // opened without blocking and its descriptor must be a regular file, so a FIFO can never hang
 // the server. Parsed items are cached by path, size and mtime.
 
-import { closeSync, constants as fsConstants, fstatSync, openSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { sep } from "node:path";
 import { parseFrontMatter, splitFrontMatter } from "../backlog.mjs";
 
@@ -25,10 +25,25 @@ export function createReader(root, hooks = {}) {
   let listed = new Map(); // dir -> names, for the current rebuild
   let forced = new Map(); // dir -> reason, skipped for the rest of the rebuild
   let targets = new Set(); // resolved symlink targets accepted in the current rebuild
+  const lastTargets = new Map(); // symlink path -> last accepted target, kept across rebuilds
+
+  // A symlink whose target went missing keeps its last target watched, so restoring the target
+  // is noticed. A link that is gone itself, or replaced by a plain file, is forgotten.
+  const trackTarget = (path, real) => {
+    if (real !== path) lastTargets.set(path, real); else lastTargets.delete(path);
+  };
+  const keepMissingTarget = (path) => {
+    const last = lastTargets.get(path);
+    if (!last) return;
+    try { lstatSync(path); } catch { lastTargets.delete(path); return; }
+    if (within(root, last)) targets.add(last);
+  };
 
   const realOf = (path) => {
-    try { return { real: realpathSync.native(path) }; } catch (e) {
-      return GONE.has(e.code) ? { absent: true } : { skip: e.code || e.message };
+    try { const real = realpathSync.native(path); trackTarget(path, real); return { real }; } catch (e) {
+      if (!GONE.has(e.code)) return { skip: e.code || e.message };
+      keepMissingTarget(path);
+      return { absent: true };
     }
   };
 

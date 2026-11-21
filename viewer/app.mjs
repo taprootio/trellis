@@ -16,7 +16,7 @@ import "@taprootio/espalier/button";
 import { createStore, connectEvents, backlogViews, attentionItems } from "./state.mjs";
 import {
   STATUSES, serializeQuery, listPath, taskPath, visibleRows, milestoneGroups,
-  priorityOptions, ownerOptions, normalizeOwner, toText,
+  priorityOptions, ownerOptions, normalizeOwner, toText, bodyLinkPath, taskFields,
 } from "./filters.mjs";
 import { effortView } from "./effort.mjs";
 
@@ -83,6 +83,17 @@ class TrellisViewer extends LitElement {
       e.preventDefault();
       this.navigate(path);
     }}>${label}</a>`;
+  }
+
+  // A task link in the body navigates in-app with the current filters; others behave normally.
+  onBodyClick(e) {
+    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
+    const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
+    if (!a || (a.target && a.target !== "_self") || a.origin !== location.origin) return;
+    const path = bodyLinkPath(a.pathname, this.snapshot.filters);
+    if (!path) return;
+    e.preventDefault();
+    this.navigate(path);
   }
 
   renderFilters(views) {
@@ -180,8 +191,7 @@ class TrellisViewer extends LitElement {
     if (task.status === "error") return html`<esp-info intent="danger">Could not load ${task.id}.</esp-info>${back}`;
     if (task.status === "loading" || !task.record) return html`<p>Loading…</p>${back}`;
     const r = task.record;
-    const fields = [["Backlog", task.backlog], ["Status", r.status], ["Milestone", r.milestone], ["Priority", r.priority], ["Owner", r.owner]]
-      .filter(([, v]) => v !== null && v !== undefined && v !== "");
+    const fields = taskFields(r, task.backlog);
     return html`
       ${back}
       <h1>${r.id} · ${toText(r.title)}</h1>
@@ -190,7 +200,7 @@ class TrellisViewer extends LitElement {
         ${r.effortDisplay && r.effortDisplay.text ? html`<dt>Effort</dt><dd>${this.renderEffort(r.effortDisplay)}</dd>` : nothing}
         ${(r.depends_on ?? []).length ? html`<dt>Depends on</dt><dd>${r.depends_on.join(", ")}</dd>` : nothing}
       </dl>
-      <div class="body">${unsafeHTML(r.bodyHtml ?? "")}</div>`;
+      <div class="body" @click=${(e) => this.onBodyClick(e)}>${unsafeHTML(r.bodyHtml ?? "")}</div>`;
   }
 
   render() {

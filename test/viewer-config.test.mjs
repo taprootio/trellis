@@ -92,7 +92,7 @@ test("--repo becomes a one-entry config whose id obeys the id rule", () => {
 
 test("loopback binds are recognized", () => {
   for (const b of ["127.0.0.1", "127.0.0.2", "::1", "localhost", "LOCALHOST"]) assert.ok(isLoopbackBind(b), b);
-  for (const b of ["0.0.0.0", "::", "192.168.1.5", "example.com"]) assert.ok(!isLoopbackBind(b), b);
+  for (const b of ["0.0.0.0", "::", "192.168.1.5", "example.com", "127.example.com", "::ffff:192.168.1.5"]) assert.ok(!isLoopbackBind(b), b);
 });
 
 // ---------------------------------------------------------- main worktree
@@ -105,6 +105,18 @@ test("a main checkout resolves to itself, and a linked worktree to the main one"
     assert.equal(r.mainWorktree, repo.root);
     assert.equal(r.gitDir, join(repo.root, ".git"));
   } finally { repo.cleanup(); }
+});
+
+test("a checkout whose directory name ends in whitespace resolves", { skip: process.platform === "win32" }, () => {
+  const dir = tmp("space");
+  try {
+    const work = join(dir, "work ");
+    mkdirSync(work);
+    execFileSync("git", ["init", "-q", ...initRefFormat, work], { stdio: "ignore" });
+    const r = resolveMainWorktree(work);
+    assert.equal(r.mainWorktree, work);
+    assert.equal(r.gitDir, join(work, ".git"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("a missing path, a non-repository and a bare repository are that backlog's layout error", () => {

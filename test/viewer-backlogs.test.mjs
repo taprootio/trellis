@@ -130,6 +130,20 @@ test("a valid active copy beside a completed copy with a front-matter syntax err
   } finally { repo.cleanup(); }
 });
 
+test("an id whose only copy has a syntax error is not a task, but keeps its diagnostic and its id", () => {
+  const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001", body: "See [bad](DEMO0002.md).\n" }] });
+  try {
+    repo.write("trellis/active/DEMO0002.md", BROKEN.replace("completed", "active").replace("DEMO0001", "DEMO0002"));
+    const out = open(repo).build();
+    assert.deepEqual(out.order, ["DEMO0001"]);
+    assert.deepEqual(out.counts, { active: 1, completed: 0, removed: 0 });
+    assert.equal(taskDetailOf(out, "DEMO0002"), null);
+    assert.ok(out.diagnostics.some((d) => d.path === "active/DEMO0002.md" && /cannot parse front-matter line/.test(d.message)));
+    assert.equal(out.nextId, "DEMO0003", "the id is still taken");
+    assert.ok(!taskDetailOf(out, "DEMO0001").bodyHtml.includes("/task/DEMO0002"), "no link to a task that is not published");
+  } finally { repo.cleanup(); }
+});
+
 test("a valid active copy beside an unreadable completed copy stays active, with a diagnostic", { skip: process.platform === "win32" || process.getuid?.() === 0 }, () => {
   const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001" }, { status: "completed", id: "DEMO0001" }] });
   try {

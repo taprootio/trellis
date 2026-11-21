@@ -23,6 +23,8 @@ function defaultGit(cwd, args) {
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
+// git ends its output with one newline; a directory name may end in whitespace.
+const chomp = (s) => String(s).replace(/\r?\n$/, "");
 const firstLine = (s) => String(s || "").trim().split("\n")[0] || "git error";
 
 function canonical(path, what) {
@@ -63,14 +65,14 @@ export function resolveMainWorktree(path, { git = defaultGit } = {}) {
 
   // A clone made with --separate-git-dir lists its metadata directory, which is no checkout.
   const top = git(entry, ["rev-parse", "--show-toplevel"]);
-  if (top.status !== 0 || canonical(top.stdout.trim(), "top level") !== entry) {
+  if (top.status !== 0 || canonical(chomp(top.stdout), "top level") !== entry) {
     throw new LayoutError(`unsupported layout: ${entry} is not the top of a checkout`);
   }
   const gitDirOut = git(entry, ["rev-parse", "--absolute-git-dir"]);
   const commonOut = git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
   if (gitDirOut.status !== 0 || commonOut.status !== 0) throw new LayoutError("unsupported layout: git could not name the repository directories");
-  const gitDir = canonical(gitDirOut.stdout.trim(), "git directory");
-  if (gitDir !== canonical(commonOut.stdout.trim(), "common git directory")) {
+  const gitDir = canonical(chomp(gitDirOut.stdout), "git directory");
+  if (gitDir !== canonical(chomp(commonOut.stdout), "common git directory")) {
     throw new LayoutError(`unsupported layout: ${entry} belongs to a different repository than ${path}`);
   }
   return { mainWorktree: entry, gitDir };

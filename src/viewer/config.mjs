@@ -4,6 +4,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { homedir as osHomedir } from "node:os";
+import { isIP } from "node:net";
 
 export const DEFAULT_PORT = 4747;
 export const DEFAULT_BIND = "127.0.0.1";
@@ -121,8 +122,12 @@ export function singleRepoConfig(path, { cwd = process.cwd() } = {}) {
   return { backlogs: [{ id, name, path: abs }], port: null, bind: null, allowedHosts: [] };
 }
 
-// True for a bind address that stays on this machine.
+// True for a literal address in a loopback range (127.0.0.0/8, ::1, or the IPv4-mapped form),
+// or the name `localhost`. A host name such as `127.example.com` is not loopback.
 export function isLoopbackBind(bind) {
   const b = String(bind).toLowerCase();
-  return b === "localhost" || b === "::1" || /^127\./.test(b) || /^::ffff:127\./.test(b);
+  if (b === "localhost") return true;
+  const family = isIP(b);
+  if (family === 4) return b.startsWith("127.");
+  return family === 6 && (b === "::1" || b.startsWith("::ffff:127."));
 }
