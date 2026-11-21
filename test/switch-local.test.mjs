@@ -783,3 +783,12 @@ test("a file just over the limit that the edit shrinks back within it gets an ad
     assert.ok(r.stderr.includes(String(LIMIT + 50)) && r.stderr.includes(String(size)));
   } finally { f.cleanup(); }
 });
+
+test("a config whose JSON root is null is refused as a config error, not a crash", () => {
+  const f = fixture();
+  try {
+    writeFileSync(join(f.root, "trellis", "backlog.config.json"), "null\n");
+    const r = refusedWith(f.root, /JSON object/);
+    assert.doesNotMatch(r.stderr, /TypeError|at /);
+  } finally { f.cleanup(); }
+});

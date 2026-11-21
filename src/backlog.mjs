@@ -134,13 +134,21 @@ export function artifactSet(repoRoot, cfg) {
 }
 
 // ----------------------------------------------------------------- config
-export function loadConfig(repoRoot) {
+// `readText(path)` returns the text, `null` when the file is absent, or `{ skip: reason }`
+// when a caller (the viewer) refused it. The default is today's plain read.
+export function defaultReadText(path) {
+  return existsSync(path) ? readFileSync(path, "utf8") : null;
+}
+
+export function loadConfig(repoRoot, { readText = defaultReadText } = {}) {
   const warnings = [];
   const configPath = paths(repoRoot).config;
-  if (!existsSync(configPath)) return { cfg: null, warnings, errors: ["missing backlog.config.json"] };
+  const text = readText(configPath);
+  if (text === null) return { cfg: null, warnings, errors: ["missing backlog.config.json"] };
+  if (typeof text !== "string") return { cfg: null, warnings, errors: [`backlog.config.json was skipped (${text.skip})`] };
   let cfg;
   try {
-    cfg = JSON.parse(readFileSync(configPath, "utf8"));
+    cfg = JSON.parse(text);
   } catch (e) {
     return { cfg: null, warnings, errors: [`backlog.config.json is not valid JSON (${e.message})`] };
   }
@@ -152,6 +160,10 @@ export function loadConfig(repoRoot) {
 export function validateConfig(cfg) {
   const warnings = [];
   const errors = [];
+  // JSON.parse accepts `null`, arrays and scalars; none of them is a config.
+  if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg)) {
+    return { cfg: null, warnings, errors: ["backlog.config.json must be a JSON object"] };
+  }
   if (typeof cfg.idPrefix !== "string" || !cfg.idPrefix) errors.push("config: `idPrefix` must be a non-empty string");
   if (!Number.isInteger(cfg.idWidth) || cfg.idWidth < 1) errors.push("config: `idWidth` must be a positive integer");
   // Optional (TRL0032): floors the *organic* next id (max(floor, max+1)) so freshly
@@ -162,6 +174,11 @@ export function validateConfig(cfg) {
     } else if (Number.isInteger(cfg.idWidth) && cfg.idWidth >= 1 && cfg.nextIdFloor >= 10 ** cfg.idWidth) {
       errors.push(`config: \`nextIdFloor\` (${cfg.nextIdFloor}) must be < 10^idWidth (${10 ** cfg.idWidth}) to fit ${cfg.idWidth} digits`);
     }
+  }
+  // Scan mode interpolates the prefix unescaped into a RegExp, so one that does not compile
+  // (such as `[`) is a config error here instead of a throw in readBacklog.
+  if (typeof cfg.idPrefix === "string" && cfg.idPrefix && !scanPatternCompiles(cfg)) {
+    errors.push("config: `idPrefix` does not form a valid id pattern");
   }
   validateIdAllocation(cfg, errors);
   validateLegacy(cfg, errors);
@@ -317,13 +334,15 @@ export function findActiveMember(roster, handle) {
 // result-object idiom. Absent file → empty roster, no errors. Never throws; the
 // caller surfaces errors. Top-level extra keys are tolerated (room for the future
 // cross-repo direction); member keys are validated strictly.
-export function loadRoster(repoRoot) {
+export function loadRoster(repoRoot, { readText = defaultReadText } = {}) {
   const warnings = [];
   const teamPath = paths(repoRoot).team;
-  if (!existsSync(teamPath)) return { roster: emptyRoster(), warnings, errors: [] };
+  const text = readText(teamPath);
+  if (text === null) return { roster: emptyRoster(), warnings, errors: [] };
+  if (typeof text !== "string") return { roster: emptyRoster(), warnings, errors: [`team.json was skipped (${text.skip})`] };
   let raw;
   try {
-    raw = JSON.parse(readFileSync(teamPath, "utf8"));
+    raw = JSON.parse(text);
   } catch (e) {
     return { roster: emptyRoster(), warnings, errors: [`team.json is not valid JSON (${e.message})`] };
   }
@@ -486,14 +505,23 @@ function unquote(s) {
   return m ? m[1] : s;
 }
 
+// The one rule for where front matter ends: `block` is the text between the fences (null when
+// there is no closed block) and `body` is what follows the closing fence, minus its newline.
+export function splitFrontMatter(text) {
+  const norm = text.replace(/\r\n/g, "\n");
+  const m = norm.match(/^---\n([\s\S]*?)\n---/);
+  if (!m) return { block: null, body: norm };
+  return { block: m[1], body: norm.slice(m[0].length).replace(/^\n/, "") };
+}
+
 // Parse the YAML-subset front-matter block. Tolerates CRLF, `#` comments, and
 // colons inside values; flags malformed lines and duplicate keys via `errors`.
 export function parseFrontMatter(text, where, errors = []) {
-  const block = text.replace(/\r\n/g, "\n").match(/^---\n([\s\S]*?)\n---/);
-  if (!block) { errors.push(`${where}: missing or unterminated YAML front-matter`); return null; }
+  const { block } = splitFrontMatter(text);
+  if (block === null) { errors.push(`${where}: missing or unterminated YAML front-matter`); return null; }
   const fm = {};
   const seen = new Set();
-  const lines = block[1].split("\n");
+  const lines = block.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line.trim() || line.trim().startsWith("#")) continue;
@@ -580,14 +608,26 @@ export function composeFile(fm, body) {
 }
 
 // --------------------------------------------------------------- reading
-function idsFromDir(dir, fileRe) {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).map((f) => f.match(fileRe)).filter(Boolean).map((m) => m[1]);
+function idsFromNames(names, fileRe) {
+  return names.map((f) => f.match(fileRe)).filter(Boolean).map((m) => m[1]);
+}
+
+// Default seams for readBacklog. `listDir` returns names, `[]` for an absent directory, or
+// `{ skip: reason }`; `readItem` returns `{ fm, body, syntaxErrors }` or `{ skip: reason }`.
+const defaultListDir = (dir) => (existsSync(dir) ? readdirSync(dir) : []);
+function defaultReadItem(path, where) {
+  const text = readFileSync(path, "utf8");
+  const syntaxErrors = [];
+  const fm = parseFrontMatter(text, where, syntaxErrors);
+  return { fm, body: splitFrontMatter(text).body, syntaxErrors };
 }
 
 // The scan-mode id pattern, as readBacklog reads it from the config (the prefix is not
 // escaped). The one owner for item checks, filenames and the MCP prompts (TRL0040).
 export const scanIdPattern = (cfg) => `${cfg.idPrefix}\\d{${cfg.idWidth}}`;
+function scanPatternCompiles(cfg) {
+  try { new RegExp(`^(${scanIdPattern(cfg)})\\.md$`); return true; } catch { return false; }
+}
 
 // The per-item checks, shared by readBacklog and the ledger create preflight (TRL0037).
 function makeValidators(cfg, roster, ids) {
@@ -706,20 +746,30 @@ export function activeItemErrors(cfg, data, it) {
   return errors;
 }
 
-export function readBacklog(repoRoot, cfg) {
+export function readBacklog(repoRoot, cfg, { readItem = defaultReadItem, listDir = defaultListDir, readText = defaultReadText } = {}) {
   const p = paths(repoRoot, cfg);
   const fileRe = new RegExp(`^(${scanIdPattern(cfg)})\\.md$`);
   const errors = [];
+  const skipped = []; // { path, reason }: a directory label or `kind/file`, left out by a seam
 
   // The roster lives at the fixed config home; its load/validation errors are
   // config-class and surface here so `--check`/validate fail on a malformed team.json
   // (SPEC §7.2). An absent roster is empty — owner/collaborators stay optional.
-  const { roster, errors: rosterErrors } = loadRoster(repoRoot);
+  const { roster, errors: rosterErrors } = loadRoster(repoRoot, { readText });
   errors.push(...rosterErrors);
+
+  // One listing per status directory, shared by the id scan and the item read, so a directory
+  // that vanishes between them cannot add ids without items.
+  const listings = new Map();
+  for (const [label, dir] of [["active", p.active], ["completed/tasks", p.completedTasks], ["removed", p.removed]]) {
+    const names = listDir(dir);
+    if (Array.isArray(names)) listings.set(dir, names);
+    else { skipped.push({ path: label, reason: names.skip }); listings.set(dir, []); }
+  }
 
   const byId = new Map();
   for (const [label, dir] of [["active", p.active], ["completed/tasks", p.completedTasks], ["removed", p.removed]]) {
-    for (const id of idsFromDir(dir, fileRe)) {
+    for (const id of idsFromNames(listings.get(dir), fileRe)) {
       const at = byId.get(id) || []; at.push(label); byId.set(id, at);
     }
   }
@@ -728,14 +778,15 @@ export function readBacklog(repoRoot, cfg) {
 
   const readDir = (dir, kind, isActive) => {
     const out = [];
-    if (!existsSync(dir)) return out;
-    for (const f of readdirSync(dir).sort()) {
+    for (const f of [...listings.get(dir)].sort()) {
       if (!fileRe.test(f)) {
         if (isActive && /\.md$/.test(f)) errors.push(`active/${f}: filename must be ${cfg.idPrefix} + ${cfg.idWidth} digits`);
         continue;
       }
-      const fm = parseFrontMatter(readFileSync(join(dir, f), "utf8"), `${kind}/${f}`, errors);
-      if (fm) out.push({ ...fm, _file: f });
+      const item = readItem(join(dir, f), `${kind}/${f}`);
+      if (item.skip !== undefined) { skipped.push({ path: `${kind}/${f}`, reason: item.skip }); continue; }
+      errors.push(...item.syntaxErrors);
+      if (item.fm) out.push({ ...item.fm, _file: f });
     }
     return out;
   };
@@ -776,7 +827,7 @@ export function readBacklog(repoRoot, cfg) {
     validateAssignees(it, err, false);
   }
 
-  return { active, completed, removed, ids, errors, roster };
+  return { active, completed, removed, ids, errors, roster, skipped, configErrors: rosterErrors };
 }
 
 // ------------------------------------------------------------------ ids

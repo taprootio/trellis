@@ -20,6 +20,8 @@ import {
   buildBacklogJson,
   composeFile,
   parseFrontMatter,
+  splitFrontMatter,
+  validateConfig,
   paths,
   branchNameProblem,
   artifactSet,
@@ -1283,4 +1285,93 @@ test("summary: 0 still fails on a qualifying item and on a non-qualifying one in
       assert.ok(legacyErrors(root).some((e) => e.includes("missing `summary`")), id);
     } finally { cleanup(root); }
   }
+});
+
+// ------------------------------------------- reading seams (TRL0005)
+
+test("a config whose JSON root is not an object is a config error, not a throw", () => {
+  for (const raw of [null, [], 3, "x"]) {
+    const root = mkdtempSync(join(tmpdir(), "trellis-backlog-"));
+    try {
+      mkdirSync(join(root, "trellis"), { recursive: true });
+      writeFileSync(join(root, "trellis", "backlog.config.json"), JSON.stringify(raw));
+      const { cfg, errors } = loadConfig(root);
+      assert.equal(cfg, null);
+      assert.ok(errors.some((e) => e.includes("JSON object")), JSON.stringify(raw));
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+  assert.ok(validateConfig(null).errors.length > 0);
+});
+
+test("a scan idPrefix that does not compile is a config error, while R+ still loads", () => {
+  for (const idPrefix of ["[", "R[", "(", "*"]) {
+    assert.ok(configErrors({ ...ARRAY_CFG, idPrefix }).some((e) => e.includes("idPrefix")), idPrefix);
+  }
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, idPrefix: "R+" }), []);
+});
+
+test("the default seams read the files as before and add skipped and configErrors", () => {
+  withRepo(ARRAY_CFG, { active: [{ id: "DEMO0001", title: "T", effort: 3 }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    assert.deepEqual(data.errors, []);
+    assert.deepEqual(data.skipped, []);
+    assert.deepEqual(data.configErrors, []);
+    assert.deepEqual(data.active.map((a) => a._file), ["DEMO0001.md"]);
+    assert.deepEqual([...data.ids], ["DEMO0001"]);
+  });
+});
+
+test("an absent team.json is an empty roster, a skipped one is a roster error; same for the config", () => {
+  withRepo(ARRAY_CFG, {}, (root) => {
+    assert.deepEqual(loadRoster(root).errors, []);
+    assert.deepEqual(loadRoster(root, { readText: () => null }).errors, []);
+    const skippedRoster = loadRoster(root, { readText: () => ({ skip: "not a regular file" }) });
+    assert.deepEqual(skippedRoster.errors, ["team.json was skipped (not a regular file)"]);
+    assert.equal(skippedRoster.roster.members.length, 0);
+
+    assert.deepEqual(loadConfig(root, { readText: () => null }).errors, ["missing backlog.config.json"]);
+    const skippedCfg = loadConfig(root, { readText: () => ({ skip: "leaves the worktree" }) });
+    assert.equal(skippedCfg.cfg, null);
+    assert.deepEqual(skippedCfg.errors, ["backlog.config.json was skipped (leaves the worktree)"]);
+  });
+});
+
+test("readBacklog reports a skipped roster as configErrors beside errors", () => {
+  withRepo(ARRAY_CFG, {}, (root) => {
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg, { readText: (p) => (p.endsWith("team.json") ? { skip: "fifo" } : null) });
+    assert.deepEqual(data.configErrors, ["team.json was skipped (fifo)"]);
+    assert.ok(data.errors.includes(data.configErrors[0]));
+  });
+});
+
+test("readItem and listDir seams: skips are recorded, a skipped directory adds no ids, syntax errors flow into errors", () => {
+  withRepo(ARRAY_CFG, { active: [{ id: "DEMO0001", title: "A", effort: 3 }, { id: "DEMO0002", title: "B", effort: 3 }], completed: [{ id: "DEMO0009", title: "C" }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const calls = [];
+    const data = readBacklog(root, cfg, {
+      listDir: (dir) => (dir.endsWith("completed/tasks") ? { skip: "outside the worktree" } : ["DEMO0001.md", "DEMO0002.md"].filter(() => dir.endsWith("active"))),
+      readItem: (path, where) => {
+        calls.push(where);
+        if (where === "active/DEMO0002.md") return { skip: "unreadable" };
+        return { fm: { id: "DEMO0001", title: "A", status: "active", milestone: "Alpha", priority: "High", effort: 3, depends_on: [], summary: "S." }, body: "b", syntaxErrors: ["active/DEMO0001.md: odd line"] };
+      },
+    });
+    assert.deepEqual(calls, ["active/DEMO0001.md", "active/DEMO0002.md"]);
+    assert.deepEqual(data.skipped, [{ path: "completed/tasks", reason: "outside the worktree" }, { path: "active/DEMO0002.md", reason: "unreadable" }]);
+    assert.ok(data.errors.includes("active/DEMO0001.md: odd line"));
+    assert.deepEqual([...data.ids].sort(), ["DEMO0001", "DEMO0002"], "the skipped directory contributed no ids");
+    assert.equal(data.completed.length, 0);
+  });
+});
+
+test("splitFrontMatter splits on the rule parseFrontMatter uses", () => {
+  assert.deepEqual(splitFrontMatter("---\na: 1\n---\n\n# Body\n"), { block: "a: 1", body: "\n# Body\n" });
+  assert.deepEqual(splitFrontMatter("---\r\na: 1\r\n---\r\nx\r\n"), { block: "a: 1", body: "x\n" });
+  assert.deepEqual(splitFrontMatter("---\na: 1\n"), { block: null, body: "---\na: 1\n" });
+  assert.deepEqual(splitFrontMatter("no fences"), { block: null, body: "no fences" });
+  const errors = [];
+  assert.equal(parseFrontMatter("---\na: 1\n", "x", errors), null);
+  assert.equal(errors.length, 1);
 });

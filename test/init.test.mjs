@@ -2229,3 +2229,19 @@ test("--skip agents renders no block, so a huge id width still dry-runs", () => 
     assert.equal(r.status, 0, r.stderr.slice(0, 300));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("init --force rewrites a config whose JSON root is null; without --force it reports a config error", () => {
+  const root = tempRepo();
+  try {
+    mkdirSync(join(root, "trellis"), { recursive: true });
+    const cfgPath = join(root, "trellis", "backlog.config.json");
+    writeFileSync(cfgPath, "null\n");
+    const plain = spawnSync(process.execPath, [join(sourceRoot, "scripts", "trellis-init.mjs"), root, "--prefix", "DEMO", "--skip", "agents"], { encoding: "utf8" });
+    assert.equal(plain.status, 1, plain.stderr);
+    assert.match(plain.stderr, /JSON object/);
+    assert.doesNotMatch(plain.stderr, /TypeError/);
+    const { summary } = applyScaffold(root, { prefix: "DEMO", force: true }, {}, sourceRoot);
+    assert.deepEqual(summary.errors, []);
+    assert.equal(JSON.parse(readFileSync(cfgPath, "utf8")).idPrefix, "DEMO");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
