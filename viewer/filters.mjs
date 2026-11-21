@@ -1,0 +1,172 @@
+// Pure list logic: filters in the query string, row building, sort and search order.
+
+export const STATUSES = ["active", "completed", "removed"];
+export const DEFAULT_STATUSES = ["active"];
+
+export function defaultFilters() {
+  return { backlogs: [], statuses: [...DEFAULT_STATUSES], milestones: [], priority: "", owner: "", q: "" };
+}
+
+// Owners compare trimmed and case-folded, like the roster's handle lookup.
+export function normalizeOwner(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+// A milestone value is "<backlogId>:<milestone>"; backlog ids never hold a colon.
+export function milestoneKey(backlogId, milestone) {
+  return `${backlogId}:${milestone}`;
+}
+
+function values(params, key) {
+  return params.getAll(key).filter((v) => v !== "");
+}
+
+export function parseQuery(search = "") {
+  const params = new URLSearchParams(search);
+  const f = defaultFilters();
+  f.backlogs = values(params, "backlog");
+  if (params.has("status")) f.statuses = values(params, "status").filter((s) => STATUSES.includes(s));
+  f.milestones = values(params, "milestone");
+  f.priority = params.get("priority") ?? "";
+  f.owner = params.get("owner") ?? "";
+  f.q = params.get("q") ?? "";
+  return f;
+}
+
+export function serializeQuery(filters) {
+  const f = { ...defaultFilters(), ...filters };
+  const params = new URLSearchParams();
+  for (const id of f.backlogs) params.append("backlog", id);
+  const sameStatuses = f.statuses.length === DEFAULT_STATUSES.length && f.statuses.every((s, i) => s === DEFAULT_STATUSES[i]);
+  if (!sameStatuses) {
+    if (f.statuses.length === 0) params.append("status", "");
+    for (const s of f.statuses) params.append("status", s);
+  }
+  for (const m of f.milestones) params.append("milestone", m);
+  if (f.priority) params.set("priority", f.priority);
+  if (f.owner) params.set("owner", f.owner);
+  if (f.q) params.set("q", f.q);
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
+// Routes: "/", "/b/<id>" (presets the backlog filter) and "/b/<id>/task/<ID>".
+export function parseLocation(pathname = "/", search = "") {
+  const filters = parseQuery(search);
+  const parts = pathname.split("/").filter(Boolean).map((p) => {
+    try { return decodeURIComponent(p); } catch { return p; }
+  });
+  if (parts[0] === "b" && parts[1]) {
+    if (parts[2] === "task" && parts[3] && parts.length === 4) {
+      return { view: "task", filters, task: { backlog: parts[1], id: parts[3] } };
+    }
+    if (parts.length === 2) {
+      if (!new URLSearchParams(search).has("backlog")) filters.backlogs = [parts[1]];
+      return { view: "list", filters, task: null };
+    }
+  }
+  return { view: "list", filters, task: null };
+}
+
+export function listPath(filters) {
+  return `/${serializeQuery(filters)}`;
+}
+
+export function taskPath(backlogId, id, filters) {
+  return `/b/${encodeURIComponent(backlogId)}/task/${encodeURIComponent(id)}${serializeQuery(filters)}`;
+}
+
+const collator = new Intl.Collator("en", { numeric: true });
+
+// One row per task across every loaded backlog, tagged with its sort position.
+export function buildRows(backlogViews) {
+  const rows = [];
+  backlogViews.forEach((view, backlogIndex) => {
+    if (view.status !== "ok" || !Array.isArray(view.tasks)) return;
+    const milestones = Array.isArray(view.milestones) ? view.milestones : [];
+    for (const task of view.tasks) {
+      const at = typeof task.milestone === "string" ? milestones.indexOf(task.milestone) : -1;
+      rows.push({
+        key: `${view.id}/${task.id}`,
+        backlogId: view.id,
+        backlogName: view.name,
+        backlogIndex,
+        milestoneIndex: at < 0 ? Number.MAX_SAFE_INTEGER : at,
+        task,
+      });
+    }
+  });
+  return rows;
+}
+
+export function compareRows(a, b) {
+  return a.backlogIndex - b.backlogIndex
+    || a.milestoneIndex - b.milestoneIndex
+    || collator.compare(a.task.id, b.task.id);
+}
+
+export function sortRows(rows) {
+  return [...rows].sort(compareRows);
+}
+
+export function filterRows(rows, filters) {
+  const ownerWanted = normalizeOwner(filters.owner);
+  return rows.filter(({ backlogId, task }) => {
+    if (filters.backlogs.length && !filters.backlogs.includes(backlogId)) return false;
+    if (filters.statuses.length && !filters.statuses.includes(task.status)) return false;
+    if (filters.milestones.length && !filters.milestones.includes(milestoneKey(backlogId, task.milestone))) return false;
+    if (filters.priority && task.priority !== filters.priority) return false;
+    if (ownerWanted && normalizeOwner(task.owner) !== ownerWanted) return false;
+    return true;
+  });
+}
+
+// Search hits replace the default sort and add the matching line to each card.
+export function orderByHits(rows, hits) {
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  const ordered = [];
+  for (const hit of hits) {
+    const row = byKey.get(`${hit.backlog}/${hit.id}`);
+    if (row) ordered.push({ ...row, hit });
+  }
+  return ordered;
+}
+
+// Rows to show: default sort, or hit order while a search term is set.
+export function visibleRows(backlogViews, filters, search) {
+  const filtered = filterRows(buildRows(backlogViews), filters);
+  if (!filters.q.trim()) return sortRows(filtered);
+  return search.status === "ready" ? orderByHits(filtered, search.hits) : [];
+}
+
+export function milestoneGroups(backlogViews) {
+  return backlogViews
+    .filter((v) => v.status === "ok" && Array.isArray(v.milestones) && v.milestones.length)
+    .map((v) => ({
+      backlogId: v.id,
+      backlogName: v.name,
+      items: v.milestones.map((m) => ({ text: `${v.name} · ${m}`, value: milestoneKey(v.id, m) })),
+    }));
+}
+
+export function priorityOptions(backlogViews) {
+  const seen = new Set();
+  for (const v of backlogViews) {
+    for (const p of v.config?.priorities ?? []) seen.add(p);
+  }
+  return [...seen];
+}
+
+// One entry per normalized owner, shown as first written.
+export function ownerOptions(backlogViews) {
+  const seen = new Map();
+  for (const row of buildRows(backlogViews)) {
+    const key = normalizeOwner(row.task.owner);
+    if (key && !seen.has(key)) seen.set(key, row.task.owner.trim());
+  }
+  return [...seen].map(([value, text]) => ({ value, text })).sort((a, b) => collator.compare(a.text, b.text));
+}
+
+export function toText(value) {
+  return value === null || value === undefined ? "" : String(value);
+}
