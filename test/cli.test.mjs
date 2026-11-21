@@ -12,6 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { applyScaffold } from "../src/init.mjs";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
+import { startViewer } from "../src/viewer/server.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cliScript = join(sourceRoot, "scripts", "trellis.mjs");
@@ -151,7 +152,7 @@ function viewerPackProblems(paths, filesField) {
 }
 
 // The only test that runs the real viewer build; every other test uses a fixture dist.
-test("package ships scaffold templates and the viewer only with its grant", () => {
+test("package ships scaffold templates and the viewer only with its grant", async () => {
   const cache = mkdtempSync(join(tmpdir(), "trellis-npm-cache-"));
   const copy = mkdtempSync(join(tmpdir(), "trellis-pack-copy-"));
   try {
@@ -164,6 +165,19 @@ test("package ships scaffold templates and the viewer only with its grant", () =
     const js = shell.match(/src="\/app\/(app-[^"]+\.js)"/);
     assert.ok(js && existsSync(join(dist, js[1])), "index.html should reference the built bundle by a root-relative /app/ URL");
     assert.match(shell, /href="\/app\/esp-reset\.css"/);
+
+    // A deep link gets the shell, and the shell's root-relative assets load from there.
+    const viewer = await startViewer({ entries: [{ id: "trellis", name: "Trellis", path: sourceRoot }], port: 0, distDir: dist, watch: false });
+    try {
+      const page = await fetch(`${viewer.url}/b/trellis/task/TRL0005`);
+      assert.equal(page.status, 200);
+      const html = await page.text();
+      for (const asset of [...html.matchAll(/(?:src|href)="(\/app\/[^"]+)"/g)].map((m) => m[1])) {
+        assert.equal((await fetch(`${viewer.url}${asset}`)).status, 200, `${asset} should load`);
+      }
+    } finally {
+      await viewer.close();
+    }
 
     const pkg = JSON.parse(readFileSync(join(sourceRoot, "package.json"), "utf8"));
     const paths = packedPaths(sourceRoot, cache);
