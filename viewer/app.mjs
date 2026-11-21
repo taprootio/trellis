@@ -29,6 +29,15 @@ async function fetchJson(url) {
 
 const ANY = "";
 
+// Cards render inside esp-repeater's shadow root, which the page's <style> cannot reach.
+const CARD_STYLE = html`<style>
+  .card { background: var(--esp-color-layer-2); border-radius: var(--esp-size-border-radius); padding: var(--esp-size-padding); margin-block-end: var(--esp-size-small); }
+  .card-head, .card-meta { display: flex; flex-wrap: wrap; gap: var(--esp-size-small); align-items: center; }
+  .card p { margin: var(--esp-size-tiny) 0; }
+  .effort-image { block-size: 1.25em; inline-size: auto; vertical-align: middle; }
+  .hit { font-family: var(--esp-font-monospace); }
+</style>`;
+
 class TrellisViewer extends LitElement {
   static properties = { snapshot: { state: true } };
 
@@ -82,9 +91,9 @@ class TrellisViewer extends LitElement {
     const backlogItems = pick(views.map((v) => ({ text: v.name, value: v.id })), filters.backlogs);
     const statusItems = pick(STATUSES.map((s) => ({ text: s, value: s })), filters.statuses);
     const milestoneItems = pick(milestoneGroups(views).flatMap((g) => g.items), filters.milestones);
-    const one = (items, current) => [{ text: "Any", value: ANY, selected: !current }, ...items.map((i) => ({ ...i, selected: i.value === current }))];
-    const priorityItems = one(priorityOptions(views).map((p) => ({ text: p, value: p })), filters.priority);
-    const ownerItems = one(ownerOptions(views), normalizeOwner(filters.owner));
+    const one = (label, items, current) => [{ text: `Any ${label}`, value: ANY, selected: !current }, ...items.map((i) => ({ ...i, selected: i.value === current }))];
+    const priorityItems = one("priority", priorityOptions(views).map((p) => ({ text: p, value: p })), filters.priority);
+    const ownerItems = one("owner", ownerOptions(views), normalizeOwner(filters.owner));
     const some = (key) => (e) => this.setFilters({ ...filters, [key]: e.detail.map((i) => i.value) });
     const single = (key) => (e) => this.setFilters({ ...filters, [key]: e.detail?.value ?? "" });
     return html`
@@ -113,6 +122,7 @@ class TrellisViewer extends LitElement {
     const { filters } = this.snapshot;
     return html`
       <article class="card">
+        ${CARD_STYLE}
         <header class="card-head">
           <esp-badge>${row.backlogName}</esp-badge>
           <a class="task-id" href=${taskPath(row.backlogId, task.id, filters)}
@@ -160,7 +170,7 @@ class TrellisViewer extends LitElement {
 
   renderTask() {
     const { task, filters } = this.snapshot;
-    const back = html`<esp-button @esp-clicked=${() => this.navigate(listPath(filters))}>Back to list</esp-button>`;
+    const back = html`<esp-button collapsed label="Back to list" @esp-clicked=${() => this.navigate(listPath(filters))}></esp-button>`;
     if (task.status === "gone") {
       return html`<p>${task.id} is no longer there.</p>${back}`;
     }
@@ -174,7 +184,6 @@ class TrellisViewer extends LitElement {
       <dl class="front-matter">
         ${fm.map(([k, v]) => html`<dt>${k}</dt><dd>${typeof v === "object" ? JSON.stringify(v) : toText(v)}</dd>`)}
       </dl>
-      ${this.renderEffort(r.effortDisplay)}
       <div class="body">${unsafeHTML(r.bodyHtml ?? "")}</div>`;
   }
 
@@ -185,11 +194,8 @@ class TrellisViewer extends LitElement {
       <style>
         trellis-viewer .filters { display: grid; gap: var(--esp-size-small); grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); margin-block-end: var(--esp-size-padding); }
         trellis-viewer main { padding: var(--esp-size-padding-page); }
-        trellis-viewer .card { background: var(--esp-color-layer-2); border-radius: var(--esp-size-border-radius); padding: var(--esp-size-padding); margin-block-end: var(--esp-size-small); }
-        trellis-viewer .card-head, trellis-viewer .card-meta, trellis-viewer .attention { display: flex; flex-wrap: wrap; gap: var(--esp-size-small); align-items: center; }
-        trellis-viewer .card p { margin: var(--esp-size-tiny) 0; }
+        trellis-viewer .attention { display: flex; flex-wrap: wrap; gap: var(--esp-size-small); align-items: center; }
         trellis-viewer .effort-image { block-size: 1.25em; vertical-align: middle; }
-        trellis-viewer .hit { font-family: var(--esp-font-monospace); }
         trellis-viewer .front-matter { display: grid; grid-template-columns: max-content 1fr; gap: var(--esp-size-tiny) var(--esp-size-padding); }
         trellis-viewer .front-matter dd { margin: 0; }
       </style>
