@@ -107,6 +107,47 @@ subject. This is a **derived, non-gated report** (SPEC §8.4): volatile and
 non-authoritative (git is the record), so it is **not** part of `backlog:check`,
 and the materialized `history.json` is gitignored — regenerate it at build time.
 
+## View backlogs
+
+`trellis serve` runs a local, read-only viewer for one or more backlogs, built
+with Espalier controls. Each backlog is read from its repo's **main worktree**
+(edits in linked worktrees do not show), and the page updates live as files
+change there.
+
+```
+npx @taprootio/trellis serve                  # the current repo, at http://127.0.0.1:4747
+npx @taprootio/trellis serve --config <file>  # several backlogs from a viewer config
+```
+
+A viewer config lists the backlogs to show, in display order
+(`templates/viewer.example.json`):
+
+```json
+{
+  "backlogs": [
+    { "id": "taproot", "name": "Taproot", "path": "~/Documents/GitHub/taproot" },
+    { "id": "espalier", "name": "Espalier", "path": "~/Documents/GitHub/taproot-controls" }
+  ],
+  "port": 4747,
+  "bind": "127.0.0.1",
+  "allowedHosts": ["trellis.test"]
+}
+```
+
+Without `--config` or `--repo`, Trellis reads `$TRELLIS_VIEWER_CONFIG`, then
+`$XDG_CONFIG_HOME/trellis/viewer.json`, then `~/.config/trellis/viewer.json`,
+and serves the current repo when none exists. The startup line names the file
+it loaded. Each backlog uses its own repo's config, so prefixes, milestones and
+spec versions can differ; a backlog that cannot be read shows its error while
+the others still serve. The viewer listens on loopback by default and answers
+only `127.0.0.1`, `localhost`, its printed address and `allowedHosts`
+(`--allow-host` adds one), so a proxy such as a local `*.test` route needs its
+host name allowed. Reading needs git 2.36 or later.
+
+Building the viewer from a checkout (`npm run build:viewer`, which `node --test`
+and `npm pack` also run) needs Node `^20.19.0 || >=22.12.0`, rolldown's floor;
+the published CLI keeps its Node 18 floor because it ships the built bundle.
+
 ## Operate over MCP
 
 The backlog operations are also exposed as MCP tools, so any MCP-aware client
