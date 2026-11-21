@@ -86,9 +86,10 @@ export function createWatchers(backlogs, onChange, { debounceMs = DEBOUNCE_MS, w
     try { h.watcher.close(); } catch { /* already closed */ }
   }
 
-  function reconcile(backlog) {
+  function reconcile(backlog, initial = false) {
     const s = state.get(backlog.id);
     if (closed || !s || !backlog.mainWorktree) return;
+    let armedLate = false;
     const wanted = watchPlan(backlog);
     for (const dir of [...s.handles.keys()]) if (!wanted.has(dir)) disarm(s, dir);
     for (const [dir, accept] of wanted) {
@@ -102,8 +103,14 @@ export function createWatchers(backlogs, onChange, { debounceMs = DEBOUNCE_MS, w
         handle.watcher = watch(dir, { persistent: false }, (_type, filename) => onEvent(backlog, s, dir, handle, filename));
         handle.watcher.on("error", () => { disarm(s, dir); schedule(backlog, s); });
         s.handles.set(dir, handle);
+        if (!initial) {
+          // Files written between the replacement and this watch raised no event.
+          backlog.reader.invalidate(dir);
+          armedLate = true;
+        }
       } catch { /* retried by the next reconcile */ }
     }
+    if (armedLate) schedule(backlog, s);
   }
 
   function onEvent(backlog, s, dir, handle, filename) {
@@ -130,7 +137,7 @@ export function createWatchers(backlogs, onChange, { debounceMs = DEBOUNCE_MS, w
   }
 
   return {
-    start() { for (const b of backlogs) reconcile(b); },
+    start() { for (const b of backlogs) reconcile(b, true); },
     reconcile(backlog) { reconcile(typeof backlog === "string" ? byId.get(backlog) : backlog); },
     // The directories currently watched for a backlog, for tests.
     watched(id) { return [...state.get(id).handles.keys()].sort(); },
