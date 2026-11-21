@@ -1,0 +1,68 @@
+{
+  "variants": {
+    "ok-and-error": {
+      "description": "The list in config order: a working backlog, then one in error (zero counts, null nextId).",
+      "optional": [],
+      "nullable": [
+        "[].nextId"
+      ],
+      "freeForm": [],
+      "response": [
+        {
+          "id": "demo",
+          "name": "Demo",
+          "path": "/Users/me/demo",
+          "mainWorktree": "/Users/me/demo",
+          "status": "ok",
+          "errors": [],
+          "counts": {
+            "active": 2,
+            "completed": 1,
+            "removed": 0
+          },
+          "nextId": "DEMO0004"
+        },
+        {
+          "id": "broken",
+          "name": "Broken",
+          "path": "/Users/me/broken",
+          "mainWorktree": "/Users/me/broken",
+          "status": "error",
+          "errors": [
+            "backlog.config.json must be a JSON object"
+          ],
+          "counts": {
+            "active": 0,
+            "completed": 0,
+            "removed": 0
+          },
+          "nextId": null
+        }
+      ]
+    },
+    "ledger-null-next-id": {
+      "description": "A ledger backlog with no valid ledger: nextId null on an ok backlog.",
+      "optional": [],
+      "nullable": [
+        "[].nextId"
+      ],
+      "freeForm": [],
+      "response": [
+        {
+          "id": "ledger",
+          "name": "Ledger",
+          "path": "/Users/me/ledger",
+          "mainWorktree": "/Users/me/ledger",
+          "status": "ok",
+          "errors": [],
+          "counts": {
+            "active": 1,
+            "completed": 0,
+            "removed": 0
+          },
+          "nextId": null
+        }
+      ]
+    }
+  }
+}

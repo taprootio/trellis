@@ -1,0 +1,51 @@
+{
+  "variants": {
+    "hits-and-skipped": {
+      "description": "Hits for several fields and a skipped backlog id; each hit has backlog, id, field and line (text).",
+      "optional": [],
+      "nullable": [],
+      "freeForm": [],
+      "response": {
+        "hits": [
+          {
+            "backlog": "demo",
+            "id": "DEMO0003",
+            "field": "id",
+            "line": "With body"
+          },
+          {
+            "backlog": "demo",
+            "id": "DEMO0001",
+            "field": "title",
+            "line": "Custom scale"
+          },
+          {
+            "backlog": "demo",
+            "id": "DEMO0002",
+            "field": "summary",
+            "line": "S."
+          },
+          {
+            "backlog": "plain",
+            "id": "PLN0001",
+            "field": "body",
+            "line": "The first line that matches"
+          }
+        ],
+        "skipped": [
+          "broken"
+        ]
+      }
+    },
+    "empty": {
+      "description": "No hits and nothing skipped.",
+      "optional": [],
+      "nullable": [],
+      "freeForm": [],
+      "response": {
+        "hits": [],
+        "skipped": []
+      }
+    }
+  }
+}

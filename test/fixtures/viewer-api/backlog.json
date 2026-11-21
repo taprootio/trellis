@@ -1,0 +1,902 @@
+{
+  "variants": {
+    "custom-scale-active": {
+      "description": "A scan backlog with a custom effort scale: label, emoji and image effort, dependsOnMissing on one task.",
+      "optional": [
+        "tasks[].dependsOnMissing",
+        "tasks[].effortLabel",
+        "tasks[].effortEmoji",
+        "tasks[].effortImage",
+        "tasks[].completed_on",
+        "tasks[].removed_on",
+        "tasks[].removed_reason"
+      ],
+      "nullable": [
+        "config.effortScale.name",
+        "config.effortScale.values[].emoji",
+        "config.effortScale.values[].imageUrl",
+        "tasks[].effortDisplay.emoji",
+        "tasks[].effortDisplay.imageUrl"
+      ],
+      "freeForm": [],
+      "response": {
+        "id": "demo",
+        "name": "Demo",
+        "status": "ok",
+        "errors": [],
+        "prefix": "DEMO",
+        "milestones": [
+          "Alpha",
+          "Beta"
+        ],
+        "nextId": "DEMO0003",
+        "counts": {
+          "active": 2,
+          "completed": 0,
+          "removed": 0
+        },
+        "tasks": [
+          {
+            "id": "DEMO0001",
+            "title": "Custom scale",
+            "status": "active",
+            "milestone": "Alpha",
+            "priority": "High",
+            "effort": 3,
+            "depends_on": [],
+            "owner": null,
+            "collaborators": [],
+            "summary": "S.",
+            "effortDisplay": {
+              "label": "Trout",
+              "value": 3,
+              "emoji": "🐡",
+              "imageUrl": null,
+              "text": "Trout · 3"
+            },
+            "needsAttention": false,
+            "validationErrors": [],
+            "effortLabel": "Trout",
+            "effortEmoji": "🐡"
+          },
+          {
+            "id": "DEMO0002",
+            "title": "Image scale",
+            "status": "active",
+            "milestone": "Beta",
+            "priority": "Low",
+            "effort": 5,
+            "depends_on": [],
+            "owner": null,
+            "collaborators": [],
+            "summary": "S.",
+            "effortDisplay": {
+              "label": "Tuna",
+              "value": 5,
+              "emoji": null,
+              "imageUrl": "/assets/demo/effort/tuna.svg",
+              "text": "Tuna · 5"
+            },
+            "needsAttention": false,
+            "validationErrors": [],
+            "effortLabel": "Tuna",
+            "effortImage": "assets/effort/tuna.svg",
+            "dependsOnMissing": true
+          }
+        ],
+        "config": {
+          "idPrefix": "DEMO",
+          "milestones": [
+            "Alpha",
+            "Beta"
+          ],
+          "priorities": [
+            "High",
+            "Low"
+          ],
+          "effortScale": {
+            "name": "fish",
+            "values": [
+              {
+                "value": 1,
+                "label": "Minnow",
+                "emoji": "🐟",
+                "imageUrl": null
+              },
+              {
+                "value": 2,
+                "label": "Goldfish",
+                "emoji": "🐠",
+                "imageUrl": null
+              },
+              {
+                "value": 5,
+                "label": "Tuna",
+                "emoji": null,
+                "imageUrl": "/assets/demo/effort/tuna.svg"
+              },
+              {
+                "value": 8,
+                "label": "Swordfish",
+                "emoji": null,
+                "imageUrl": null
+              }
+            ]
+          }
+        },
+        "diagnostics": []
+      }
+    },
+    "identity-scale": {
+      "description": "The plain numeric scale: effortScale.name is null, effortDisplay.text is the bare number, no effortLabel fields.",
+      "optional": [
+        "tasks[].dependsOnMissing",
+        "tasks[].effortLabel",
+        "tasks[].effortEmoji",
+        "tasks[].effortImage",
+        "tasks[].completed_on",
+        "tasks[].removed_on",
+        "tasks[].removed_reason"
+      ],
+      "nullable": [
+        "config.effortScale.name",
+        "tasks[].effortDisplay.emoji",
+        "tasks[].effortDisplay.imageUrl"
+      ],
+      "freeForm": [],
+      "response": {
+        "id": "plain",
+        "name": "Plain",
+        "status": "ok",
+        "errors": [],
+        "prefix": "PLN",
+        "milestones": [
+          "Alpha",
+          "Beta"
+        ],
+        "nextId": "PLN0002",
+        "counts": {
+          "active": 1,
+          "completed": 0,
+          "removed": 0
+        },
+        "tasks": [
+          {
+            "id": "PLN0001",
+            "title": "Identity",
+            "status": "active",
+            "milestone": "Alpha",
+            "priority": "High",
+            "effort": 5,
+            "depends_on": [],
+            "owner": null,
+            "collaborators": [],
+            "summary": "S.",
+            "effortDisplay": {
+              "label": "5",
+              "value": 5,
+              "emoji": null,
+              "imageUrl": null,
+              "text": "5"
+            },
+            "needsAttention": false,
+            "validationErrors": []
+          }
+        ],
+        "config": {
+          "idPrefix": "PLN",
+          "milestones": [
+            "Alpha",
+            "Beta"
+          ],
+          "priorities": [
+            "High",
+            "Low"
+          ],
+          "effortScale": {
+            "name": null,
+            "values": [
+              {
+                "value": 1,
+                "label": "1",
+                "emoji": null,
+                "imageUrl": null
+              },
+              {
+                "value": 2,
+                "label": "2",
+                "emoji": null,
+                "imageUrl": null
+              },
+              {
+                "value": 3,
+                "label": "3",
+                "emoji": null,
+                "imageUrl": null
+              },
+              {
+                "value": 5,
+                "label": "5",
+                "emoji": null,
+                "imageUrl": null
+              }
+            ]
+          }
+        },
+        "diagnostics": []
+      }
+    },
+    "legacy-completed-nulls": {
+      "description": "A legacy completed task with null milestone, priority, effort and summary, and an unresolved effort display. Never needs attention.",
+      "optional": [
+        "tasks[].dependsOnMissing",
+        "tasks[].effortLabel",
+        "tasks[].effortEmoji",
+        "tasks[].effortImage",
+        "tasks[].completed_on",
+        "tasks[].removed_on",
+        "tasks[].removed_reason"
+      ],
+      "nullable": [
+        "tasks[].milestone",
+        "tasks[].priority",
+        "tasks[].effort",
+        "tasks[].summary",
+        "tasks[].completed_on",
+        "tasks[].effortDisplay.label",
+        "tasks[].effortDisplay.value",
+        "tasks[].effortDisplay.emoji",
+        "tasks[].effortDisplay.imageUrl",
+        "config.effortScale.name"
+      ],
+      "freeForm": [],
+      "response": {
+        "id": "legacy",
+        "name": "Legacy",
+        "status": "ok",
+        "errors": [],
+        "prefix": "OLD",
+        "milestones": [
+          "Alpha",
+          "Beta"
+        ],
+        "nextId": "OLD0002",
+        "counts": {
+          "active": 0,
+          "completed": 1,
+          "removed": 0
+        },
+        "tasks": [
+          {
+            "id": "OLD0001",
+            "title": "Before adoption",
+            "status": "completed",
+            "milestone": null,
+            "priority": null,
+            "effort": null,
+            "depends_on": [],
+            "owner": null,
+            "collaborators": [],
+            "summary": null,
+            "effortDisplay": {
+              "label": null,
+              "value": null,
+              "emoji": null,
+              "imageUrl": null,
+              "text": ""
+            },
+            "needsAttention": false,
+            "validationErrors": [],
+            "completed_on": null
+          }
+        ],
+        "config": {
+          "idPrefix": "OLD",
+          "milestones": [
+            "Alpha",
+            "Beta"
+          ],
+          "priorities": [
+            "High",
+            "Low"
+          ],
+          "effortScale": {
+            "name": null,
+            "values": [
+              {
+                "value": 1,
+                "label": "1",
+                "emoji": null,
+                "imageUrl": null
+              }
+            ]
+          }
+        },
+        "diagnostics": []
+      }
+    },
+    "completed-retired-label": {
+      "description": "A completed task whose string effort label is retired from the scale: the raw string stays in effort, the display is empty and there is no validation error.",
+      "optional": [
+        "tasks[].dependsOnMissing",
+        "tasks[].effortLabel",
+        "tasks[].effortEmoji",
+        "tasks[].effortImage",
+        "tasks[].completed_on",
+        "tasks[].removed_on",
+        "tasks[].removed_reason"
+      ],
+      "nullable": [
+        "config.effortScale.name",
+        "config.effortScale.values[].emoji",
+        "config.effortScale.values[].imageUrl",
+        "tasks[].effortDisplay.label",
+        "tasks[].effortDisplay.value",
+        "tasks[].effortDisplay.emoji",
+        "tasks[].effortDisplay.imageUrl"
+      ],
+      "freeForm": [],
+      "response": {
+        "id": "demo",
+        "name": "Demo",
+        "status": "ok",
+        "errors": [],
+        "prefix": "DEMO",
+        "milestones": [
+          "Alpha",
+          "Beta"
+        ],
+        "nextId": "DEMO0005",
+        "counts": {
+          "active": 0,
+          "completed": 1,
+          "removed": 0
+        },
+        "tasks": [
+          {
+            "id": "DEMO0004",
+            "title": "Retired label",
+            "status": "completed",
+            "milestone": "Alpha",
+            "priority": "High",
+            "effort": "Medium",
+            "depends_on": [],
+            "owner": null,
+            "collaborators": [],
+            "summary": "S.",
+            "effortDisplay": {
+              "label": null,
+              "value": null,
+              "emoji": null,
+              "imageUrl": null,
+              "text": ""
+            },
+            "needsAttention": false,
+            "validationErrors": [],
+            "completed_on": "2026-01-01"
+          }
+        ],
+        "config": {
+          "idPrefix": "DEMO",
+          "milestones": [
+            "Alpha",
+            "Beta"
+          ],
+          "priorities": [
+            "High",
+            "Low"
+          ],
+          "effortScale": {
+            "name": "fish",
+            "values": [
+              {
+                "value": 1,
+                "label": "Minnow",
+                "emoji": "🐟",
+                "imageUrl": null
+              },
+              {
+                "value": 2,
+                "label": "Goldfish",
+                "emoji": "🐠",
+                "imageUrl": null
+              },
+              {
+                "value": 5,
+                "label": "Tuna",
+                "emoji": null,
+                "imageUrl": "/assets/demo/effort/tuna.svg"
+              },
+              {
+                "value": 8,
+                "label": "Swordfish",
+                "emoji": null,
+                "imageUrl": null
+              }
+            ]
+          }
+        },
+        "diagnostics": []
+      }
+    },
+    "authored-id-differs": {
+      "description": "The file DEMO0006.md authored `id: DEMO0099`: the record id is the filename id, and the authored value is only a validation error.",
+      "optional": [
+        "tasks[].dependsOnMissing",
+        "tasks[].effortLabel",
+        "tasks[].effortEmoji",
+        "tasks[].effortImage",
+        "tasks[].completed_on",
+        "tasks[].removed_on",
+        "tasks[].removed_reason"
+      ],
+      "nullable": [
+        "config.effortScale.name",
+        "config.effortScale.values[].emoji",
+        "config.effortScale.values[].imageUrl",
+        "tasks[].effortDisplay.emoji",
+        "tasks[].effortDisplay.imageUrl"
+      ],
+      "freeForm": [],
+      "response": {
+        "id": "demo",
+        "name": "Demo",
+        "status": "ok",
+        "errors": [],
+        "prefix": "DEMO",
+        "milestones": [
+          "Alpha",
+          "Beta"
+        ],
+        "nextId": "DEMO0007",
+        "counts": {
+          "active": 1,
+          "completed": 0,
+          "removed": 0
+        },
+        "tasks": [
+          {
+            "id": "DEMO0006",
+            "title": "Filename wins",
+            "status": "active",
+            "milestone": "Alpha",
+            "priority": "High",
+            "effort": 3,
+            "depends_on": [],
+            "owner": null,
+            "collaborators": [],
+            "summary": "S.",
+            "effortDisplay": {
+              "label": "Trout",
+              "value": 3,
+              "emoji": "🐡",
+              "imageUrl": null,
+              "text": "Trout · 3"
+            },
+            "needsAttention": false,
+            "validationErrors": [
+              "active/DEMO0006.md: `id` DEMO0099 does not match the filename"
+            ],
+            "effortLabel": "Trout",
+            "effortEmoji": "🐡"
+          }
+        ],
+        "config": {
+          "idPrefix": "DEMO",
+          "milestones": [
+            "Alpha",
+            "Beta"
+          ],
+          "priorities": [
+            "High",
+            "Low"
+          ],
+          "effortScale": {
+            "name": "fish",
+            "values": [
+              {
+                "value": 1,
+                "label": "Minnow",
+                "emoji": "🐟",
+                "imageUrl": null
+              },
+              {
+                "value": 2,
+                "label": "Goldfish",
+                "emoji": "🐠",
+                "imageUrl": null
+              },
+              {
+                "value": 5,
+                "label": "Tuna",
+                "emoji": null,
+                "imageUrl": "/assets/demo/effort/tuna.svg"
+              },
+              {
+                "value": 8,
+                "label": "Swordfish",
+                "emoji": null,
+                "imageUrl": null
+              }
+            ]
+          }
+        },
+        "diagnostics": []
+      }
+    },
+    "removed-task": {
+      "description": "A removed task carries removed_on and removed_reason; completed_on is absent.",
+      "optional": [
+        "tasks[].dependsOnMissing",
+        "tasks[].effortLabel",
+        "tasks[].effortEmoji",
+        "tasks[].effortImage",
+        "tasks[].completed_on",
+        "tasks[].removed_on",
+        "tasks[].removed_reason"
+      ],
+      "nullable": [
+        "config.effortScale.name",
+        "config.effortScale.values[].emoji",
+        "config.effortScale.values[].imageUrl",
+        "tasks[].effortDisplay.emoji",
+        "tasks[].effortDisplay.imageUrl"
+      ],
+      "freeForm": [],
+      "response": {
+        "id": "demo",
+        "name": "Demo",
+        "status": "ok",
+        "errors": [],
+        "prefix": "DEMO",
+        "milestones": [
+          "Alpha",
+          "Beta"
+        ],
+        "nextId": "DEMO0009",
+        "counts": {
+          "active": 0,
+          "completed": 0,
+          "removed": 1
+        },
+        "tasks": [
+          {
+            "id": "DEMO0008",
+            "title": "Dropped",
+            "status": "removed",
+            "milestone": "Alpha",
+            "priority": "Low",
+            "effort": 1,
+            "depends_on": [],
+            "owner": null,
+            "collaborators": [],
+            "summary": "S.",
+            "effortDisplay": {
+              "label": "Minnow",
+              "value": 1,
+              "emoji": "🐟",
+              "imageUrl": null,
+              "text": "Minnow · 1"
+            },
+            "needsAttention": false,
+            "validationErrors": [],
+            "effortLabel": "Minnow",
+            "effortEmoji": "🐟",
+            "removed_on": "2026-02-01",
+            "removed_reason": "Superseded."
+          }
+        ],
+        "config": {
+          "idPrefix": "DEMO",
+          "milestones": [
+            "Alpha",
+            "Beta"
+          ],
+          "priorities": [
+            "High",
+            "Low"
+          ],
+          "effortScale": {
+            "name": "fish",
+            "values": [
+              {
+                "value": 1,
+                "label": "Minnow",
+                "emoji": "🐟",
+                "imageUrl": null
+              },
+              {
+                "value": 2,
+                "label": "Goldfish",
+                "emoji": "🐠",
+                "imageUrl": null
+              },
+              {
+                "value": 5,
+                "label": "Tuna",
+                "emoji": null,
+                "imageUrl": "/assets/demo/effort/tuna.svg"
+              },
+              {
+                "value": 8,
+                "label": "Swordfish",
+                "emoji": null,
+                "imageUrl": null
+              }
+            ]
+          }
+        },
+        "diagnostics": []
+      }
+    },
+    "numeric-title": {
+      "description": "An unquoted `title: 404` parses as a number, so title is a number here.",
+      "optional": [
+        "tasks[].dependsOnMissing",
+        "tasks[].effortLabel",
+        "tasks[].effortEmoji",
+        "tasks[].effortImage",
+        "tasks[].completed_on",
+        "tasks[].removed_on",
+        "tasks[].removed_reason"
+      ],
+      "nullable": [
+        "config.effortScale.name",
+        "tasks[].effortDisplay.emoji",
+        "tasks[].effortDisplay.imageUrl"
+      ],
+      "freeForm": [],
+      "response": {
+        "id": "plain",
+        "name": "Plain",
+        "status": "ok",
+        "errors": [],
+        "prefix": "PLN",
+        "milestones": [
+          "Alpha",
+          "Beta"
+        ],
+        "nextId": "PLN0004",
+        "counts": {
+          "active": 1,
+          "completed": 0,
+          "removed": 0
+        },
+        "tasks": [
+          {
+            "id": "PLN0003",
+            "title": 404,
+            "status": "active",
+            "milestone": "Alpha",
+            "priority": "High",
+            "effort": 3,
+            "depends_on": [],
+            "owner": null,
+            "collaborators": [],
+            "summary": "S.",
+            "effortDisplay": {
+              "label": "3",
+              "value": 3,
+              "emoji": null,
+              "imageUrl": null,
+              "text": "3"
+            },
+            "needsAttention": false,
+            "validationErrors": []
+          }
+        ],
+        "config": {
+          "idPrefix": "PLN",
+          "milestones": [
+            "Alpha",
+            "Beta"
+          ],
+          "priorities": [
+            "High",
+            "Low"
+          ],
+          "effortScale": {
+            "name": null,
+            "values": [
+              {
+                "value": 3,
+                "label": "3",
+                "emoji": null,
+                "imageUrl": null
+              }
+            ]
+          }
+        },
+        "diagnostics": []
+      }
+    },
+    "active-missing-title-and-milestone": {
+      "description": "A parsed active task with no title or milestone: buildBacklogJson omits both keys, and the task needs attention.",
+      "optional": [
+        "tasks[].dependsOnMissing",
+        "tasks[].effortLabel",
+        "tasks[].effortEmoji",
+        "tasks[].effortImage",
+        "tasks[].completed_on",
+        "tasks[].removed_on",
+        "tasks[].removed_reason",
+        "tasks[].title",
+        "tasks[].milestone"
+      ],
+      "nullable": [
+        "config.effortScale.name",
+        "tasks[].effortDisplay.emoji",
+        "tasks[].effortDisplay.imageUrl"
+      ],
+      "freeForm": [],
+      "response": {
+        "id": "plain",
+        "name": "Plain",
+        "status": "ok",
+        "errors": [],
+        "prefix": "PLN",
+        "milestones": [
+          "Alpha",
+          "Beta"
+        ],
+        "nextId": "PLN0006",
+        "counts": {
+          "active": 1,
+          "completed": 0,
+          "removed": 0
+        },
+        "tasks": [
+          {
+            "id": "PLN0005",
+            "status": "active",
+            "priority": "High",
+            "effort": 3,
+            "depends_on": [],
+            "owner": null,
+            "collaborators": [],
+            "summary": "S.",
+            "effortDisplay": {
+              "label": "3",
+              "value": 3,
+              "emoji": null,
+              "imageUrl": null,
+              "text": "3"
+            },
+            "needsAttention": true,
+            "validationErrors": [
+              "active/PLN0005.md: missing `title`",
+              "active/PLN0005.md: missing `milestone`"
+            ]
+          }
+        ],
+        "config": {
+          "idPrefix": "PLN",
+          "milestones": [
+            "Alpha",
+            "Beta"
+          ],
+          "priorities": [
+            "High",
+            "Low"
+          ],
+          "effortScale": {
+            "name": null,
+            "values": [
+              {
+                "value": 3,
+                "label": "3",
+                "emoji": null,
+                "imageUrl": null
+              }
+            ]
+          }
+        },
+        "diagnostics": [
+          {
+            "path": "active/PLN0007.md",
+            "message": "missing or unterminated YAML front-matter"
+          }
+        ]
+      }
+    },
+    "ledger-null-next-id": {
+      "description": "A ledger backlog whose ref is not a valid ledger: nextId is null and nextIdReason says why. nextIdReason is absent when nextId is a string.",
+      "optional": [
+        "tasks[].dependsOnMissing",
+        "tasks[].effortLabel",
+        "tasks[].effortEmoji",
+        "tasks[].effortImage",
+        "tasks[].completed_on",
+        "tasks[].removed_on",
+        "tasks[].removed_reason",
+        "nextIdReason"
+      ],
+      "nullable": [
+        "nextId",
+        "config.effortScale.name",
+        "tasks[].effortDisplay.emoji",
+        "tasks[].effortDisplay.imageUrl"
+      ],
+      "freeForm": [],
+      "response": {
+        "id": "ledger",
+        "name": "Ledger",
+        "status": "ok",
+        "errors": [],
+        "prefix": "LED",
+        "milestones": [
+          "Alpha",
+          "Beta"
+        ],
+        "nextId": null,
+        "counts": {
+          "active": 1,
+          "completed": 0,
+          "removed": 0
+        },
+        "tasks": [
+          {
+            "id": "LED0001",
+            "title": "Ledger task",
+            "status": "active",
+            "milestone": "Alpha",
+            "priority": "High",
+            "effort": 3,
+            "depends_on": [],
+            "owner": null,
+            "collaborators": [],
+            "summary": "S.",
+            "effortDisplay": {
+              "label": "3",
+              "value": 3,
+              "emoji": null,
+              "imageUrl": null,
+              "text": "3"
+            },
+            "needsAttention": false,
+            "validationErrors": []
+          }
+        ],
+        "config": {
+          "idPrefix": "LED",
+          "milestones": [
+            "Alpha",
+            "Beta"
+          ],
+          "priorities": [
+            "High",
+            "Low"
+          ],
+          "effortScale": {
+            "name": null,
+            "values": [
+              {
+                "value": 3,
+                "label": "3",
+                "emoji": null,
+                "imageUrl": null
+              }
+            ]
+          }
+        },
+        "diagnostics": [],
+        "nextIdReason": "The id ledger ref does not exist yet."
+      }
+    },
+    "error-backlog": {
+      "description": "A backlog with no usable config: status error, the config errors, and none of the config-derived keys.",
+      "optional": [],
+      "nullable": [],
+      "freeForm": [],
+      "response": {
+        "id": "broken",
+        "name": "Broken",
+        "status": "error",
+        "errors": [
+          "backlog.config.json must be a JSON object"
+        ],
+        "diagnostics": []
+      }
+    }
+  }
+}
