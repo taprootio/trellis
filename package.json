@@ -43,6 +43,8 @@
   },
   "scripts": {
     "trellis": "node scripts/trellis.mjs",
+    "build:viewer": "node viewer/build.mjs",
+    "prepack": "node viewer/build.mjs",
     "backlog:readme": "node scripts/backlog-readme.mjs",
     "backlog:check": "node scripts/backlog-readme.mjs --check",
     "check:agent": "good-agent check",
