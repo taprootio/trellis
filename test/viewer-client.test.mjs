@@ -134,7 +134,12 @@ test("error backlogs and diagnostics surface from the fixtures", () => {
   assert.equal(views[1].status, "error");
   assert.ok(views[1].errors.length > 0);
   const flagged = backlogFx["active-missing-title-and-milestone"].response;
-  assert.equal(attentionItems(flagged).length, 3);
+  const { diagnostics, flagged: tasks } = attentionItems(flagged);
+  // Diagnostics and flagged tasks are counted apart: a task with several errors counts once.
+  assert.equal(tasks.length, flagged.tasks.filter((t) => t.needsAttention).length);
+  assert.ok(tasks.every((t) => Array.isArray(t.errors)));
+  assert.equal(diagnostics.length, (flagged.diagnostics ?? []).length);
+  assert.equal(attentionItems({ diagnostics: [{ path: "active/X.md", message: "bad" }], tasks: [] }).flagged.length, 0);
 });
 
 test("search hits replace the sort and add the matching line", () => {

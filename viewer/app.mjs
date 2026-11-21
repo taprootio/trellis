@@ -125,8 +125,7 @@ class TrellisViewer extends LitElement {
         ${CARD_STYLE}
         <header class="card-head">
           <esp-badge>${row.backlogName}</esp-badge>
-          <a class="task-id" href=${taskPath(row.backlogId, task.id, filters)}
-            @click=${(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); this.navigate(taskPath(row.backlogId, task.id, filters)); }}>${task.id}</a>
+          ${this.link(taskPath(row.backlogId, task.id, filters), task.id)}
           <strong>${toText(task.title)}</strong>
         </header>
         ${task.summary ? html`<p>${toText(task.summary)}</p>` : nothing}
@@ -144,15 +143,19 @@ class TrellisViewer extends LitElement {
 
   renderBacklogNotices(views) {
     return views.map((v) => {
-      const items = v.status === "ok" ? attentionItems(v) : [];
+      const { diagnostics, flagged } = v.status === "ok" ? attentionItems(v) : { diagnostics: [], flagged: [] };
       return html`
         ${v.status === "error" ? html`<esp-info intent="danger"><strong>${v.name}</strong>
           <ul>${(v.errors ?? []).map((e) => html`<li>${toText(e)}</li>`)}</ul></esp-info>` : nothing}
-        ${items.length ? html`<div class="attention">
-          <esp-badge intent="warning">Needs attention · ${items.length}</esp-badge>
-          <esp-details summary=${`${v.name}: ${items.length} ${items.length === 1 ? "problem" : "problems"}`}>
-            <ul>${items.map((i) => html`<li>${i}</li>`)}</ul>
-          </esp-details></div>` : nothing}`;
+        ${diagnostics.length || flagged.length ? html`<div class="attention">
+          ${diagnostics.length ? html`<esp-details summary=${`${v.name}: ${diagnostics.length} ${diagnostics.length === 1 ? "diagnostic" : "diagnostics"}`}>
+            <ul>${diagnostics.map((d) => html`<li>${d}</li>`)}</ul>
+          </esp-details>` : nothing}
+          ${flagged.length ? html`<esp-badge intent="warning">${v.name}: needs attention · ${flagged.length}</esp-badge>
+            <esp-details summary=${`${flagged.length} flagged ${flagged.length === 1 ? "task" : "tasks"}`}>
+              <ul>${flagged.map((f) => html`<li>${f.id}: ${f.errors.join("; ")}</li>`)}</ul>
+            </esp-details>` : nothing}
+        </div>` : nothing}`;
     });
   }
 
@@ -177,12 +180,15 @@ class TrellisViewer extends LitElement {
     if (task.status === "error") return html`<esp-info intent="danger">Could not load ${task.id}.</esp-info>${back}`;
     if (task.status === "loading" || !task.record) return html`<p>Loading…</p>${back}`;
     const r = task.record;
-    const fm = Object.entries(r.frontMatter ?? {});
+    const fields = [["Backlog", task.backlog], ["Status", r.status], ["Milestone", r.milestone], ["Priority", r.priority], ["Owner", r.owner]]
+      .filter(([, v]) => v !== null && v !== undefined && v !== "");
     return html`
       ${back}
-      <h1>${toText(r.title)}</h1>
+      <h1>${r.id} · ${toText(r.title)}</h1>
       <dl class="front-matter">
-        ${fm.map(([k, v]) => html`<dt>${k}</dt><dd>${typeof v === "object" ? JSON.stringify(v) : toText(v)}</dd>`)}
+        ${fields.map(([k, v]) => html`<dt>${k}</dt><dd>${toText(v)}</dd>`)}
+        ${r.effortDisplay && r.effortDisplay.text ? html`<dt>Effort</dt><dd>${this.renderEffort(r.effortDisplay)}</dd>` : nothing}
+        ${(r.depends_on ?? []).length ? html`<dt>Depends on</dt><dd>${r.depends_on.join(", ")}</dd>` : nothing}
       </dl>
       <div class="body">${unsafeHTML(r.bodyHtml ?? "")}</div>`;
   }

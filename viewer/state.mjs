@@ -165,11 +165,10 @@ export function backlogViews(state) {
   return state.backlogs.map((entry) => ({ ...entry, ...(state.details[entry.id] ?? {}) }));
 }
 
-// Diagnostics and the validation errors of flagged tasks, for "Needs attention".
+// A backlog's diagnostics, and its flagged tasks with their validation errors.
 export function attentionItems(view) {
-  const items = (view.diagnostics ?? []).map((d) => `${d.path}: ${d.message}`);
-  for (const task of view.tasks ?? []) {
-    if (task.needsAttention) for (const e of task.validationErrors ?? []) items.push(e);
-  }
-  return items;
+  return {
+    diagnostics: (view.diagnostics ?? []).map((d) => `${d.path}: ${d.message}`),
+    flagged: (view.tasks ?? []).filter((t) => t.needsAttention).map((t) => ({ id: t.id, errors: t.validationErrors ?? [] })),
+  };
 }
