@@ -58,6 +58,9 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "good-agent": "0.3.0"
+    "@taprootio/espalier": "7.2.0",
+    "good-agent": "0.3.0",
+    "lit": "3.3.3",
+    "rolldown": "1.3.0"
   }
 }
