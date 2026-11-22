@@ -1,8 +1,8 @@
 {
   "name": "@taprootio/trellis",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
-  "description": "Trellis — a tool-agnostic toolkit for file-based backlogs; dogfoods its own conventions.",
+  "description": "Trellis — a tool-agnostic toolkit for file-based backlogs; dogfoods its own conventions. Trellis's code is MIT; the bundled viewer in viewer/dist/ includes Espalier under viewer/ESPALIER-GRANT.md.",
   "keywords": [
     "backlog",
     "tasks",
@@ -35,7 +35,9 @@
     "templates/",
     "docs/import.md",
     "README.md",
-    "SPEC.md"
+    "SPEC.md",
+    "viewer/dist/",
+    "viewer/ESPALIER-GRANT.md"
   ],
   "publishConfig": {
     "access": "public",
