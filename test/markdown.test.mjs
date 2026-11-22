@@ -67,6 +67,8 @@ test("a long malformed paragraph renders as escaped text in linear time", () => 
     const html = render(md);
     assert.doesNotMatch(html, /<a |<em>|<strong>/);
   }
+  // Unmatched openers whose only closers are intraword, and a long blank run before a list continuation.
+  for (const md of ["_a ".repeat(70_000) + "b_c", `- a${"\n".repeat(100_000)}  b`, `_a ${"x_y ".repeat(50_000)}`]) render(md);
   assert.equal(render("## Title ##  "), "<h2>Title</h2>\n");
   assert.equal(render("# C# #"), "<h1>C#</h1>\n");
   assert.equal(render("#hash"), "<p>#hash</p>\n");
@@ -96,4 +98,14 @@ test("thousands of nested list markers on one line render without a stack overfl
     assert.ok(html.match(/<ul>|<ol>/g).length <= 33, "nesting stops at the cap");
   }
   assert.equal(render("- a\n  - b"), "<ul>\n<li>a\n<ul>\n<li>b</li>\n</ul></li>\n</ul>\n");
+});
+
+test("an intraword underscore is skipped as a closer, so the next valid closer is found", () => {
+  assert.equal(render("_see snake_case here_"), "<p><em>see snake_case here</em></p>\n");
+  assert.equal(render("__a snake__case b__"), "<p><strong>a snake__case b</strong></p>\n");
+  assert.equal(render("_a b_c"), "<p>_a b_c</p>\n");
+});
+
+test("a long blank run inside a list item keeps the continuation in the item", () => {
+  assert.equal(render("- a\n\n\n\n  b\n- c"), "<ul>\n<li><p>a</p>\n<p>b</p></li>\n<li>c</li>\n</ul>\n");
 });

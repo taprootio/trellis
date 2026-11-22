@@ -810,7 +810,8 @@ export function readBacklog(repoRoot, cfg, { readItem = defaultReadItem, listDir
       }
       const item = readItem(join(dir, f), `${kind}/${f}`);
       if (item.skip !== undefined) { skipped.push({ path: `${kind}/${f}`, reason: item.skip }); continue; }
-      errors.push(...item.syntaxErrors);
+      // A loop, not a spread: a spread of ~100k diagnostics overflows the call stack.
+      for (const e of item.syntaxErrors) errors.push(e);
       if (item.fm) out.push({ ...item.fm, _file: f });
     }
     return out;

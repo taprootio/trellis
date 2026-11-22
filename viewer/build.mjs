@@ -25,7 +25,7 @@ async function listFiles(dir, prefix = "") {
   const found = [];
   for (const e of await readdir(join(dir, prefix), { withFileTypes: true })) {
     const rel = prefix ? `${prefix}/${e.name}` : e.name;
-    if (e.isDirectory()) found.push(...await listFiles(dir, rel));
+    if (e.isDirectory()) for (const f of await listFiles(dir, rel)) found.push(f);
     else if (e.isFile()) found.push(rel);
   }
   return found.sort();

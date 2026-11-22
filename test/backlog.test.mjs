@@ -1413,3 +1413,13 @@ test("a non-string milestone or priority is a config error, not a throw", () => 
     }
   }
 });
+
+test("a task with ~200k malformed front-matter lines reports its diagnostics without overflowing the stack", () => {
+  withRepo(ARRAY_CFG, { active: [{ id: "DEMO0001", title: "A", effort: 3 }] }, (root) => {
+    writeFileSync(join(root, "trellis", "active", "DEMO0002.md"), `---\nid: DEMO0002\n${"???\n".repeat(200_000)}---\nb\n`);
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    assert.ok(data.errors.filter((e) => e.startsWith("active/DEMO0002.md: cannot parse")).length >= 200_000);
+    assert.equal(data.active.some((i) => i.id === "DEMO0001"), true, "the other task still loads");
+  });
+});

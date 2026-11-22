@@ -7,7 +7,7 @@ import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { searchItems } from "../search.mjs";
 import { IMAGE_TYPES, createBacklog, recordOf, searchCorpus, summaryOf, taskDetailOf } from "./backlogs.mjs";
-import { canonicalV6, normalizeHost } from "./config.mjs";
+import { ViewerConfigError, canonicalV6, normalizeHost } from "./config.mjs";
 import { isInside } from "./reader.mjs";
 import { createWatchers } from "./watch.mjs";
 
@@ -43,7 +43,6 @@ export function hostAllowed(header, { port, printedHost, allowedHosts = [] }) {
   if (!h) return false;
   if (allowedHosts.includes(h.host)) return true;
   const printed = String(printedHost).toLowerCase();
-  // A scoped address has no canonical form, so its printed spelling stands as it is.
   const printedKey = printed.startsWith("[") ? canonicalV6(printed) ?? printed : printed;
   if (!["127.0.0.1", "localhost", printedKey].includes(h.host)) return false;
   return h.port === null ? port === 80 : h.port === port;
@@ -54,7 +53,6 @@ export function printedHostFor(bind, address) {
   if (String(bind).toLowerCase() === "localhost") return "localhost";
   if (address === "0.0.0.0") return "127.0.0.1";
   if (address === "::") return "[::1]";
-  // A scoped address (fe80::1%lo0) does not parse as a URL host; print it bracketed as given.
   return address.includes(":") ? canonicalV6(`[${address}]`) ?? `[${address}]` : address;
 }
 
@@ -80,7 +78,9 @@ const sendJson = (res, status, value) => send(res, status, JSON.stringify(value)
 const notFound = (res) => sendJson(res, 404, { error: "not found" });
 
 // Splits the raw request target into decoded segments. Nothing is normalized, so `..` stays
-// visible and is refused. Returns null for a path that cannot name a route.
+// visible and is refused. Returns null for a path that cannot name a route. A backslash passes
+// here because a task id is only a map key on the shell and detail routes (a scan prefix may
+// match a filename holding one); the routes that build file paths refuse it with `hasBackslash`.
 function parseTarget(raw) {
   const q = raw.indexOf("?");
   const path = q === -1 ? raw : raw.slice(0, q);
@@ -92,7 +92,7 @@ function parseTarget(raw) {
   for (const part of parts) {
     let s;
     try { s = decodeURIComponent(part); } catch { return null; }
-    if (!s || s === "." || s === ".." || /[/\\\0]/.test(s)) return null;
+    if (!s || s === "." || s === ".." || /[/\0]/.test(s)) return null;
     segs.push(s);
   }
   return { segs, query };
@@ -104,6 +104,16 @@ export function readBuiltFiles(distDir) {
   try {
     const list = JSON.parse(readFileSync(join(distDir, "files.json"), "utf8"));
     return new Set(Array.isArray(list) ? list.filter((f) => typeof f === "string" && f !== "files.json") : []);
+  } catch { return null; }
+}
+
+// The real path of `file` when it is a regular file strictly inside `root` after symlinks, else
+// null. The /app/ route and the start-up check share it, so a symlink out of dist fails both.
+export function regularFileInside(file, root) {
+  try {
+    const real = realpathSync.native(file);
+    const rootReal = realpathSync.native(root);
+    return isInside(rootReal, real) && real !== rootReal && statSync(real).isFile() ? real : null;
   } catch { return null; }
 }
 
@@ -126,13 +136,8 @@ export async function startViewer({
   const built = (b) => { const out = b.build(); if (watchers) watchers.reconcile(b); return out; };
 
   function serveFile(res, req, file, root, { name, immutableCheck = true }) {
-    let real;
-    try { real = realpathSync.native(file); } catch { return notFound(res); }
-    let rootReal;
-    try { rootReal = realpathSync.native(root); } catch { return notFound(res); }
-    let st;
-    try { st = statSync(real); } catch { return notFound(res); }
-    if (!isInside(rootReal, real) || real === rootReal || !st.isFile()) return notFound(res);
+    const real = regularFileInside(file, root);
+    if (!real) return notFound(res);
     const data = readFileSync(real);
     res.writeHead(200, {
       ...BASE_HEADERS, "Content-Type": contentTypeOf(name), "Content-Length": data.length,
@@ -166,7 +171,7 @@ export async function startViewer({
     backlogs.forEach((b, order) => {
       if (!want.has(b.id)) return;
       const out = built(b);
-      if (out.status !== "ok") skipped.push(b.id); else corpus.push(...searchCorpus(out, order));
+      if (out.status !== "ok") skipped.push(b.id); else for (const doc of searchCorpus(out, order)) corpus.push(doc); // not a spread: a huge backlog would overflow the stack
     });
     sendJson(res, 200, { hits: searchItems(corpus, q), skipped });
   }
@@ -176,6 +181,7 @@ export async function startViewer({
     if (!target) return notFound(res);
     const { segs, query } = target;
     const [a, b, c, d, e] = segs;
+    const hasBackslash = segs.some((s) => s.includes("\\"));
 
     if (segs.length === 0 || (a === "b" && (segs.length === 2 || (segs.length === 4 && c === "task")))) return shell(res, req);
     if (a === "api") {
@@ -200,6 +206,7 @@ export async function startViewer({
       return undefined;
     }
     if (a === "assets" && segs.length >= 3) {
+      if (hasBackslash) return notFound(res);
       const backlog = byId.get(b);
       const out = backlog && built(backlog);
       const rest = segs.slice(2);
@@ -213,6 +220,7 @@ export async function startViewer({
       });
     }
     if (a === "app" && segs.length >= 2) {
+      if (hasBackslash) return notFound(res);
       if (!builtFiles().has(segs.slice(1).join("/"))) return notFound(res);
       return serveFile(res, req, join(distDir, ...segs.slice(1)), distDir, { name: segs[segs.length - 1] });
     }
@@ -237,11 +245,20 @@ export async function startViewer({
     }
   });
 
+  // A scoped address (fe80::1%lo0) has no URL host form and no canonical Host spelling, so
+  // the Host check could not match it. It is refused, before and after binding.
+  const SCOPED = "a scoped IPv6 address (with a % zone id) cannot be served; bind its unscoped form or a name";
+  if (String(bind).includes("%")) throw new ViewerConfigError(`bind ${bind}: ${SCOPED}`);
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen({ port, host: bind }, () => { server.off("error", reject); resolve(); });
   });
   const addr = server.address();
+  if (addr.address.includes("%")) {
+    await new Promise((resolve) => { server.close(() => resolve()); server.closeAllConnections?.(); });
+    watchers?.close();
+    throw new ViewerConfigError(`bind ${bind} resolved to ${addr.address}: ${SCOPED}`);
+  }
   handle.port = addr.port;
   handle.host = printedHostFor(bind, addr.address);
   if (watchers) watchers.start();

@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { HELP, runServe } from "../scripts/trellis-serve.mjs";
@@ -235,6 +235,8 @@ test("a dist whose files.json omits, mis-types, or points at a non-file asset th
       ["files.json is an object", (d) => writeFileSync(join(d, "files.json"), "{}"), "app-test.js"],
       ["files.json is not JSON", (d) => writeFileSync(join(d, "files.json"), "nope"), "files.json"],
       ["script is a directory", (d) => { rmSync(join(d, "app-test.js")); mkdirSync(join(d, "app-test.js")); }, "app-test.js"],
+      // The /app/ route refuses a file that resolves outside dist, so start-up must too.
+      ["script is a symlink out of dist", (d) => { writeFileSync(join(sb.dir, "outside.js"), "x"); rmSync(join(d, "app-test.js")); symlinkSync(join(sb.dir, "outside.js"), join(d, "app-test.js")); }, "app-test.js"],
     ];
     for (const [name, mutate, mention] of cases) {
       const dist = join(sb.dir, `dist-${name.replace(/\W/g, "-")}`);
@@ -328,4 +330,14 @@ test("through `trellis serve`, from an unrelated directory, the shell and its bu
 test("importing the entry file starts nothing", async () => {
   const mod = await import("../scripts/trellis-serve.mjs");
   assert.equal(typeof mod.runServe, "function");
+});
+
+test("a scoped IPv6 --bind exits 2 naming the problem and starts nothing", async () => {
+  const repo = makeRepo();
+  const sb = sandbox();
+  try {
+    assert.equal(await runServe(["--repo", repo.root, "--port", "0", "--bind", "fe80::1%lo0"], sb.base), 2);
+    assert.match(sb.err(), /scoped IPv6/);
+    assert.equal(sb.out(), "");
+  } finally { repo.cleanup(); sb.cleanup(); }
 });

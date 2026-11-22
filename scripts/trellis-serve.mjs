@@ -8,7 +8,7 @@
 // process.exit, so tests drive it in-process. Exit 2 is a usage error, 1 a config, build or
 // listen failure.
 
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir as osHomedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,7 +16,7 @@ import { optionToken } from "../src/cli.mjs";
 import {
   DEFAULT_BIND, DEFAULT_PORT, ViewerConfigError, findConfigFile, isLoopbackBind, loadViewerConfig, normalizeHost, singleRepoConfig,
 } from "../src/viewer/config.mjs";
-import { DEFAULT_DIST_DIR, readBuiltFiles, startViewer } from "../src/viewer/server.mjs";
+import { DEFAULT_DIST_DIR, readBuiltFiles, regularFileInside, startViewer } from "../src/viewer/server.mjs";
 
 export const HELP = `trellis serve — a local, read-only viewer for one or more backlogs
 
@@ -84,9 +84,8 @@ function missingBuildPart(distDir) {
   const styles = used(/<link\b[^>]*\bhref="\/app\/([^"]+\.css)"/g);
   if (!scripts.length) return "index.html references no script";
   if (!styles.length) return "index.html references no stylesheet";
-  // The /app/ route serves only listed files, so an unlisted or non-file asset would 404.
-  const isFile = (f) => { try { return statSync(join(distDir, f)).isFile(); } catch { return false; } };
-  const gone = [...scripts, ...styles].find((f) => !listed.has(f) || !isFile(f));
+  // The /app/ route serves only listed regular files inside dist, so anything else would 404.
+  const gone = [...scripts, ...styles].find((f) => !listed.has(f) || !regularFileInside(join(distDir, f), distDir));
   return gone ? `no ${gone}` : null;
 }
 
@@ -144,6 +143,7 @@ export async function runServe(argv, {
   try {
     handle = await startViewer({ entries: config.backlogs, port, bind, allowedHosts: [...config.allowedHosts, ...extraHosts], distDir, watch });
   } catch (e) {
+    if (e instanceof ViewerConfigError) { err(`error: ${e.message}`); return 2; }
     err(`error: cannot listen on ${bind}:${port} (${e.code || e.message})`);
     return 1;
   }

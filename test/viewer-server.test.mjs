@@ -7,9 +7,10 @@ import assert from "node:assert/strict";
 import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { Server } from "node:http";
 import { loadConfig } from "../src/backlog.mjs";
 import { claim, seed } from "../src/ledger.mjs";
-import { normalizeHost } from "../src/viewer/config.mjs";
+import { ViewerConfigError, normalizeHost } from "../src/viewer/config.mjs";
 import { MAX_STREAM_BUFFER, cacheControlFor, hostAllowed, parseHost, printedHostFor, pushEvent, startViewer } from "../src/viewer/server.mjs";
 import { ledgerTest } from "./git-support.mjs";
 import { BASE_CFG, FISH_CFG, FIXTURE_DIST, TUNA_SVG, getJson, loadVariant, makeRepo, openEvents, request, shapeProblems, tmp } from "./viewer-support.mjs";
@@ -181,11 +182,39 @@ test("printedHostFor follows the listener's address", () => {
   );
 });
 
-test("a scoped IPv6 listener address prints bracketed as given, and that host stays allowed", () => {
-  const printedHost = printedHostFor("fe80::1%lo0", "fe80::1%lo0");
-  assert.equal(printedHost, "[fe80::1%lo0]");
-  assert.ok(hostAllowed("[fe80::1%lo0]:4747", { port: 4747, printedHost, allowedHosts: [] }));
-  assert.ok(!hostAllowed("[fe80::2%lo0]:4747", { port: 4747, printedHost, allowedHosts: [] }));
+test("a scoped IPv6 bind is refused with a config error before anything listens", async () => {
+  const repo = makeRepo();
+  try {
+    await assert.rejects(startViewer({ entries: [entry(repo)], port: 0, bind: "fe80::1%lo0", distDir: FIXTURE_DIST, watch: false }), (e) => e instanceof ViewerConfigError && /scoped IPv6/.test(e.message));
+  } finally { repo.cleanup(); }
+});
+
+test("a bind that resolves to a scoped address closes the listener it opened", async () => {
+  const repo = makeRepo();
+  const fakeAddress = Server.prototype.address;
+  Server.prototype.address = function scoped() { const a = fakeAddress.call(this); return a && { ...a, address: "fe80::1%lo0" }; };
+  let server;
+  const fakeClose = Server.prototype.close;
+  Server.prototype.close = function tracked(...args) { server = this; return fakeClose.apply(this, args); };
+  try {
+    await assert.rejects(startViewer({ entries: [entry(repo)], port: 0, distDir: FIXTURE_DIST, watch: false }), ViewerConfigError);
+    assert.ok(server, "close was called");
+    assert.equal(fakeAddress.call(server), null, "the listener is closed");
+  } finally { Server.prototype.address = fakeAddress; Server.prototype.close = fakeClose; repo.cleanup(); }
+});
+
+test("an encoded backslash in a task id reaches the shell and detail routes but never a file route", posixOnly, async () => {
+  // The scan pattern wraps the prefix unescaped, so `R.` matches a filename holding a literal backslash.
+  const repo = makeRepo({ cfg: { ...BASE_CFG, idPrefix: "R." }, items: [{ status: "active", id: "R\\0001" }] });
+  try {
+    await withViewer([entry(repo)], async (_v, port) => {
+      assert.equal((await getJson(port, "/api/backlogs/demo/tasks/R%5C0001")).json.id, "R\\0001");
+      assert.equal((await request(port, { path: "/b/demo/task/R%5C0001" })).status, 200);
+      for (const path of ["/assets/demo/a%5Cb", "/app/a%5Capp-test.js", "/assets/demo/a%2Fb", "/api/backlogs/demo/tasks/..", "/b/demo/task/%2E%2E"]) {
+        assert.equal((await request(port, { path })).status, 404, path);
+      }
+    });
+  } finally { repo.cleanup(); }
 });
 
 test("a wrong Host gets 403 before any other check; allowedHosts opens exactly that name; a write method gets 405", async () => {

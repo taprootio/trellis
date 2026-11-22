@@ -90,7 +90,8 @@ function linkDestination(text, start) {
   return text[i] === ")" ? { target, end: i + 1 } : null;
 }
 
-// Closing delimiter search for emphasis: the run must not follow whitespace.
+// Closing delimiter search for emphasis: the run must not follow whitespace, and an `_` run
+// inside a word (`snake_case`) is not a closer, so the search goes on to the next one.
 function findClose(text, from, delim) {
   for (let i = from; i < text.length; i++) {
     if (text[i] === "\\") { i++; continue; }
@@ -102,6 +103,7 @@ function findClose(text, from, delim) {
     if (text.startsWith(delim, i) && i > from && !/\s/.test(text[i - 1])) {
       // `*` must not be the start of a longer run when closing a single one.
       if (delim.length === 1 && text[i + 1] === delim) continue;
+      if (delim[0] === "_" && /[A-Za-z0-9]/.test(text[i + delim.length] || "")) continue;
       return i;
     }
   }
@@ -162,8 +164,7 @@ function inline(text, ctx, allowLinks = true) {
         const from = i + delim.length;
         const close = from >= (noCloseFrom.get(delim) ?? Infinity) ? -1 : findClose(text, from, delim);
         if (close === -1 && !noCloseFrom.has(delim)) noCloseFrom.set(delim, from);
-        const afterOk = close !== -1 && (c === "*" || !/[A-Za-z0-9]/.test(text[close + delim.length] || ""));
-        if (close !== -1 && afterOk) {
+        if (close !== -1) {
           const tag = delim.length === 2 ? "strong" : "em";
           out += `<${tag}>${inline(text.slice(i + delim.length, close), ctx, allowLinks)}</${tag}>`;
           i = close + delim.length;
@@ -267,9 +268,14 @@ function renderList(lines, i, ctx) {
     for (; j < lines.length; j++) {
       const line = lines[j];
       if (!line.trim()) {
+        // Scan the whole blank run once: rescanning from each blank line is quadratic.
         let k = j;
         while (k < lines.length && !lines[k].trim()) k++;
-        if (k < lines.length && lines[k].search(/\S/) > baseIndent) { itemLines.push(""); continue; }
+        if (k < lines.length && lines[k].search(/\S/) > baseIndent) {
+          for (; j < k; j++) itemLines.push("");
+          j = k - 1; // the loop's j++ lands on the continuation line
+          continue;
+        }
         break;
       }
       const indent = line.search(/\S/);
