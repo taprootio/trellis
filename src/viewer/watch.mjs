@@ -8,7 +8,7 @@
 import { readdirSync, statSync, realpathSync, watch as fsWatch } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, artifactSet, loadConfig, paths } from "../backlog.mjs";
-import { isInside } from "./reader.mjs";
+import { dirIdentity, isInside } from "./reader.mjs";
 
 export const DEBOUNCE_MS = 250;
 // fs.watch can drop events under load (seen on macOS): a new or replaced directory goes
@@ -32,7 +32,7 @@ function snapshotOf(s, isGenerated) {
       try { st = statSync(path); } catch { /* vanished between list and stat */ }
       // A directory's size and mtime move when a file inside it is added; its own handle
       // reports that, so here only its identity counts (a replaced directory has a new inode).
-      out.set(path, !st ? "-" : st.isDirectory() ? `d:${st.ino}` : `${st.size}:${st.mtimeMs}:${st.ino}`);
+      out.set(path, !st ? "-" : st.isDirectory() ? `d:${dirIdentity(st)}` : `${st.size}:${st.mtimeMs}:${st.ino}`);
     }
   }
   return out;
@@ -158,10 +158,10 @@ export function createWatchers(backlogs, onChange, { debounceMs = DEBOUNCE_MS, s
       let st;
       try { st = statSync(dir); } catch { disarm(s, dir); continue; }
       const cur = s.handles.get(dir);
-      if (cur && cur.dev === st.dev && cur.ino === st.ino) { cur.accept = accept; continue; }
+      if (cur && cur.id === dirIdentity(st)) { cur.accept = accept; continue; }
       disarm(s, dir); // replaced at the same path: the old handle follows the old inode
       try {
-        const handle = { dev: st.dev, ino: st.ino, accept, watcher: null };
+        const handle = { id: dirIdentity(st), accept, watcher: null };
         handle.watcher = watch(dir, { persistent: false }, (_type, filename) => onEvent(backlog, s, dir, handle, filename));
         handle.watcher.on("error", () => { disarm(s, dir); schedule(backlog, s); });
         s.handles.set(dir, handle);

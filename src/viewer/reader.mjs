@@ -18,6 +18,11 @@ export const OUTSIDE = "resolves outside the main worktree";
 const within = (parent, child) => child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
 export const isInside = within;
 
+// A directory's identity. Linux can hand a recreated directory the inode number of the one
+// just removed, so the birth time joins dev and inode; where the platform reports no birth
+// time (0), dev and inode are all there is.
+export const dirIdentity = (st) => `${st.dev}:${st.ino}:${st.birthtimeMs || 0}`;
+
 // `hooks.beforeOpen(path)` runs after the path check and before the open; `hooks.afterList(dir)`
 // after a listing. They exist so tests can swap a file or remove a directory at that instant.
 // `hooks.fstat` and `hooks.read` stand in for the descriptor calls so a test can fail them.
@@ -167,9 +172,9 @@ export function createReader(root, hooks = {}) {
       if (!within(root, again.real)) return { skip: OUTSIDE };
       let after;
       try { after = statSync(again.real); } catch { return { skip: "directory vanished while it was read" }; }
-      if (!after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) return { skip: "directory changed while it was read" };
+      if (!after.isDirectory() || dirIdentity(after) !== dirIdentity(before)) return { skip: "directory changed while it was read" };
       if (r.real !== dir) targets.add(r.real);
-      listed.set(dir, { names, real: r.real, dev: after.dev, ino: after.ino });
+      listed.set(dir, { names, real: r.real, id: dirIdentity(after) });
       return names;
     },
     // Another pass of the same rebuild: forget the reads, keep forced skips and symlink targets.
@@ -186,7 +191,7 @@ export function createReader(root, hooks = {}) {
       if (now.skip) return now.skip;
       let st;
       try { st = statSync(now.real); } catch { return "directory vanished during the rebuild"; }
-      if (now.real !== was.real || st.dev !== was.dev || st.ino !== was.ino) return "directory changed during the rebuild";
+      if (now.real !== was.real || dirIdentity(st) !== was.id) return "directory changed during the rebuild";
       return null;
     },
     forceSkip(dir, reason) {
