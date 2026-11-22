@@ -20,7 +20,7 @@
     "type": "git",
     "url": "git+https://github.com/taprootio/trellis.git"
   },
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "engines": {
     "node": ">=18"
   },

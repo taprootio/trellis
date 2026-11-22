@@ -19,3 +19,14 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Bundled viewer
+
+The MIT License above covers Trellis's own code. From version 0.4.0 the
+published package also bundles a compiled copy of Espalier
+(`@taprootio/espalier`, proprietary) in `viewer/dist/`. That copy is not
+under the MIT License: it is covered by `viewer/ESPALIER-GRANT.md`, with
+Espalier's own license in `viewer/dist/ESPALIER-LICENSE.md` and its
+third-party notices in `viewer/dist/licenses/`.
