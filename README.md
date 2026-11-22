@@ -119,6 +119,12 @@ npx @taprootio/trellis serve                  # 0.4.0 or later: the current repo
 npx @taprootio/trellis serve --config <file>  # 0.4.0 or later: several backlogs from a viewer config
 ```
 
+The viewer's bundle in `viewer/dist/` includes Espalier (`@taprootio/espalier`),
+which is proprietary. [`viewer/ESPALIER-GRANT.md`](viewer/ESPALIER-GRANT.md)
+lets everyone who installs Trellis run that bundled copy as part of Trellis;
+Trellis's own code stays under the MIT License, and Espalier's license and
+notices ship beside the bundle.
+
 From a clone of this repo, build the viewer once and run the script directly:
 
 ```

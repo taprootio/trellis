@@ -165,6 +165,9 @@ test("package ships scaffold templates and the viewer only with its grant", asyn
     const js = shell.match(/src="\/app\/(app-[^"]+\.js)"/);
     assert.ok(js && existsSync(join(dist, js[1])), "index.html should reference the built bundle by a root-relative /app/ URL");
     assert.match(shell, /href="\/app\/esp-reset\.css"/);
+    for (const notice of ["ESPALIER-LICENSE.md", "licenses/THIRD_PARTY_NOTICES.md", "licenses/LIT-LICENSE"]) {
+      assert.ok(shell.includes(`href="/app/${notice}"`), `the shell links ${notice}`);
+    }
 
     // A deep link gets the shell, and the shell's root-relative assets load from there.
     const viewer = await startViewer({ entries: [{ id: "trellis", name: "Trellis", path: sourceRoot }], port: 0, distDir: dist, watch: false });

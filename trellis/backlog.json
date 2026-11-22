@@ -8,29 +8,11 @@
   ],
   "nextId": "TRL0042",
   "counts": {
-    "active": 7,
-    "completed": 33,
+    "active": 6,
+    "completed": 34,
     "removed": 1
   },
   "tasks": [
-    {
-      "id": "TRL0005",
-      "title": "Build the multi-backlog viewer (`trellis serve`)",
-      "status": "active",
-      "milestone": "v1",
-      "priority": "High",
-      "effort": 13,
-      "effortLabel": "Shark",
-      "effortEmoji": "🦈",
-      "depends_on": [
-        "TRL0001",
-        "TRL0037",
-        "TRL0040"
-      ],
-      "owner": "jereme",
-      "collaborators": [],
-      "summary": "A local, read-only web viewer (`trellis serve`) that shows several repos' backlogs at once, each read live from its main worktree, in an Espalier interface with an esp-repeater of tasks, released as 0.4.0."
-    },
     {
       "id": "TRL0008",
       "title": "Viewer — dependency graph and effort filter",
@@ -195,6 +177,25 @@
       "collaborators": [],
       "summary": "Expose the backlog operations over MCP so any MCP-aware tool can list, read, create, move, validate, and regenerate tasks in any repo.",
       "completed_on": "2026-06-26"
+    },
+    {
+      "id": "TRL0005",
+      "title": "Build the multi-backlog viewer (`trellis serve`)",
+      "status": "completed",
+      "milestone": "v1",
+      "priority": "High",
+      "effort": 13,
+      "effortLabel": "Shark",
+      "effortEmoji": "🦈",
+      "depends_on": [
+        "TRL0001",
+        "TRL0037",
+        "TRL0040"
+      ],
+      "owner": "jereme",
+      "collaborators": [],
+      "summary": "A local, read-only web viewer (`trellis serve`) that shows several repos' backlogs at once, each read live from its main worktree, in an Espalier interface with an esp-repeater of tasks, released as 0.4.0.",
+      "completed_on": "2026-11-21"
     },
     {
       "id": "TRL0006",

@@ -6,6 +6,7 @@ task and run `npm run backlog:readme`.
 <!-- BEGIN GENERATED:COMPLETED -->
 | ID | Title | Summary | Completed |
 | --- | --- | --- | --- |
+| [TRL0005](tasks/TRL0005.md) | Build the multi-backlog viewer (`trellis serve`) | A local, read-only web viewer (`trellis serve`) that shows several repos' backlogs at once, each read live from its main worktree, in an Espalier interface with an esp-repeater of tasks, released as 0.4.0. | 2026-11-21 |
 | [TRL0037](tasks/TRL0037.md) | Claim task ids from a local git ledger | Add an opt-in id ledger on a local orphan branch that every worktree of a clone shares, so `trellis claim` and the MCP create path hand out each id exactly once even when several sessions write stories at the same time. | 2026-11-20 |
 | [TRL0038](tasks/TRL0038.md) | Keep generated backlog artifacts out of git | Add an opt-in mode in which the generated index, completed and removed tables and backlog.json are written to an ignored folder instead of being committed, so parallel branches stop conflicting on them; local `check` validates config, roster and items, scans for leftover markers, and skips freshness comparisons. | 2026-11-20 |
 | [TRL0039](tasks/TRL0039.md) | Accept closed items that predate a repo's adoption | Add an optional legacy cutoff (an inclusive id and an exclusive close date) under which completed and removed items may omit the descriptive metadata (summary, milestone, priority, effort), so a long-lived backlog can adopt Trellis in place without inventing history while new closures stay strict. | 2026-11-20 |
