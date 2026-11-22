@@ -61,12 +61,15 @@ test("an unterminated fence runs to the end and stays escaped", () => {
 
 test("a long malformed paragraph renders as escaped text in linear time", () => {
   const DEADLINE_MS = 10_000; // the shared test deadline; the unfixed renderer needs minutes at this size
-  const inputs = ["[".repeat(200_000), "![".repeat(100_000), "[a](".repeat(15_000), "*a ".repeat(70_000), "_a ".repeat(70_000), "[a](<".repeat(12_000), `${"~".repeat(100_000)}\``, `${"`".repeat(100_000)} a\``, `|a|b\n|-${" ".repeat(100_000)}x`, `|a|b\n${" ".repeat(100_000)}|${" ".repeat(100_000)}-${" ".repeat(100_000)}!`];
+  const inputs = ["[".repeat(200_000), "![".repeat(100_000), "[a](".repeat(15_000), "*a ".repeat(70_000), "_a ".repeat(70_000), "[a](<".repeat(12_000), `${"~".repeat(100_000)}\``, `${"`".repeat(100_000)} a\``, `|a|b\n|-${" ".repeat(100_000)}x`, `|a|b\n${" ".repeat(100_000)}|${" ".repeat(100_000)}-${" ".repeat(100_000)}!`, `#${" ".repeat(100_000)}a`, `# a${" ".repeat(100_000)}x#`, `# ${"#".repeat(100_000)}x`];
   const started = Date.now();
   for (const md of inputs) {
     const html = render(md);
     assert.doesNotMatch(html, /<a |<em>|<strong>/);
   }
+  assert.equal(render("## Title ##  "), "<h2>Title</h2>\n");
+  assert.equal(render("# C# #"), "<h1>C#</h1>\n");
+  assert.equal(render("#hash"), "<p>#hash</p>\n");
   assert.equal(render("~~~js title\nx\n~~~"), '<pre><code class="language-js">x\n</code></pre>\n');
   assert.ok(Date.now() - started < DEADLINE_MS, "rendering should finish within the deadline");
   assert.match(render("[ok](https://example.com) and [open"), /<a href="https:\/\/example.com">ok<\/a> and \[open/);
@@ -84,4 +87,13 @@ test("only links resolved from repository paths carry the task-link mark", () =>
   const html = renderMarkdown("[a](../active/A.md) [b](https://example.com/b/demo/task/X1) [c](missing.md)", { resolveRepoPath: (t) => (t.endsWith("A.md") ? "/b/demo/task/A" : null) });
   assert.match(html, /<a href="\/b\/demo\/task\/A" data-task-link>a<\/a>/);
   assert.match(html, /<a href="https:\/\/example.com\/b\/demo\/task\/X1">b<\/a>/);
+});
+
+test("thousands of nested list markers on one line render without a stack overflow", () => {
+  for (const marker of ["- ", "1. ", "* - "]) {
+    const html = render(`${marker.repeat(5000)}deep`);
+    assert.ok(html.includes("deep"));
+    assert.ok(html.match(/<ul>|<ol>/g).length <= 33, "nesting stops at the cap");
+  }
+  assert.equal(render("- a\n  - b"), "<ul>\n<li>a\n<ul>\n<li>b</li>\n</ul></li>\n</ul>\n");
 });

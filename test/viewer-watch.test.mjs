@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { loadConfig } from "../src/backlog.mjs";
 import { claim, seed } from "../src/ledger.mjs";
 import { createBacklog } from "../src/viewer/backlogs.mjs";
@@ -87,8 +87,8 @@ test("editing a task title in the main worktree sends a message naming only that
     await live({ a, b }, async (ctx) => {
       writeFileSync(a.itemPath("active", "DEMO0001"), readFileSync(a.itemPath("active", "DEMO0001"), "utf8").replace("Before", "After!"));
       await until(ctx, "a", (j) => titles(j) === "After!");
-      // The sentinel edit proves the stream works for b; nothing before it named b.
-      assert.ok(ctx.events.seen.every((m) => m.backlog === "a"));
+      // Which backlog an event names is checked deterministically below with a fake watcher;
+      // here a late file event from b's warm-up probe could land at any time.
       writeFileSync(b.itemPath("active", "OTH0001"), readFileSync(b.itemPath("active", "OTH0001"), "utf8").replace("Other", "Changed"));
       await until(ctx, "b", (j) => titles(j) === "Changed");
     });
@@ -121,7 +121,7 @@ test("removing and recreating completed/tasks keeps reload working", async () =>
       await until(ctx, "demo", (j) => titles(j) === "Second");
       writeFileSync(repo.itemPath("completed", "DEMO0002"), readFileSync(repo.itemPath("completed", "DEMO0002"), "utf8").replace("Second", "Third!"));
       await until(ctx, "demo", (j) => titles(j) === "Third!");
-      assert.ok(ctx.events.seen.every((m) => m.backlog === "demo"), "no message named the other backlog");
+      // Which backlog is named is covered by "an event in one backlog's directory notifies that backlog only".
     });
   } finally { repo.cleanup(); other.cleanup(); }
 });
@@ -236,7 +236,7 @@ ledgerTest("creating the ledger ref, then two claims in a row with no task edits
       await until(ctx, "demo", (j) => j.nextId === "DEMO0003");
       claim(repo.root, cfg, { title: "two" });
       await until(ctx, "demo", (j) => j.nextId === "DEMO0004");
-      assert.ok(ctx.events.seen.every((m) => m.backlog === "demo"));
+      // Which backlog is named is covered by "an event in one backlog's directory notifies that backlog only".
     });
   } finally { repo.cleanup(); }
 });
@@ -252,7 +252,9 @@ function fakeWatch() {
   };
   return { calls, watch, live: () => calls.filter((c) => !c.closed).map((c) => c.dir).sort() };
 }
-const rel = (repo, dirs) => dirs.map((d) => d.replace(repo.root, "").replace(/^\//, "") || ".").sort();
+// Paths relative to a base, written with "/" so the expectations read the same on every platform.
+const relTo = (base, d) => relative(base, d).split(sep).join("/") || ".";
+const rel = (repo, dirs) => dirs.map((d) => relTo(repo.root, d)).sort();
 const planOf = (backlog) => [...watchPlan(backlog).keys()];
 
 test("the plan names the tasks root, status directories and config home, or the nearest existing ancestor", () => {
@@ -341,7 +343,7 @@ test("an accepted symlink target's directory and its ancestors up to the worktre
     rmSync(join(repo.root, "docs", "pool"), { recursive: true });
     symlinkSync(outside, join(repo.root, "docs", "pool"));
     const dirs = planOf(b);
-    assert.ok(dirs.every((d) => d === repo.root || d.startsWith(repo.root + "/")), `nothing outside the worktree: ${dirs}`);
+    assert.ok(dirs.every((d) => { const r = relative(repo.root, d); return r === "" || (!r.startsWith("..") && !isAbsolute(r)); }), `nothing outside the worktree: ${dirs}`);
     assert.ok(!dirs.some((d) => d.includes("pool")));
   } finally { repo.cleanup(); }
 });
@@ -376,7 +378,8 @@ ledgerTest("a ledger backlog also watches the directories that hold the ref's fi
   try {
     const b = createBacklog({ id: "demo", name: "Demo", path: repo.root });
     const gitDir = join(repo.root, ".git");
-    const dirs = () => planOf(b).map((d) => d.replace(gitDir, "<git>")).filter((d) => d.startsWith("<git>")).sort();
+    const dirs = () => planOf(b).map((d) => [d, relTo(gitDir, d)]).filter(([, r]) => !r.startsWith("..") && !isAbsolute(r))
+      .map(([, r]) => (r === "." ? "<git>" : `<git>/${r}`)).sort();
     assert.deepEqual(dirs(), ["<git>", "<git>/refs"], "the ref's own directory is missing, so its nearest ancestor is watched");
     assert.deepEqual([...watchPlan(b).get(join(gitDir, "refs"))], ["trellis"]);
     assert.deepEqual([...watchPlan(b).get(gitDir)], ["packed-refs"]);
@@ -471,4 +474,26 @@ test("an event batch is reported once per backlog after the debounce", async () 
     assert.deepEqual(reported, ["demo"]);
     watchers.close();
   } finally { repo.cleanup(); }
+});
+
+test("an event in one backlog's directory notifies that backlog only", async () => {
+  const a = makeRepo({ items: [{ status: "active", id: "DEMO0001" }] });
+  const b = makeRepo({ cfg: { ...BASE_CFG, idPrefix: "OTH" }, items: [{ status: "active", id: "OTH0001" }] });
+  try {
+    const ba = createBacklog({ id: "a", name: "A", path: a.root });
+    const bb = createBacklog({ id: "b", name: "B", path: b.root });
+    ba.build(); bb.build();
+    const fake = fakeWatch();
+    const changed = [];
+    let done;
+    const settled = new Promise((r) => { done = r; });
+    const watchers = createWatchers([ba, bb], (id) => { changed.push(id); done(); }, { watch: fake.watch, debounceMs: 5 });
+    watchers.start();
+    fake.calls.find((c) => c.dir === a.folder("active")).cb("change", "DEMO0001.md");
+    // The debounce timer is unref'd, so hold the event loop open until it fires.
+    const keepAlive = setTimeout(() => {}, 10_000);
+    try { await settled; } finally { clearTimeout(keepAlive); }
+    assert.deepEqual(changed, ["a"]);
+    watchers.close();
+  } finally { a.cleanup(); b.cleanup(); }
 });

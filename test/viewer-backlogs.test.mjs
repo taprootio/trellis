@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadConfig, readBacklog } from "../src/backlog.mjs";
 import { claim, seed } from "../src/ledger.mjs";
-import { createBacklog, recordOf, summaryOf, taskDetailOf } from "../src/viewer/backlogs.mjs";
+import { assetRelOf, createBacklog, recordOf, summaryOf, taskDetailOf } from "../src/viewer/backlogs.mjs";
 import { ledgerTest } from "./git-support.mjs";
 import { BASE_CFG, FISH_CFG, TUNA_SVG, makeRepo, tmp } from "./viewer-support.mjs";
 
@@ -203,6 +203,72 @@ test("a scan backlog with idPrefix R+ shows the items `trellis check` accepts", 
     assert.deepEqual(open(repo).build().order, expected);
     assert.ok(expected.includes("RR0001"));
   } finally { repo.cleanup(); }
+});
+
+test("every listed task has a detail even when the scan prefix holds a numeric backreference", () => {
+  // The filename pattern wraps the prefix in a group, so `\\1` there matches empty; the bare-id pattern would not.
+  const repo = makeRepo({ cfg: { ...BASE_CFG, idPrefix: "(a)\\1" }, items: [] });
+  try {
+    repo.write("trellis/active/a0001.md", "---\nid: a0001\n---\nbody\n");
+    const out = open(repo).build();
+    assert.deepEqual(out.order, ["a0001"]);
+    for (const id of out.order) assert.equal(taskDetailOf(out, id).id, id);
+    assert.equal(taskDetailOf(out, "a0002"), null);
+    assert.equal(taskDetailOf(out, "../x"), null);
+  } finally { repo.cleanup(); }
+});
+
+test("an effort image path with an unpaired surrogate gives no image URL and does not break the record", () => {
+  const scales = (image) => ({ ...FISH_CFG.effort, scales: { fish: { ...FISH_CFG.effort.scales.fish, 5: { label: "Tuna", image } } } });
+  assert.equal(assetRelOf("assets/\ud800.svg"), null);
+  assert.equal(assetRelOf("assets/\udc00x.svg"), null);
+  assert.equal(assetRelOf("assets/\ud83d\udc1f.svg"), "assets/\ud83d\udc1f.svg".slice(7));
+  const repo = makeRepo({ cfg: { ...FISH_CFG, effort: scales("assets/effort/\ud800.svg") }, items: [{ status: "active", id: "DEMO0001", fm: { effort: "tuna" } }] });
+  try {
+    const out = open(repo).build();
+    assert.equal(out.status, "ok");
+    assert.equal(task(out, "DEMO0001").effortDisplay.imageUrl, null);
+    assert.ok(recordOf(out).config.effortScale.values.every((v) => v.imageUrl === null || !v.imageUrl.includes("%")));
+    assert.equal(out.assets.size, 0);
+  } finally { repo.cleanup(); }
+});
+
+// A hostile but JSON-valid config must fail (or build) for that backlog only, never throw.
+const HOSTILE_CONFIGS = [
+  ["effort entry with a null toString", { effort: [1, { toString: null }] }, "error"],
+  ["effort values entry with a null toString", { effort: { values: [1, { toString: null }] } }, "error"],
+  ["scale name with a null toString", { effort: { values: [1], scale: { toString: null } } }, "error"],
+  ["scale label with a null toString", { effort: { values: [1], scale: "x", scales: { x: { 1: { label: { toString: null } } } } } }, "error"],
+  ["scale named __proto__", { effort: { values: [1], scale: "__proto__", scales: {} } }, "error"],
+  ["huge effort numbers on a scan backlog", { effort: [1e308, 1e21] }, "ok"],
+  ["unsafe effort on a ledger backlog", { effort: [1e21], idAllocation: "ledger" }, "error"],
+  ["lone surrogates in a scale label, emoji and image", { effort: { values: [1], scale: "x", scales: { x: { 1: { label: "\ud800", emoji: "\ud800", image: "assets/\ud800.png" } } } } }, "ok"],
+  ["id prefix with a null toString", { idPrefix: { toString: null } }, "error"],
+  ["id prefix that is a lone surrogate", { idPrefix: "\ud800" }, "any"],
+  ["id prefix with a numeric backreference", { idPrefix: "(a)\\1" }, "any"],
+  ["id width beyond the limit", { idWidth: 1e9 }, "error"],
+  ["next id floor beyond the safe integers", { nextIdFloor: 1e21, idWidth: 25 }, "error"],
+  ["tasksDir with a NUL character", { tasksDir: "a\u0000b" }, "error"],
+  ["tasksDir with a null toString", { tasksDir: { toString: null } }, "error"],
+  ["tasksDir that is a lone surrogate", { tasksDir: "\ud800" }, "any"],
+  ["specVersion with a null toString", { specVersion: { toString: null } }, "error"],
+  ["legacy with null-toString members", { legacy: { through: { toString: null }, closedBefore: { toString: null } } }, "error"],
+  ["ledger ref that is a lone surrogate", { idAllocation: "ledger", idLedgerRef: "refs/trellis/\ud800" }, "any"],
+  ["milestones with a null-prototype-like entry", { milestones: [{ toString: null }] }, "error"],
+];
+
+test("hostile but JSON-valid configs never throw and never reach the other backlogs", () => {
+  const good = makeRepo({ items: [{ status: "active", id: "DEMO0001" }] });
+  const repos = HOSTILE_CONFIGS.map(([, patch]) => makeRepo({ rawConfig: JSON.stringify({ ...BASE_CFG, ...patch }) }));
+  try {
+    HOSTILE_CONFIGS.forEach(([name, , want], i) => {
+      let out;
+      assert.doesNotThrow(() => { out = open(repos[i]).build(); }, name);
+      if (want !== "any") assert.equal(out.status, want, `${name}: ${JSON.stringify(out.errors)}`);
+      assert.doesNotThrow(() => JSON.stringify([summaryOf(out), recordOf(out)]), name);
+    });
+    assert.equal(open(good).build().status, "ok");
+  } finally { good.cleanup(); repos.forEach((r) => r.cleanup()); }
 });
 
 test("effort display: label · N with emoji or the scale's image under a nested tasksDir, and the bare number on the identity scale", () => {

@@ -109,7 +109,8 @@ test("--repo becomes a one-entry config whose id obeys the id rule", () => {
   const WORK = resolve("/work");
   const c = singleRepoConfig("My Repo_Name", { cwd: WORK });
   assert.deepEqual(c.backlogs, [{ id: "my-repo-name", name: "My Repo_Name", path: join(WORK, "My Repo_Name") }]);
-  assert.equal(singleRepoConfig(parse(WORK).root, { cwd: WORK }).backlogs[0].id, "repo");
+  // A filesystem root has no folder name: POSIX "/" falls back to "repo", a Windows drive "C:\\" gives its letter.
+  assert.match(singleRepoConfig(parse(WORK).root, { cwd: WORK }).backlogs[0].id, process.platform === "win32" ? /^[a-z]$/ : /^repo$/);
 });
 
 test("loopback binds are recognized", () => {

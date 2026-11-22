@@ -2,7 +2,7 @@
 // contained reader and shapes the API records from `readBacklog`.
 
 import { dirname, join, normalize, resolve } from "node:path";
-import { buildBacklogJson, loadConfig, paths, readBacklog, resolveEffort, scanIdPattern } from "../backlog.mjs";
+import { buildBacklogJson, loadConfig, paths, readBacklog, resolveEffort } from "../backlog.mjs";
 import { preview } from "../ledger.mjs";
 import { renderMarkdown } from "../markdown.mjs";
 import { createReader } from "./reader.mjs";
@@ -21,8 +21,10 @@ const fileIdOf = (item) => item._file.replace(/\.md$/, "");
 
 // The path under `<tasksDir>/assets/` of a configured effort image, or null when the image
 // is not an image file under that folder.
+// An unpaired surrogate makes encodeURIComponent throw, so such a path is never an asset.
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 export function assetRelOf(image) {
-  if (typeof image !== "string") return null;
+  if (typeof image !== "string" || LONE_SURROGATE_RE.test(image)) return null;
   const parts = image.split(/[\\/]+/);
   if (parts[0] !== "assets" || parts.length < 2) return null;
   const rest = parts.slice(1);
@@ -190,7 +192,7 @@ export function createBacklog(entry, { hooks, git } = {}) {
     return {
       ...base, status: "ok", errors: [], diagnostics, cfg, counts: json.counts, nextId: json.nextId, nextIdReason,
       prefix: json.prefix, milestones: json.milestones, tasks, order: json.tasks.map((t) => t.id), assets,
-      assetRoot: join(root, cfg.tasksDir || "trellis", "assets"), taskPaths, taskIdRe: new RegExp(`^${scanIdPattern(cfg)}$`), root,
+      assetRoot: join(root, cfg.tasksDir || "trellis", "assets"), taskPaths, root,
     };
   }
 
@@ -220,10 +222,10 @@ export function recordOf(b) {
 }
 
 // One task's record with its front matter and rendered body, or null when there is none.
-// The id is checked against the backlog's pattern and looked up in the parsed set; it never
-// becomes a path.
+// The id is looked up in the parsed set (so every listed task has a detail, whatever the scan
+// prefix); it never becomes a path.
 export function taskDetailOf(b, id) {
-  if (b.status !== "ok" || !b.taskIdRe.test(id)) return null;
+  if (b.status !== "ok") return null;
   const t = b.tasks.get(id);
   if (!t) return null;
   const resolveRepoPath = (target) => {

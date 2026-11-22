@@ -8,7 +8,7 @@
 // process.exit, so tests drive it in-process. Exit 2 is a usage error, 1 a config, build or
 // listen failure.
 
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir as osHomedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,7 +16,7 @@ import { optionToken } from "../src/cli.mjs";
 import {
   DEFAULT_BIND, DEFAULT_PORT, ViewerConfigError, findConfigFile, isLoopbackBind, loadViewerConfig, normalizeHost, singleRepoConfig,
 } from "../src/viewer/config.mjs";
-import { DEFAULT_DIST_DIR, startViewer } from "../src/viewer/server.mjs";
+import { DEFAULT_DIST_DIR, readBuiltFiles, startViewer } from "../src/viewer/server.mjs";
 
 export const HELP = `trellis serve — a local, read-only viewer for one or more backlogs
 
@@ -75,7 +75,8 @@ function parseArgs(argv) {
 // A half-built dist (a failed or interrupted build) must stop the start, not serve a blank page.
 // Returns what is missing, or null: files.json, index.html, and the script and stylesheet it uses.
 function missingBuildPart(distDir) {
-  if (!existsSync(join(distDir, "files.json"))) return "no files.json";
+  const listed = readBuiltFiles(distDir);
+  if (!listed) return "no usable files.json";
   let html;
   try { html = readFileSync(join(distDir, "index.html"), "utf8"); } catch { return "no index.html"; }
   const used = (re) => [...html.matchAll(re)].map((m) => m[1]);
@@ -83,7 +84,9 @@ function missingBuildPart(distDir) {
   const styles = used(/<link\b[^>]*\bhref="\/app\/([^"]+\.css)"/g);
   if (!scripts.length) return "index.html references no script";
   if (!styles.length) return "index.html references no stylesheet";
-  const gone = [...scripts, ...styles].find((f) => !existsSync(join(distDir, f)));
+  // The /app/ route serves only listed files, so an unlisted or non-file asset would 404.
+  const isFile = (f) => { try { return statSync(join(distDir, f)).isFile(); } catch { return false; } };
+  const gone = [...scripts, ...styles].find((f) => !listed.has(f) || !isFile(f));
   return gone ? `no ${gone}` : null;
 }
 

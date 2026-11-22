@@ -188,7 +188,21 @@ function parseFence(line) {
   if (info.includes("`")) return null;
   return { marker: m[1], lang: info.trim().split(/\s/, 1)[0] };
 }
-const HEADING_RE = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
+// The marker, the text and the optional closing hashes are taken in separate linear steps:
+// one regex with lazy text and an optional trailer backtracked quadratically on long spaces.
+const HEADING_MARKER_RE = /^ {0,3}(#{1,6})(?=[ \t]|$)/;
+function parseHeading(line) {
+  const m = HEADING_MARKER_RE.exec(line);
+  if (!m) return null;
+  let text = line.slice(m[0].length).trim();
+  let end = text.length;
+  while (end > 0 && text[end - 1] === "#") end--; // a loop: `#+$` rescans a long run of hashes
+  const closing = text.length - end;
+  // Closing hashes count only when a space or tab precedes them (or they are the whole text).
+  if (closing && (closing === text.length || /[ \t]/.test(text[text.length - closing - 1]))) text = text.slice(0, text.length - closing).trim();
+  return { level: m[1].length, text };
+}
+const MAX_LIST_DEPTH = 32;
 const LIST_RE = /^( *)([-*+]|\d{1,9}[.)])[ \t]+(\S.*)$/;
 const SEP_CELL_RE = /^:?-+:?$/;
 // Split and trim first, so a long run of whitespace cannot make a regex backtrack.
@@ -213,7 +227,7 @@ const startsTable = (lines, i) => lines[i].includes("|") && i + 1 < lines.length
 // Whether a line begins a block that may interrupt a paragraph.
 function interrupts(lines, i) {
   const line = lines[i];
-  if (parseFence(line) || HEADING_RE.test(line)) return true;
+  if (parseFence(line) || parseHeading(line)) return true;
   const m = LIST_RE.exec(line);
   if (m && (/^[-*+]$/.test(m[2]) || m[2] === "1." || m[2] === "1)")) return true;
   return startsTable(lines, i);
@@ -239,6 +253,7 @@ function renderTable(lines, i, ctx) {
 // Parses a list starting at `i`. An item's lines are everything indented past its marker
 // (nested blocks), plus lazy continuation lines of its first paragraph.
 function renderList(lines, i, ctx) {
+  const inner = { ...ctx, listDepth: (ctx.listDepth ?? 0) + 1 };
   const first = LIST_RE.exec(lines[i]);
   const baseIndent = first[1].length;
   const ordered = /\d/.test(first[2]);
@@ -263,7 +278,7 @@ function renderList(lines, i, ctx) {
       if (itemLines[itemLines.length - 1] === "") break;
       itemLines.push(line.trim());
     }
-    let body = renderBlocks(itemLines, ctx).trimEnd();
+    let body = renderBlocks(itemLines, inner).trimEnd();
     // A tight item (no blank line inside) shows its first paragraph without <p>.
     if (!itemLines.includes("")) body = body.replace(/^<p>([\s\S]*?)<\/p>/, "$1");
     items.push(`<li>${body}</li>`);
@@ -291,9 +306,9 @@ function renderBlocks(lines, ctx) {
       html += `<pre><code${cls}>${escapeHtml(body.join("\n"))}${body.length ? "\n" : ""}</code></pre>\n`;
       continue;
     }
-    const heading = HEADING_RE.exec(line);
+    const heading = parseHeading(line);
     if (heading) {
-      html += `<h${heading[1].length}>${inline((heading[2] || "").trim(), ctx)}</h${heading[1].length}>\n`;
+      html += `<h${heading.level}>${inline(heading.text, ctx)}</h${heading.level}>\n`;
       i++;
       continue;
     }
@@ -302,7 +317,8 @@ function renderBlocks(lines, ctx) {
       html += t.html; i = t.next;
       continue;
     }
-    if (LIST_RE.test(line)) {
+    // Past the cap a marker is plain text, so a line of thousands of `- ` cannot overflow the stack.
+    if (LIST_RE.test(line) && (ctx.listDepth ?? 0) < MAX_LIST_DEPTH) {
       const l = renderList(lines, i, ctx);
       html += l.html; i = l.next;
       continue;

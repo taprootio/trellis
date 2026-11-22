@@ -1568,6 +1568,22 @@ test("a bad --skip value is a usage error and nothing is written", () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("an --id-width over the config limit fails before anything is written", () => {
+  for (const args of [["--id-width", "100001", "--skip", "agents"], ["--id-width", "100001"], ["--prefix", "[", "--id-width", "4"]]) {
+    const root = tempRepo();
+    try {
+      const r = runInit(root, args);
+      assert.notEqual(r.status, 0, args.join(" "));
+      assert.deepEqual(readdirSync(root), [], "nothing written");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+  const root = tempRepo();
+  try {
+    assert.ok(applyScaffold(root, { idWidth: 100001, skip: ["agents"] }, {}, sourceRoot).summary.errors.length > 0);
+    assert.deepEqual(readdirSync(root), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("--skip agents writes no AGENTS.md and leaves an existing one out of the reconciliation scan", () => {
   const fresh = tempRepo();
   try {
@@ -2222,11 +2238,12 @@ test("applyScaffold refuses skip playbooks with withPlaybooks and writes nothing
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("--skip agents renders no block, so a huge id width still dry-runs", () => {
+test("a huge id width is refused with the config's width message, even for a dry run", () => {
   const root = tempRepo();
   try {
     const r = cliRun(root, ["--prefix", "DEMO", "--id-width", "1000000000", "--skip", "agents", "--dry-run"]);
-    assert.equal(r.status, 0, r.stderr.slice(0, 300));
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /idWidth/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

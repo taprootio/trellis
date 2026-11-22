@@ -98,6 +98,15 @@ function parseTarget(raw) {
   return { segs, query };
 }
 
+// The build's own list of what it emitted, or null when files.json is missing or unreadable.
+// The /app/ route and the start-up check share this one parse.
+export function readBuiltFiles(distDir) {
+  try {
+    const list = JSON.parse(readFileSync(join(distDir, "files.json"), "utf8"));
+    return new Set(Array.isArray(list) ? list.filter((f) => typeof f === "string" && f !== "files.json") : []);
+  } catch { return null; }
+}
+
 // ---------------------------------------------------------------- server
 // Starts the viewer. `entries` are config backlogs ({ id, name, path }). Resolves to a handle
 // { server, url, port, host, backlogs, close() }. `watch: false` skips the live-reload watchers.
@@ -132,13 +141,7 @@ export async function startViewer({
     res.end(req.method === "HEAD" ? undefined : data);
   }
 
-  // The build's own list of what it emitted. A missing or unreadable one lists nothing.
-  function builtFiles() {
-    try {
-      const list = JSON.parse(readFileSync(join(distDir, "files.json"), "utf8"));
-      return new Set(Array.isArray(list) ? list.filter((f) => typeof f === "string" && f !== "files.json") : []);
-    } catch { return new Set(); }
-  }
+  const builtFiles = () => readBuiltFiles(distDir) ?? new Set();
 
   function shell(res, req) {
     const file = join(distDir, "index.html");

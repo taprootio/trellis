@@ -226,6 +226,28 @@ test("a half-built dist (no files.json, or a referenced script or stylesheet mis
   } finally { repo.cleanup(); sb.cleanup(); }
 });
 
+test("a dist whose files.json omits, mis-types, or points at a non-file asset the page uses exits 1", async () => {
+  const repo = makeRepo();
+  const sb = sandbox();
+  try {
+    const cases = [
+      ["unlisted stylesheet", (d) => writeFileSync(join(d, "files.json"), JSON.stringify(["app-test.js"])), "esp-reset.css"],
+      ["files.json is an object", (d) => writeFileSync(join(d, "files.json"), "{}"), "app-test.js"],
+      ["files.json is not JSON", (d) => writeFileSync(join(d, "files.json"), "nope"), "files.json"],
+      ["script is a directory", (d) => { rmSync(join(d, "app-test.js")); mkdirSync(join(d, "app-test.js")); }, "app-test.js"],
+    ];
+    for (const [name, mutate, mention] of cases) {
+      const dist = join(sb.dir, `dist-${name.replace(/\W/g, "-")}`);
+      cpSync(FIXTURE_DIST, dist, { recursive: true });
+      mutate(dist);
+      const err0 = sb.err().length;
+      assert.equal(await runServe(["--repo", repo.root, "--port", "0"], { ...sb.base, distDir: dist }), 1, name);
+      const msg = sb.err().slice(err0);
+      assert.ok(msg.includes(mention) && msg.includes("npm run build:viewer"), `${name}: ${msg}`);
+    }
+  } finally { repo.cleanup(); sb.cleanup(); }
+});
+
 test("a backlog with a bad path still lets the viewer start, with that backlog in error", async () => {
   const good = makeRepo({ items: [{ status: "active", id: "DEMO0001" }] });
   const sb = sandbox();
@@ -276,6 +298,8 @@ test("through `trellis serve`: help, usage error, config error and a missing dis
 });
 
 test("through `trellis serve`, from an unrelated directory, the shell and its bundle are served and SIGTERM stops it", async () => {
+  // Windows kills the process on SIGTERM (no graceful handler), so the exit code is only defined elsewhere.
+  const graceful = process.platform !== "win32";
   const pkg = packageCopy();
   const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001" }] });
   const cwd = tmp("cwd");
@@ -296,7 +320,8 @@ test("through `trellis serve`, from an unrelated directory, the shell and its bu
       assert.equal((await request(port, { path: "/app/esp-reset.css" })).status, 200);
       assert.equal((await getJson(port, "/api/backlogs")).json[0].counts.active, 1);
     } finally { child.kill("SIGTERM"); }
-    assert.equal((await exited).code, 0);
+    const result = await exited;
+    if (graceful) assert.equal(result.code, 0);
   } finally { pkg.cleanup(); repo.cleanup(); rmSync(cwd, { recursive: true, force: true }); }
 });
 

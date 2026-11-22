@@ -177,7 +177,7 @@ export function validateConfig(cfg) {
   // Optional (TRL0032): floors the *organic* next id (max(floor, max+1)) so freshly
   // created tasks begin above an imported band; must fit idWidth.
   if (cfg.nextIdFloor != null) {
-    if (!Number.isInteger(cfg.nextIdFloor) || cfg.nextIdFloor < 0) {
+    if (!Number.isSafeInteger(cfg.nextIdFloor) || cfg.nextIdFloor < 0) {
       errors.push("config: `nextIdFloor` must be a non-negative integer when present");
     } else if (Number.isInteger(cfg.idWidth) && cfg.idWidth >= 1 && cfg.idWidth <= MAX_ID_WIDTH && cfg.nextIdFloor >= 10 ** cfg.idWidth) {
       errors.push(`config: \`nextIdFloor\` (${cfg.nextIdFloor}) must be < 10^idWidth (${10 ** cfg.idWidth}) to fit ${cfg.idWidth} digits`);
@@ -219,6 +219,8 @@ export function validateConfig(cfg) {
   if (cfg.tasksDir != null) {
     if (typeof cfg.tasksDir !== "string" || !cfg.tasksDir.trim()) {
       errors.push("config: `tasksDir` must be a non-empty string when present");
+    } else if (cfg.tasksDir.includes("\0")) {
+      errors.push("config: `tasksDir` must not contain a NUL character");
     } else if (isAbsolute(cfg.tasksDir) || cfg.tasksDir.split(/[/\\]/).includes("..")) {
       errors.push("config: `tasksDir` must be a repo-relative path within the repo (no absolute path or `..` segments)");
     } else {
@@ -412,11 +414,13 @@ export function attachEffortScale(cfg, errors = []) {
   return cfg.effortScale;
 }
 
+// Only real numbers are labeled: a malformed entry is already a config error, and String() on
+// an object with no callable toString would throw before that error could be reported.
 function identityScale(values) {
   return {
     isIdentity: true,
     name: "fibonacci",
-    byNumber: new Map(values.map((v) => [v, { label: String(v) }])),
+    byNumber: new Map(values.filter((v) => typeof v === "number" && Number.isFinite(v)).map((v) => [v, { label: String(v) }])),
     byLabel: new Map(),
   };
 }

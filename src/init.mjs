@@ -14,7 +14,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join, relative, isAbsolute, sep } from "node:path";
 import { execFileSync } from "node:child_process";
-import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, GENERATED_DIR, ledgerMarkerRe, loadConfig, loadRoster, readBacklog, generateArtifacts, attachEffortScale, artifactSet, isLocalMode } from "./backlog.mjs";
+import { SPEC_VERSION, DEFAULT_TASKS_DIR, CONFIG_DIR, MARKERS, GENERATED_DIR, ledgerMarkerRe, loadConfig, loadRoster, readBacklog, validateConfig, generateArtifacts, attachEffortScale, artifactSet, isLocalMode } from "./backlog.mjs";
 import { OutputRefused, outputPreflight, previewNextId, writeArtifactFiles } from "./local-output.mjs";
 
 // The config home is fixed at `trellis/backlog.config.json` (CONFIG_DIR),
@@ -248,6 +248,10 @@ function preflight(targetRoot, options, force) {
     cfg = existing.cfg;
   } else {
     cfg = effectiveConfig(options); // fresh target, or --force will overwrite it
+    // The config init would write must pass the same rules `check` applies to it, so an
+    // absurd width fails here instead of after files are written (or while padding an id).
+    const { errors } = validateConfig(cfg);
+    if (errors.length) return [`the scaffold config would be invalid: ${errors.join("; ")}`];
   }
   const root = tasksRootOf(cfg); // a kept config may relocate the tree via tasksDir
   const data = readBacklog(targetRoot, cfg);
