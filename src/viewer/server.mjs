@@ -16,10 +16,17 @@ export const DEFAULT_DIST_DIR = fileURLToPath(new URL("../../viewer/dist/", impo
 const HEARTBEAT_MS = 25_000;
 
 // ------------------------------------------------------------ host check
+// One spelling per IPv6 address, so `::ffff:127.0.0.1` and `::ffff:7f00:1` compare equal.
+function canonicalV6(literal) {
+  try { return new URL(`http://${literal}`).hostname; } catch { return null; }
+}
+
 export function parseHost(header) {
   const h = String(header).trim().toLowerCase();
   const m = /^(\[[0-9a-f:.]+\])(?::(\d+))?$/.exec(h) || /^([a-z0-9._-]+)(?::(\d+))?$/.exec(h);
-  return m ? { host: m[1], port: m[2] === undefined ? null : Number(m[2]) } : null;
+  if (!m) return null;
+  const host = m[1].startsWith("[") ? canonicalV6(m[1]) : m[1];
+  return host ? { host, port: m[2] === undefined ? null : Number(m[2]) } : null;
 }
 
 // Pure so the port 80 rule is testable without binding port 80. A Host is allowed when it is
@@ -30,7 +37,8 @@ export function hostAllowed(header, { port, printedHost, allowedHosts = [] }) {
   const h = parseHost(header);
   if (!h) return false;
   if (allowedHosts.includes(h.host)) return true;
-  if (!["127.0.0.1", "localhost", String(printedHost).toLowerCase()].includes(h.host)) return false;
+  const printed = String(printedHost).toLowerCase();
+  if (!["127.0.0.1", "localhost", printed.startsWith("[") ? canonicalV6(printed) : printed].includes(h.host)) return false;
   return h.port === null ? port === 80 : h.port === port;
 }
 
@@ -39,7 +47,7 @@ export function printedHostFor(bind, address) {
   if (String(bind).toLowerCase() === "localhost") return "localhost";
   if (address === "0.0.0.0") return "127.0.0.1";
   if (address === "::") return "[::1]";
-  return address.includes(":") ? `[${address}]` : address;
+  return address.includes(":") ? canonicalV6(`[${address}]`) : address;
 }
 
 // ------------------------------------------------------------- responses

@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../src/backlog.mjs";
 import { claim, seed } from "../src/ledger.mjs";
@@ -19,19 +19,54 @@ const STAMP = 1_700_000_000;
 const stamp = (file) => utimesSync(file, STAMP, STAMP);
 
 // A live viewer over `repos` ({ id: repo }) with an event stream; stops everything afterwards.
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// fs.watch on macOS can miss changes made in the first moments after it attaches (seen when
+// the whole suite loads the disk). Before a test edits anything, poke each backlog with a
+// probe file until a message proves its watchers deliver, then wait for the stream to go
+// quiet so no probe message is mistaken for the test's own.
+async function warmUp(repos, events) {
+  for (const [id, repo] of Object.entries(repos)) {
+    const dir = existsSync(repo.folder("active")) ? repo.folder("active") : join(repo.root, repo.tasksDir ?? "trellis");
+    const probe = join(dir, ".watch-probe");
+    for (let n = 0; !events.seen.some((m) => m.backlog === id); n++) {
+      if (n > 40) throw new Error(`watchers for ${id} never delivered a change`);
+      writeFileSync(probe, String(n));
+      await pause(250);
+    }
+    rmSync(probe, { force: true });
+  }
+  for (let quiet = 0, last = events.seen.length; quiet < 4; ) {
+    await pause(250);
+    if (events.seen.length === last) quiet++; else { quiet = 0; last = events.seen.length; }
+  }
+}
+
 async function live(repos, fn) {
   const entries = Object.entries(repos).map(([id, repo]) => ({ id, name: id, path: repo.root }));
   const viewer = await startViewer({ entries, port: 0, distDir: FIXTURE_DIST, watch: true });
   const events = await openEvents(viewer.port);
-  try { return await fn({ port: viewer.port, events, viewer }); } finally { events.close(); await viewer.close(); }
+  try {
+    await warmUp(repos, events);
+    const warm = events.seen.length;
+    // Tests read `seen` from here on, so the probe's messages never count.
+    const view = { ...events, get seen() { return events.seen.slice(warm); }, next: (id) => events.next(id), close: () => events.close() };
+    return await fn({ port: viewer.port, events: view, viewer });
+  } finally { events.close(); await viewer.close(); }
 }
 
-// Re-reads /api/backlogs/<id> until `ok(record)`, waiting for one message between reads.
-async function until({ port, events }, id, ok) {
+// Called right after an edit. Waits for a message sent after that edit before each read, so a
+// watcher that never broadcasts fails the test instead of being papered over by the API's own read.
+// Accepts only messages that arrived after the previous successful wait, so the edit's
+// own message counts even when it lands before this call (the edit happens first).
+async function until(ctx, id, ok) {
+  const { port, events } = ctx;
+  const mark = ctx.consumed ?? 0;
   for (;;) {
+    const msg = await events.next(id);
+    if (events.seen.indexOf(msg) < mark) continue;
     const { json } = await getJson(port, `/api/backlogs/${id}`);
-    if (ok(json)) return json;
-    await events.next(id);
+    if (ok(json)) { ctx.consumed = events.seen.length; return json; }
   }
 }
 const titles = (json) => (json.tasks || []).map((t) => t.title).join();
@@ -212,17 +247,17 @@ test("the plan names the tasks root, status directories and config home, or the 
   const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001" }] });
   try {
     const b = createBacklog({ id: "demo", name: "Demo", path: repo.root });
-    assert.deepEqual(rel(repo, planOf(b)), ["trellis", "trellis/active"], "directories that do not exist yet are covered by trellis/");
+    assert.deepEqual(rel(repo, planOf(b)), [".", "trellis", "trellis/active"], "directories that do not exist yet are covered by trellis/");
     mkdirSync(repo.folder("completed"), { recursive: true });
     mkdirSync(repo.folder("removed"));
-    assert.deepEqual(rel(repo, planOf(b)), ["trellis", "trellis/active", "trellis/completed", "trellis/completed/tasks", "trellis/removed"]);
+    assert.deepEqual(rel(repo, planOf(b)), [".", "trellis", "trellis/active", "trellis/completed", "trellis/completed/tasks", "trellis/removed"]);
     // A nested tasks root that is missing is watched through its nearest existing ancestor.
     repo.write("trellis/backlog.config.json", JSON.stringify({ ...BASE_CFG, tasksDir: "docs/tasks" }));
     assert.deepEqual(rel(repo, planOf(b)), [".", "trellis"]);
     mkdirSync(join(repo.root, "docs"));
-    assert.deepEqual(rel(repo, planOf(b)), ["docs", "trellis"]);
+    assert.deepEqual(rel(repo, planOf(b)), [".", "docs", "trellis"]);
     mkdirSync(join(repo.root, "docs", "tasks", "active"), { recursive: true });
-    assert.deepEqual(rel(repo, planOf(b)), ["docs", "docs/tasks", "docs/tasks/active", "trellis"]);
+    assert.deepEqual(rel(repo, planOf(b)), [".", "docs", "docs/tasks", "docs/tasks/active", "trellis"]);
   } finally { repo.cleanup(); }
 });
 
@@ -234,10 +269,10 @@ test("a config change rebuilds the plan: the new root is watched and the old dir
     const fake = fakeWatch();
     const watchers = createWatchers([b], () => {}, { watch: fake.watch });
     watchers.start();
-    assert.deepEqual(rel(repo, fake.live()), ["trellis", "trellis/active"]);
+    assert.deepEqual(rel(repo, fake.live()), [".", "trellis", "trellis/active"]);
     repo.write("trellis/backlog.config.json", JSON.stringify({ ...BASE_CFG, tasksDir: "docs/tasks" }));
     watchers.reconcile(b);
-    assert.deepEqual(rel(repo, fake.live()), ["docs", "docs/tasks", "docs/tasks/active", "trellis"]);
+    assert.deepEqual(rel(repo, fake.live()), [".", "docs", "docs/tasks", "docs/tasks/active", "trellis"]);
     watchers.close();
   } finally { repo.cleanup(); }
 });
@@ -260,7 +295,7 @@ test("a directory replaced at the same path is re-armed, and a vanished one is r
     assert.ok(first.closed && !second[1].closed);
     rmSync(repo.folder("active"), { recursive: true });
     watchers.reconcile(b);
-    assert.deepEqual(rel(repo, fake.live()), ["trellis"]);
+    assert.deepEqual(rel(repo, fake.live()), [".", "trellis"]);
     watchers.close();
   } finally { repo.cleanup(); }
 });
@@ -283,7 +318,44 @@ test("an accepted symlink target's directory and its ancestors up to the worktre
     writeFileSync(join(repo.dir, "outside.md"), "x");
     symlinkSync(join(repo.dir, "outside.md"), link);
     b.build();
-    assert.deepEqual(rel(repo, planOf(b)), ["trellis", "trellis/active"]);
+    assert.deepEqual(rel(repo, planOf(b)), [".", "trellis", "trellis/active"]);
+    // A target accepted earlier whose directory has since become a link out of the worktree is dropped.
+    rmSync(link);
+    symlinkSync(target, link);
+    b.build();
+    const outside = join(repo.dir, "elsewhere");
+    mkdirSync(join(outside, "deep"), { recursive: true });
+    writeFileSync(join(outside, "deep", "real.md"), "x");
+    rmSync(join(repo.root, "docs", "pool"), { recursive: true });
+    symlinkSync(outside, join(repo.root, "docs", "pool"));
+    const dirs = planOf(b);
+    assert.ok(dirs.every((d) => d === repo.root || d.startsWith(repo.root + "/")), `nothing outside the worktree: ${dirs}`);
+    assert.ok(!dirs.some((d) => d.includes("pool")));
+  } finally { repo.cleanup(); }
+});
+
+test("the worktree root is watched for the tasks root's top entry, so replacing a rejected symlinked root with a real one is reported", posixOnly, () => {
+  const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001" }] });
+  try {
+    const b = createBacklog({ id: "demo", name: "Demo", path: repo.root });
+    assert.deepEqual([...watchPlan(b).get(repo.root)], ["trellis"], "even the default root is watched through its parent");
+    // Send the whole backlog outside the worktree, which the reader rejects.
+    const outside = join(repo.dir, "outside-trellis");
+    renameSync(join(repo.root, "trellis"), outside);
+    symlinkSync(outside, join(repo.root, "trellis"));
+    const fake = fakeWatch();
+    const changed = [];
+    const watchers = createWatchers([b], (id) => changed.push(id), { watch: fake.watch, debounceMs: 5 });
+    watchers.start();
+    assert.deepEqual(rel(repo, fake.live()), ["."], "nothing outside is watched, only the contained parent");
+    const rootWatch = fake.calls.find((c) => c.dir === repo.root);
+    const invalidated = [];
+    b.reader.invalidate = (p) => invalidated.push(p);
+    rootWatch.cb("rename", "unrelated");
+    assert.deepEqual(invalidated, [], "other names in the worktree root are ignored");
+    rootWatch.cb("rename", "trellis");
+    assert.deepEqual(invalidated, [join(repo.root, "trellis")]);
+    watchers.close();
   } finally { repo.cleanup(); }
 });
 

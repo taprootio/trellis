@@ -19,7 +19,10 @@ export const isInside = within;
 
 // `hooks.beforeOpen(path)` runs after the path check and before the open; `hooks.afterList(dir)`
 // after a listing. They exist so tests can swap a file or remove a directory at that instant.
+// `hooks.fstat` and `hooks.read` stand in for the descriptor calls so a test can fail them.
 export function createReader(root, hooks = {}) {
+  const fstat = hooks.fstat || fstatSync;
+  const read = hooks.read || readFileSync;
   const cache = new Map(); // task path -> { size, mtimeMs, real, fm, body, syntaxErrors }
   let lastRead = new Map(); // `where` -> { path, fm, body, syntaxErrors }, for the current rebuild
   let listed = new Map(); // dir -> names, for the current rebuild
@@ -57,13 +60,22 @@ export function createReader(root, hooks = {}) {
     try { fd = openSync(r.real, OPEN_FLAGS); } catch (e) {
       return GONE.has(e.code) ? { absent: true } : { skip: `cannot open (${e.code || e.message})` };
     }
-    const st = fstatSync(fd);
+    let st;
+    try { st = fstat(fd); } catch (e) {
+      closeSync(fd);
+      return { skip: `cannot read (${e.code || e.message})` };
+    }
     if (!st.isFile()) { closeSync(fd); return { skip: "not a regular file" }; }
     if (r.real !== path) targets.add(r.real);
     return { fd, real: r.real, st };
   }
 
-  const readFd = (fd) => { try { return readFileSync(fd, "utf8"); } finally { closeSync(fd); } };
+  // Reads and always closes the descriptor; a failed read is a skip, never a throw.
+  const readFd = (fd, encoding) => {
+    try { return { data: read(fd, encoding) }; } catch (e) {
+      return { skip: `cannot read (${e.code || e.message})` };
+    } finally { closeSync(fd); }
+  };
 
   return {
     root,
@@ -76,7 +88,8 @@ export function createReader(root, hooks = {}) {
       const o = openRegular(path);
       if (o.absent) return null;
       if (o.skip) return { skip: o.skip };
-      return readFd(o.fd);
+      const r = readFd(o.fd, "utf8");
+      return r.skip ? { skip: r.skip } : r.data;
     },
     readItem(path, where) {
       const o = openRegular(path);
@@ -86,7 +99,9 @@ export function createReader(root, hooks = {}) {
       if (entry && entry.size === o.st.size && entry.mtimeMs === o.st.mtimeMs && entry.real === o.real) {
         closeSync(o.fd);
       } else {
-        const text = readFd(o.fd);
+        const r = readFd(o.fd, "utf8");
+        if (r.skip) return { skip: r.skip };
+        const text = r.data;
         const syntaxErrors = [];
         const fm = parseFrontMatter(text, where, syntaxErrors);
         entry = { size: o.st.size, mtimeMs: o.st.mtimeMs, real: o.real, fm, body: splitFrontMatter(text).body, syntaxErrors };
@@ -149,7 +164,7 @@ export function createReader(root, hooks = {}) {
       const o = openRegular(path);
       if (!o.fd) return null;
       if (!within(rootReal.real, o.real) || o.st.size > maxBytes) { closeSync(o.fd); return null; }
-      try { return readFileSync(o.fd); } finally { closeSync(o.fd); }
+      return readFd(o.fd).data ?? null;
     },
     resolve(path) {
       return realOf(path);

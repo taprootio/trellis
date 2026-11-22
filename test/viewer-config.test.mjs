@@ -119,6 +119,16 @@ test("a checkout whose directory name ends in whitespace resolves", { skip: proc
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("a checkout whose directory name ends in a carriage return keeps it", { skip: process.platform === "win32" }, () => {
+  const dir = tmp("cr");
+  try {
+    const work = join(dir, "work\r");
+    mkdirSync(work);
+    execFileSync("git", ["init", "-q", ...initRefFormat, work], { stdio: "ignore" });
+    assert.equal(resolveMainWorktree(work).mainWorktree, work);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("a missing path, a non-repository and a bare repository are that backlog's layout error", () => {
   const dir = tmp("layout");
   try {

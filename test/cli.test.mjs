@@ -190,11 +190,15 @@ test("package ships scaffold templates and the viewer only with its grant", asyn
     assert.deepEqual(viewerPackProblems(paths, pkg.files), []);
 
     // In a copy with viewer/dist listed, the rule fails until the grant is listed and present.
-    for (const entry of [...pkg.files, "viewer/dist"]) {
+    // The real grant may already be listed and present; the negative check starts without it.
+    const GRANT = "viewer/ESPALIER-GRANT.md";
+    const baseFiles = pkg.files.filter((f) => f !== GRANT);
+    for (const entry of [...baseFiles, "viewer/dist"]) {
       const rel = entry.replace(/\/$/, "");
       if (existsSync(join(sourceRoot, rel))) cpSync(join(sourceRoot, rel), join(copy, rel), { recursive: true });
     }
-    const withDist = { ...pkg, files: [...pkg.files, "viewer/dist/"] };
+    rmSync(join(copy, GRANT), { force: true });
+    const withDist = { ...pkg, files: [...baseFiles, "viewer/dist/"] };
     writeFileSync(join(copy, "package.json"), JSON.stringify(withDist, null, 2));
     assert.ok(viewerPackProblems(packedPaths(copy, cache), withDist.files).includes("viewer/ESPALIER-GRANT.md is not packed"));
     writeFileSync(join(copy, "viewer", "ESPALIER-GRANT.md"), "grant\n");

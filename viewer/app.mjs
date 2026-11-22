@@ -16,7 +16,7 @@ import "@taprootio/espalier/button";
 import { createStore, connectEvents, backlogViews, attentionItems } from "./state.mjs";
 import {
   STATUSES, serializeQuery, listPath, taskPath, visibleRows, milestoneGroups,
-  priorityOptions, ownerOptions, normalizeOwner, toText, bodyLinkPath, taskFields,
+  priorityOptions, ownerOptions, normalizeOwner, toText, bodyLinkPath, taskFields, carryFiltersInLinks, taskProblems,
 } from "./filters.mjs";
 import { effortView } from "./effort.mjs";
 
@@ -58,6 +58,12 @@ class TrellisViewer extends LitElement {
     this.onPop();
     this.store.loadAll();
     this.events = connectEvents(this.store, EventSource);
+  }
+
+  // The body's HTML is injected as a string, so its task links get the filters after each render.
+  updated() {
+    const body = this.querySelector(".body");
+    if (body) carryFiltersInLinks(body.querySelectorAll("a[href]"), location.origin, this.snapshot.filters);
   }
 
   disconnectedCallback() {
@@ -200,6 +206,8 @@ class TrellisViewer extends LitElement {
         ${r.effortDisplay && r.effortDisplay.text ? html`<dt>Effort</dt><dd>${this.renderEffort(r.effortDisplay)}</dd>` : nothing}
         ${(r.depends_on ?? []).length ? html`<dt>Depends on</dt><dd>${r.depends_on.join(", ")}</dd>` : nothing}
       </dl>
+      ${taskProblems(r).length ? html`<esp-info intent="warning"><strong>Needs attention</strong>
+        <ul>${taskProblems(r).map((e) => html`<li>${e}</li>`)}</ul></esp-info>` : nothing}
       <div class="body" @click=${(e) => this.onBodyClick(e)}>${unsafeHTML(r.bodyHtml ?? "")}</div>`;
   }
 

@@ -64,7 +64,11 @@ function planOf(backlog) {
   if (set.dir) generated.push({ path: resolved(set.dir), dir: true });
   for (const d of [p.tasks, p.active, join(p.tasks, "completed"), p.completedTasks, p.removed, join(root, "trellis")]) add(nearestExisting(d, root));
   // A replaced tasks root is reported by its parent, which a handle on the old inode may miss.
-  if (dirname(p.tasks) !== root) add(nearestExisting(dirname(p.tasks), root));
+  // The worktree root reports the root's top entry (even `trellis`), and each contained
+  // ancestor reports the next one down. These also cover a root that resolves outside the
+  // worktree and is rejected: swapping it for a real folder must still send an event.
+  add(root, [p.tasks.slice(root.length + 1).split(sep)[0]]);
+  for (let d = dirname(p.tasks); d !== root && isInside(root, d); d = dirname(d)) add(nearestExisting(d, root));
 
   if (cfg && cfg.idAllocation === "ledger" && backlog.gitDir) {
     const gitDir = backlog.gitDir;
@@ -75,11 +79,14 @@ function planOf(backlog) {
   }
 
   // A symlinked task, config or roster: watch the target's directory and every ancestor up
-  // to the worktree, so replacing a subtree that holds it is reported.
+  // to the worktree, so replacing a subtree that holds it is reported. The reader accepted
+  // each target earlier; it is resolved again here so one swapped for a link that now
+  // points outside is never watched.
   for (const target of backlog.reader.symlinkTargets()) {
-    if (isDir(target)) add(target);
+    const real = nearestExisting(target, root);
+    if (real === target && isDir(real)) add(real);
     for (let d = dirname(target); isInside(root, d); d = dirname(d)) {
-      add(d);
+      add(nearestExisting(d, root));
       if (d === root) break;
     }
   }

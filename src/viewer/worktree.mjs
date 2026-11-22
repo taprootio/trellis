@@ -24,7 +24,8 @@ function defaultGit(cwd, args) {
 }
 
 // git ends its output with one newline; a directory name may end in whitespace.
-const chomp = (s) => String(s).replace(/\r?\n$/, "");
+// Only Windows git writes CRLF; on POSIX a trailing CR belongs to the name.
+const chomp = (s) => String(s).replace(process.platform === "win32" ? /\r?\n$/ : /\n$/, "");
 const firstLine = (s) => String(s || "").trim().split("\n")[0] || "git error";
 
 function canonical(path, what) {

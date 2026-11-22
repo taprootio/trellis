@@ -83,6 +83,20 @@ export function bodyLinkPath(pathname, filters) {
   return task ? taskPath(task.backlog, task.id, filters) : null;
 }
 
+// Rewrites each in-app task link under `anchors` so a new tab or a copied link keeps the filters.
+// The link's own path is read, so running it again with newer filters just replaces the query.
+export function carryFiltersInLinks(anchors, origin, filters) {
+  for (const a of anchors) {
+    if (a.origin !== origin) continue;
+    const path = bodyLinkPath(a.pathname, filters);
+    if (path) a.setAttribute("href", path);
+  }
+}
+
+// The task's own validation problems as text. They come from the shared validator, so a label
+// retired from the config stays quiet on a closed task.
+export const taskProblems = (record) => (Array.isArray(record.validationErrors) ? record.validationErrors.map(toText).filter(Boolean) : []);
+
 // The task view's text fields as [label, text] pairs, empty ones left out. The authored id is
 // not here (the heading shows the record id), and effort has its own rendering.
 export function taskFields(record, backlogName) {

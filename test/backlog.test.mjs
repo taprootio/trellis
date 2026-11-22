@@ -133,6 +133,17 @@ test("config errors: missing mapping, duplicate label, bad types, unknown active
   }
 });
 
+test("a non-string specVersion is a config error, never a throw", () => {
+  const hostile = JSON.stringify({ ...ARRAY_CFG, specVersion: { toString: 1 } });
+  for (const [json, re] of [[hostile, /`specVersion` must be a string/], [JSON.stringify({ ...ARRAY_CFG, specVersion: 1 }), /`specVersion` must be a string/]]) {
+    withRepo({ ...ARRAY_CFG }, {}, (root) => {
+      writeFileSync(join(root, "trellis/backlog.config.json"), json);
+      const { errors } = loadConfig(root);
+      assert.ok(errors.some((e) => re.test(e)), JSON.stringify(errors));
+    });
+  }
+});
+
 test("config accepts a valid nextIdFloor and rejects invalid ones (TRL0032)", () => {
   withRepo({ ...ARRAY_CFG, nextIdFloor: 100 }, {}, (root) => {
     const { cfg, errors } = loadConfig(root);

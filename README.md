@@ -110,13 +110,20 @@ and the materialized `history.json` is gitignored — regenerate it at build tim
 ## View backlogs
 
 `trellis serve` runs a local, read-only viewer for one or more backlogs, built
-with Espalier controls. Each backlog is read from its repo's **main worktree**
-(edits in linked worktrees do not show), and the page updates live as files
-change there.
+with Espalier controls. It is available from 0.4.0. Each backlog is read from
+its repo's **main worktree** (edits in linked worktrees do not show), and the
+page updates live as files change there.
 
 ```
-npx @taprootio/trellis serve                  # the current repo, at http://127.0.0.1:4747
-npx @taprootio/trellis serve --config <file>  # several backlogs from a viewer config
+npx @taprootio/trellis serve                  # 0.4.0 or later: the current repo, at http://127.0.0.1:4747
+npx @taprootio/trellis serve --config <file>  # 0.4.0 or later: several backlogs from a viewer config
+```
+
+From a clone of this repo, build the viewer once and run the script directly:
+
+```
+npm run build:viewer
+node scripts/trellis.mjs serve [--config <file>]
 ```
 
 A viewer config lists the backlogs to show, in display order
@@ -145,8 +152,9 @@ only `127.0.0.1`, `localhost`, its printed address and `allowedHosts`
 host name allowed. Reading needs git 2.36 or later.
 
 Building the viewer from a checkout (`npm run build:viewer`, which `node --test`
-and `npm pack` also run) needs Node `^20.19.0 || >=22.12.0`, rolldown's floor;
-the published CLI keeps its Node 18 floor because it ships the built bundle.
+and `npm pack` also run) needs Node `^20.19.0 || >=22.12.0`, rolldown's floor.
+From 0.4.0 the published CLI ships the built bundle, so it keeps its Node 18
+floor; a clone needs the newer Node only to build.
 
 ## Operate over MCP
 

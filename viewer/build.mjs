@@ -20,7 +20,10 @@ function packageRoot(entry, name) {
   return dir;
 }
 
-export async function build({ outDir = join(here, "dist") } = {}) {
+// The only directory the build empties, fixed from this module's own location.
+const outDir = join(here, "dist");
+
+export async function build() {
   await rm(outDir, { recursive: true, force: true });
   await mkdir(join(outDir, "licenses"), { recursive: true });
 
@@ -53,13 +56,7 @@ export async function build({ outDir = join(here, "dist") } = {}) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const at = process.argv.indexOf("--out");
-  const outDir = at > -1 ? process.argv[at + 1] : undefined;
-  if (at > -1 && !outDir) {
-    log("--out needs a directory");
-    process.exit(2);
-  }
-  build(outDir ? { outDir } : {}).catch((err) => {
+  build().catch((err) => {
     process.stderr.write(`build:viewer failed: ${err?.stack ?? err}\n`);
     process.exit(1);
   });

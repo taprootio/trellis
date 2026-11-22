@@ -289,6 +289,23 @@ test("a task removed between listing and reading is skipped, and a task swapped 
   } finally { repo.cleanup(); }
 });
 
+test("a failed fstat or read after a successful open is a skip for tasks and null for images, and the descriptor closes", () => {
+  const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001" }, { status: "active", id: "DEMO0002" }] });
+  try {
+    for (const [name, hooks, re] of [
+      ["fstat", { fstat() { throw Object.assign(new Error("boom"), { code: "EIO" }); } }, /cannot read \(EIO\)/],
+      ["read", { read() { throw Object.assign(new Error("boom"), { code: "EIO" }); } }, /cannot read \(EIO\)/],
+    ]) {
+      const b = createBacklog({ id: "demo", name: "Demo", path: repo.root }, { hooks });
+      const out = b.build();
+      assert.deepEqual(out.order, [], name);
+      // The config read fails the same way, so the message may sit in errors or diagnostics.
+      assert.ok([...out.errors, ...out.diagnostics.map((d) => d.message)].some((m) => re.test(m)), name);
+      assert.equal(b.reader.readBinary(repo.itemPath("active", "DEMO0001"), repo.itemPath("active", "")), null, name);
+    }
+  } finally { repo.cleanup(); }
+});
+
 // Whole-second times survive utimes exactly, so a replacement can keep the very same mtime.
 const STAMP = 1_700_000_000;
 const stamp = (file) => utimesSync(file, STAMP, STAMP);

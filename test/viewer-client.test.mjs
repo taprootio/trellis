@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { effortView } from "../viewer/effort.mjs";
 import {
   defaultFilters, parseQuery, serializeQuery, parseLocation, normalizeOwner,
-  visibleRows, filterRows, buildRows, taskPath, listPath, bodyLinkPath, taskFields,
+  visibleRows, filterRows, buildRows, taskPath, listPath, bodyLinkPath, taskFields, carryFiltersInLinks, taskProblems,
 } from "../viewer/filters.mjs";
 import { createStore, connectEvents, backlogViews, attentionItems } from "../viewer/state.mjs";
 
@@ -272,6 +272,24 @@ test("a task link in a body keeps the current filters, and only task links are t
   assert.equal(bodyLinkPath("/b/demo", filters), null);
   assert.equal(bodyLinkPath("/assets/demo/a.png", filters), null);
   assert.equal(bodyLinkPath("/b/demo/task/DEMO0002/extra", filters), null);
+});
+
+test("task links in a body get the current filters in their href, again when the filters change; other links are untouched", () => {
+  const anchor = (href) => {
+    const u = new URL(href, "http://127.0.0.1:4747");
+    return { origin: u.origin, pathname: u.pathname, href, setAttribute(_n, v) { this.href = v; } };
+  };
+  const links = [anchor("/b/demo/task/DEMO0002"), anchor("https://example.com/b/demo/task/DEMO0002"), anchor("/assets/demo/a.png")];
+  carryFiltersInLinks(links, "http://127.0.0.1:4747", { ...defaultFilters(), q: "x" });
+  assert.deepEqual(links.map((l) => l.href), ["/b/demo/task/DEMO0002?q=x", "https://example.com/b/demo/task/DEMO0002", "/assets/demo/a.png"]);
+  carryFiltersInLinks(links, "http://127.0.0.1:4747", { ...defaultFilters(), statuses: ["completed"] });
+  assert.equal(links[0].href, "/b/demo/task/DEMO0002?status=completed");
+});
+
+test("the task view's problems are the record's validation errors as text", () => {
+  assert.deepEqual(taskProblems({ validationErrors: ["milestone must be one of: Alpha", ""] }), ["milestone must be one of: Alpha"]);
+  assert.deepEqual(taskProblems({ validationErrors: [] }), []);
+  assert.deepEqual(taskProblems({}), []);
 });
 
 test("the task view lists the standard text fields, hiding empty ones and the authored id", () => {

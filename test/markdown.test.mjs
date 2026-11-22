@@ -58,3 +58,15 @@ test("markdown it does not cover stays text, and snake_case is not emphasis", ()
 test("an unterminated fence runs to the end and stays escaped", () => {
   assert.equal(render("```\n<b>x"), "<pre><code>&lt;b&gt;x\n</code></pre>\n");
 });
+
+test("a long malformed paragraph renders as escaped text in linear time", () => {
+  const DEADLINE_MS = 10_000; // the shared test deadline; the unfixed renderer needs minutes at this size
+  const inputs = ["[".repeat(200_000), "![".repeat(100_000), "[a](".repeat(15_000), "*a ".repeat(70_000), "_a ".repeat(70_000), "[a](<".repeat(12_000)];
+  const started = Date.now();
+  for (const md of inputs) {
+    const html = render(md);
+    assert.doesNotMatch(html, /<a |<em>|<strong>/);
+  }
+  assert.ok(Date.now() - started < DEADLINE_MS, "rendering should finish within the deadline");
+  assert.match(render("[ok](https://example.com) and [open"), /<a href="https:\/\/example.com">ok<\/a> and \[open/);
+});

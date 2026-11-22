@@ -162,6 +162,15 @@ test("hostAllowed: with no port in Host, a loopback or printed host passes only 
   assert.equal(parseHost("a/b"), null);
 });
 
+test("hostAllowed compares IPv6 literals by address, not spelling", () => {
+  const opts = { port: 4747, printedHost: "[::ffff:127.0.0.1]", allowedHosts: [] };
+  assert.ok(hostAllowed("[::ffff:7f00:1]:4747", opts));
+  assert.ok(hostAllowed("[::FFFF:127.0.0.1]:4747", opts));
+  assert.ok(hostAllowed("[0:0:0:0:0:0:0:1]:4747", { ...opts, printedHost: "[::1]" }));
+  assert.ok(!hostAllowed("[::ffff:7f00:2]:4747", opts));
+  assert.equal(printedHostFor("::ffff:127.0.0.1", "::ffff:127.0.0.1"), "[::ffff:7f00:1]");
+});
+
 test("printedHostFor follows the listener's address", () => {
   assert.deepEqual(
     [["127.0.0.1", "127.0.0.1"], ["0.0.0.0", "0.0.0.0"], ["::", "::"], ["::1", "::1"], ["localhost", "::1"], ["localhost", "127.0.0.1"], ["127.0.0.2", "127.0.0.2"]].map(([bind, addr]) => printedHostFor(bind, addr)),

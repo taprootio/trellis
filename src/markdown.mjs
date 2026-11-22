@@ -28,22 +28,32 @@ function linkHref(target, resolveRepoPath) {
   return typeof resolveRepoPath === "function" ? resolveRepoPath(target) || null : null;
 }
 
-// Finds the `]` that closes the `[` at `start`, skipping escapes and code spans.
-function closingBracket(text, start) {
-  let depth = 0;
-  for (let i = start; i < text.length; i++) {
+// Pairs every `[` with its `]` in one pass (skipping escapes and code spans), so a long
+// paragraph of unmatched brackets stays linear instead of rescanning to the end for each one.
+// Returns Map(open index -> close index); an unmatched `[` has no entry.
+function bracketPairs(text) {
+  const pairs = new Map();
+  const open = [];
+  for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (c === "\\") { i++; continue; }
     if (c === "`") {
-      const run = /^`+/.exec(text.slice(i))[0];
-      const end = text.indexOf(run, i + run.length);
-      if (end !== -1) { i = end + run.length - 1; continue; }
+      let run = 1;
+      while (text[i + run] === "`") run++;
+      const ticks = "`".repeat(run);
+      const end = text.indexOf(ticks, i + run);
+      i = end !== -1 ? end + run - 1 : i + run - 1;
+      continue;
     }
-    if (c === "[") depth++;
-    else if (c === "]" && --depth === 0) return i;
+    if (c === "[") open.push(i);
+    else if (c === "]" && open.length) pairs.set(open.pop(), i);
   }
-  return -1;
+  return pairs;
 }
+
+// The longest link destination read; a longer or unclosed one renders as plain text, so a
+// run of `[a](` cannot make every link rescan the rest of the paragraph.
+const MAX_DESTINATION = 2000;
 
 // Reads `(destination "optional title")` at `start` (the `(`). Returns { target, end } or null.
 function linkDestination(text, start) {
@@ -51,14 +61,14 @@ function linkDestination(text, start) {
   while (text[i] === " ") i++;
   let target;
   if (text[i] === "<") {
-    const close = text.indexOf(">", i);
+    const close = text.slice(0, i + MAX_DESTINATION).indexOf(">", i);
     if (close === -1 || text.slice(i, close).includes("\n")) return null;
     target = text.slice(i + 1, close);
     i = close + 1;
   } else {
     let depth = 0;
     const from = i;
-    for (; i < text.length; i++) {
+    for (; i < text.length && i - from <= MAX_DESTINATION; i++) {
       const c = text[i];
       if (c === "\\") { i++; continue; }
       if (c === "(") depth++;
@@ -99,6 +109,10 @@ function findClose(text, from, delim) {
 function inline(text, ctx, allowLinks = true) {
   let out = "";
   let i = 0;
+  let pairs = null; // built on the first `[`
+  const closeOf = (open) => (pairs ??= bracketPairs(text)).get(open) ?? -1;
+  // A delimiter with no closer from here has none from any later start either.
+  const noCloseFrom = new Map();
   while (i < text.length) {
     const c = text[i];
     if (c === "\\" && i + 1 < text.length && PUNCT_RE.test(text[i + 1])) { out += escapeHtml(text[i + 1]); i += 2; continue; }
@@ -116,12 +130,12 @@ function inline(text, ctx, allowLinks = true) {
     }
     // An image is not covered, so it stays text (its brackets must not become a link).
     if (c === "!" && text[i + 1] === "[") {
-      const close = closingBracket(text, i + 1);
+      const close = closeOf(i + 1);
       const dest = close !== -1 && text[close + 1] === "(" ? linkDestination(text, close + 1) : null;
       if (dest) { out += escapeHtml(text.slice(i, dest.end)); i = dest.end; continue; }
     }
     if (c === "[" && allowLinks) {
-      const close = closingBracket(text, i);
+      const close = closeOf(i);
       if (close !== -1 && text[close + 1] === "(") {
         const dest = linkDestination(text, close + 1);
         if (dest) {
@@ -142,7 +156,9 @@ function inline(text, ctx, allowLinks = true) {
       const intraword = c === "_" && i > 0 && /[A-Za-z0-9]/.test(text[i - 1]);
       const next = text[i + delim.length];
       if (!intraword && next !== undefined && !/\s/.test(next)) {
-        const close = findClose(text, i + delim.length, delim);
+        const from = i + delim.length;
+        const close = from >= (noCloseFrom.get(delim) ?? Infinity) ? -1 : findClose(text, from, delim);
+        if (close === -1 && !noCloseFrom.has(delim)) noCloseFrom.set(delim, from);
         const afterOk = close !== -1 && (c === "*" || !/[A-Za-z0-9]/.test(text[close + delim.length] || ""));
         if (close !== -1 && afterOk) {
           const tag = delim.length === 2 ? "strong" : "em";
