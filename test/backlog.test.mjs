@@ -1362,7 +1362,7 @@ test("readItem and listDir seams: skips are recorded, a skipped directory adds n
     const { cfg } = loadConfig(root);
     const calls = [];
     const data = readBacklog(root, cfg, {
-      listDir: (dir) => (dir.endsWith("completed/tasks") ? { skip: "outside the worktree" } : ["DEMO0001.md", "DEMO0002.md"].filter(() => dir.endsWith("active"))),
+      listDir: (dir) => (dir === join(root, "trellis", "completed", "tasks") ? { skip: "outside the worktree" } : ["DEMO0001.md", "DEMO0002.md"].filter(() => dir === join(root, "trellis", "active"))),
       readItem: (path, where) => {
         calls.push(where);
         if (where === "active/DEMO0002.md") return { skip: "unreadable" };
@@ -1404,4 +1404,12 @@ test("a directory at backlog.config.json or team.json is a structured error with
 
 test("an idPrefix that fits the filename pattern but not the bare id pattern is a config error", () => {
   assert.ok(configErrors({ ...ARRAY_CFG, idPrefix: ")T(" }).some((e) => e.includes("idPrefix")));
+});
+
+test("a non-string milestone or priority is a config error, not a throw", () => {
+  for (const key of ["milestones", "priorities"]) {
+    for (const bad of [[1], [null], [{}], ["A", ["B"]]]) {
+      assert.ok(configErrors({ ...ARRAY_CFG, [key]: bad }).some((e) => e.includes(`\`${key}\` entries`)), `${key} ${JSON.stringify(bad)}`);
+    }
+  }
 });

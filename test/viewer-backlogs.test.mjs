@@ -274,6 +274,21 @@ test("a status directory removed during a rebuild is skipped with a diagnostic, 
   } finally { repo.cleanup(); }
 });
 
+test("a status directory replaced after its listing is discarded with a diagnostic, and its ids add nothing", () => {
+  const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001" }, { status: "completed", id: "DEMO0009" }] });
+  try {
+    const dir = repo.folder("completed");
+    let swapped = false;
+    const b = createBacklog({ id: "demo", name: "Demo", path: repo.root }, {
+      hooks: { afterList(d) { if (d === dir && !swapped) { swapped = true; renameSync(dir, `${dir}-old`); mkdirSync(dir); } } },
+    });
+    const out = b.build();
+    assert.ok(swapped);
+    assert.deepEqual([out.status, out.order, out.nextId], ["ok", ["DEMO0001"], "DEMO0002"]);
+    assert.ok(out.diagnostics.some((d) => d.path === "completed/tasks" && /changed/.test(d.message)));
+  } finally { repo.cleanup(); }
+});
+
 test("a task removed between listing and reading is skipped, and a task swapped for a FIFO after the path check does not block", posixOnly, () => {
   const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001" }, { status: "active", id: "DEMO0002" }, { status: "active", id: "DEMO0003" }] });
   try {
@@ -386,7 +401,7 @@ test("task detail renders bodyHtml inert and links same-backlog task files, unde
     const detail = taskDetailOf(out, "DEMO0002");
     assert.doesNotMatch(detail.bodyHtml, /<script/);
     assert.equal(detail.bodyHtml.match(/<a /g).length, 1);
-    assert.match(detail.bodyHtml, /<a href="\/b\/demo\/task\/DEMO0001">dep<\/a>/);
+    assert.match(detail.bodyHtml, /<a href="\/b\/demo\/task\/DEMO0001" data-task-link>dep<\/a>/);
     assert.equal(detail.frontMatter.title, "Title DEMO0002");
     assert.equal(detail.id, "DEMO0002");
     for (const bad of ["DEMO9999", "../README", "demo0001", "DEMO001", ""]) assert.equal(taskDetailOf(out, bad), null, bad);

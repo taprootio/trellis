@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { effortView } from "../viewer/effort.mjs";
 import {
   defaultFilters, parseQuery, serializeQuery, parseLocation, normalizeOwner,
-  visibleRows, filterRows, buildRows, taskPath, listPath, bodyLinkPath, taskFields, carryFiltersInLinks, taskProblems,
+  visibleRows, filterRows, buildRows, taskPath, listPath, bodyLinkPath, taskFields, carryFiltersInLinks, taskProblems, pickerEpoch,
 } from "../viewer/filters.mjs";
 import { createStore, connectEvents, backlogViews, attentionItems } from "../viewer/state.mjs";
 
@@ -275,11 +275,14 @@ test("a task link in a body keeps the current filters, and only task links are t
 });
 
 test("task links in a body get the current filters in their href, again when the filters change; other links are untouched", () => {
-  const anchor = (href) => {
+  const anchor = (href, marked = true) => {
     const u = new URL(href, "http://127.0.0.1:4747");
-    return { origin: u.origin, pathname: u.pathname, href, setAttribute(_n, v) { this.href = v; } };
+    return { origin: u.origin, pathname: u.pathname, href, marked, hasAttribute() { return this.marked; }, setAttribute(_n, v) { this.href = v; } };
   };
   const links = [anchor("/b/demo/task/DEMO0002"), anchor("https://example.com/b/demo/task/DEMO0002"), anchor("/assets/demo/a.png")];
+  const authored = anchor("http://127.0.0.1:4747/b/demo/task/DEMO0002?x=1#top", false);
+  carryFiltersInLinks([authored], "http://127.0.0.1:4747", { ...defaultFilters(), q: "x" });
+  assert.equal(authored.href, "http://127.0.0.1:4747/b/demo/task/DEMO0002?x=1#top", "an authored same-origin link is left alone");
   carryFiltersInLinks(links, "http://127.0.0.1:4747", { ...defaultFilters(), q: "x" });
   assert.deepEqual(links.map((l) => l.href), ["/b/demo/task/DEMO0002?q=x", "https://example.com/b/demo/task/DEMO0002", "/assets/demo/a.png"]);
   carryFiltersInLinks(links, "http://127.0.0.1:4747", { ...defaultFilters(), statuses: ["completed"] });
@@ -302,4 +305,12 @@ test("the task view lists the standard text fields, hiding empty ones and the au
   ]);
   assert.equal(taskFields(closed, "demo").find(([k]) => k === "Collaborators")[1], "ann, bo");
   assert.deepEqual(taskFields({ id: "A", status: "active", collaborators: [] }, "demo"), [["Backlog", "demo"], ["Status", "active"]]);
+});
+
+test("the picker key moves only when navigation changes the filters", () => {
+  const a = parseQuery("?backlog=demo&status=completed");
+  const b = parseQuery("?milestone=demo:Alpha");
+  assert.equal(pickerEpoch(3, a, parseQuery("?backlog=demo&status=completed")), 3, "same filters keep the pickers");
+  assert.equal(pickerEpoch(3, a, b), 4, "Back to other filters rebuilds them");
+  assert.equal(pickerEpoch(0, a, defaultFilters()), 1);
 });

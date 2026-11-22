@@ -50,6 +50,13 @@ export function serializeQuery(filters) {
   return text ? `?${text}` : "";
 }
 
+// The pickers keep their own selection once the user has touched them, so a filter change that
+// came from the URL (Back, Forward, a link) needs fresh pickers. This counter is the picker key:
+// it moves only when navigation changed the filters, never when a picker itself edited them.
+export function pickerEpoch(epoch, before, after) {
+  return serializeQuery(before) === serializeQuery(after) ? epoch : epoch + 1;
+}
+
 // Routes: "/", "/b/<id>" (presets the backlog filter) and "/b/<id>/task/<ID>".
 export function parseLocation(pathname = "/", search = "") {
   const filters = parseQuery(search);
@@ -83,11 +90,12 @@ export function bodyLinkPath(pathname, filters) {
   return task ? taskPath(task.backlog, task.id, filters) : null;
 }
 
-// Rewrites each in-app task link under `anchors` so a new tab or a copied link keeps the filters.
+// Only links the server built from repository paths carry `data-task-link`; an authored link
+// to this origin keeps its own query and fragment. Rewrites each such link under `anchors` so a new tab or a copied link keeps the filters.
 // The link's own path is read, so running it again with newer filters just replaces the query.
 export function carryFiltersInLinks(anchors, origin, filters) {
   for (const a of anchors) {
-    if (a.origin !== origin) continue;
+    if (!a.hasAttribute("data-task-link") || a.origin !== origin) continue;
     const path = bodyLinkPath(a.pathname, filters);
     if (path) a.setAttribute("href", path);
   }

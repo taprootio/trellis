@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   DEFAULT_PORT, ViewerConfigError, findConfigFile, isLoopbackBind, loadViewerConfig, parseViewerConfig, singleRepoConfig,
 } from "../src/viewer/config.mjs";
@@ -81,6 +81,24 @@ test("loadViewerConfig reports unreadable and invalid files with the file name",
     assert.throws(() => loadViewerConfig(file), /not valid JSON/);
     writeFileSync(file, JSON.stringify({ backlogs: [ENTRY], typo: true }));
     assert.throws(() => loadViewerConfig(file), (e) => e.message.includes(file) && e.message.includes("`typo`"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("allowedHosts canonicalizes bracketed IPv6 and rejects one that does not parse", () => {
+  const cfg = parseViewerConfig({ backlogs: [ENTRY], allowedHosts: ["[0:0:0:0:0:0:0:1]", "[::FFFF:127.0.0.1]", "[::1]"] }, { homedir: "/home/me" });
+  assert.deepEqual(cfg.allowedHosts, ["[::1]", "[::ffff:7f00:1]", "[::1]"]);
+  for (const bad of ["[1.2.3.4]", "[::1::2]", "[:::]"]) {
+    assert.match(parseError({ backlogs: [ENTRY], allowedHosts: [bad] })?.message ?? "", /allowedHosts\[0\]/, bad);
+  }
+});
+
+test("a FIFO or directory given as the config file is a config error, not a hang", { skip: process.platform === "win32" }, () => {
+  const dir = tmp("cfgfifo");
+  try {
+    const fifo = join(dir, "viewer.json");
+    assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
+    assert.throws(() => loadViewerConfig(fifo), (e) => e instanceof ViewerConfigError && /not a regular file/.test(e.message));
+    assert.throws(() => loadViewerConfig(dir), ViewerConfigError);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

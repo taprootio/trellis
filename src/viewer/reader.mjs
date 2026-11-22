@@ -4,7 +4,7 @@
 // opened without blocking and its descriptor must be a regular file, so a FIFO can never hang
 // the server. Parsed items are cached by path, size and mtime.
 
-import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { sep } from "node:path";
 import { parseFrontMatter, splitFrontMatter } from "../backlog.mjs";
 
@@ -123,12 +123,22 @@ export function createReader(root, hooks = {}) {
       if (r.skip) return { skip: r.skip };
       if (!within(root, r.real)) return { skip: OUTSIDE };
       let names;
-      try { names = readdirSync(r.real); } catch (e) {
+      let before;
+      try { before = statSync(r.real); names = readdirSync(r.real); } catch (e) {
         return { skip: GONE.has(e.code) ? "directory vanished while it was read" : `cannot list (${e.code || e.message})` };
       }
+      if (hooks.afterList) hooks.afterList(dir);
+      // A swap during the read (a symlink retargeted, a directory replaced) makes the names
+      // untrustworthy, so the listing is dropped whole rather than mixed with the new target.
+      const again = realOf(dir);
+      if (again.absent) return { skip: "directory vanished while it was read" };
+      if (again.skip) return { skip: again.skip };
+      if (!within(root, again.real)) return { skip: OUTSIDE };
+      let after;
+      try { after = statSync(again.real); } catch { return { skip: "directory vanished while it was read" }; }
+      if (!after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) return { skip: "directory changed while it was read" };
       if (r.real !== dir) targets.add(r.real);
       listed.set(dir, names);
-      if (hooks.afterList) hooks.afterList(dir);
       return names;
     },
     // Another pass of the same rebuild: forget the reads, keep forced skips and symlink targets.

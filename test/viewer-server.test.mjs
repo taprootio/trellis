@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadConfig } from "../src/backlog.mjs";
 import { claim, seed } from "../src/ledger.mjs";
+import { normalizeHost } from "../src/viewer/config.mjs";
 import { cacheControlFor, hostAllowed, parseHost, printedHostFor, startViewer } from "../src/viewer/server.mjs";
 import { ledgerTest } from "./git-support.mjs";
 import { BASE_CFG, FISH_CFG, FIXTURE_DIST, TUNA_SVG, getJson, loadVariant, makeRepo, openEvents, request, shapeProblems, tmp } from "./viewer-support.mjs";
@@ -169,6 +170,8 @@ test("hostAllowed compares IPv6 literals by address, not spelling", () => {
   assert.ok(hostAllowed("[0:0:0:0:0:0:0:1]:4747", { ...opts, printedHost: "[::1]" }));
   assert.ok(!hostAllowed("[::ffff:7f00:2]:4747", opts));
   assert.equal(printedHostFor("::ffff:127.0.0.1", "::ffff:127.0.0.1"), "[::ffff:7f00:1]");
+  const compressed = { port: 4747, printedHost: "[::1]", allowedHosts: [normalizeHost("[0:0:0:0:0:0:0:2]")] };
+  assert.ok(hostAllowed("[::2]:1", compressed), "an expanded allowedHosts entry matches the compressed Host");
 });
 
 test("printedHostFor follows the listener's address", () => {
@@ -176,6 +179,13 @@ test("printedHostFor follows the listener's address", () => {
     [["127.0.0.1", "127.0.0.1"], ["0.0.0.0", "0.0.0.0"], ["::", "::"], ["::1", "::1"], ["localhost", "::1"], ["localhost", "127.0.0.1"], ["127.0.0.2", "127.0.0.2"]].map(([bind, addr]) => printedHostFor(bind, addr)),
     ["127.0.0.1", "127.0.0.1", "[::1]", "[::1]", "localhost", "localhost", "127.0.0.2"],
   );
+});
+
+test("a scoped IPv6 listener address prints bracketed as given, and that host stays allowed", () => {
+  const printedHost = printedHostFor("fe80::1%lo0", "fe80::1%lo0");
+  assert.equal(printedHost, "[fe80::1%lo0]");
+  assert.ok(hostAllowed("[fe80::1%lo0]:4747", { port: 4747, printedHost, allowedHosts: [] }));
+  assert.ok(!hostAllowed("[fe80::2%lo0]:4747", { port: 4747, printedHost, allowedHosts: [] }));
 });
 
 test("a wrong Host gets 403 before any other check; allowedHosts opens exactly that name; a write method gets 405", async () => {
@@ -276,6 +286,22 @@ test("the app shell serves at / and the app's routes, and /app/ serves the built
       for (const path of ["/app/missing.js", "/app", "/app/"]) assert.equal((await request(port, { path })).status, 404, path);
     });
   } finally { repo.cleanup(); }
+});
+
+test("/app/ serves only files the build manifest lists", async () => {
+  const dist = tmp("dist");
+  const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001" }] });
+  try {
+    const built = join(dist, "dist");
+    cpSync(FIXTURE_DIST, built, { recursive: true });
+    writeFileSync(join(built, "stray.js"), "stray");
+    await withViewer([entry(repo)], async (_v, port) => {
+      assert.equal((await request(port, { path: "/app/stray.js" })).status, 404, "a file the build did not list");
+      assert.equal((await request(port, { path: "/app/files.json" })).status, 404, "the manifest itself");
+      assert.equal((await request(port, { path: "/app/app-test.js" })).status, 200);
+      assert.equal((await request(port, { path: "/" })).status, 200, "the shell does not need a listing");
+    }, { distDir: built });
+  } finally { repo.cleanup(); rmSync(dist, { recursive: true, force: true }); }
 });
 
 test("hashed built files cache for a year, others revalidate", () => {

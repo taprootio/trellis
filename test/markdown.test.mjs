@@ -28,7 +28,7 @@ test("network-path and disguised targets render no link", () => {
 
 test("a link to another task file of the same backlog goes to its task route, other repository paths stay text", () => {
   const html = render("See [the dependency](../active/TRL0012.md) and [readme](../README.md) and [other](../active/TRL0099.md).");
-  assert.match(html, /<a href="\/b\/trl\/task\/TRL0012">the dependency<\/a>/);
+  assert.match(html, /<a href="\/b\/trl\/task\/TRL0012" data-task-link>the dependency<\/a>/);
   assert.match(html, /readme \(\.\.\/README\.md\)/);
   assert.equal(html.match(/<a /g).length, 1);
 });
@@ -61,12 +61,19 @@ test("an unterminated fence runs to the end and stays escaped", () => {
 
 test("a long malformed paragraph renders as escaped text in linear time", () => {
   const DEADLINE_MS = 10_000; // the shared test deadline; the unfixed renderer needs minutes at this size
-  const inputs = ["[".repeat(200_000), "![".repeat(100_000), "[a](".repeat(15_000), "*a ".repeat(70_000), "_a ".repeat(70_000), "[a](<".repeat(12_000)];
+  const inputs = ["[".repeat(200_000), "![".repeat(100_000), "[a](".repeat(15_000), "*a ".repeat(70_000), "_a ".repeat(70_000), "[a](<".repeat(12_000), `${"~".repeat(100_000)}\``, `${"`".repeat(100_000)} a\``];
   const started = Date.now();
   for (const md of inputs) {
     const html = render(md);
     assert.doesNotMatch(html, /<a |<em>|<strong>/);
   }
+  assert.equal(render("~~~js title\nx\n~~~"), '<pre><code class="language-js">x\n</code></pre>\n');
   assert.ok(Date.now() - started < DEADLINE_MS, "rendering should finish within the deadline");
   assert.match(render("[ok](https://example.com) and [open"), /<a href="https:\/\/example.com">ok<\/a> and \[open/);
+});
+
+test("only links resolved from repository paths carry the task-link mark", () => {
+  const html = renderMarkdown("[a](../active/A.md) [b](https://example.com/b/demo/task/X1) [c](missing.md)", { resolveRepoPath: (t) => (t.endsWith("A.md") ? "/b/demo/task/A" : null) });
+  assert.match(html, /<a href="\/b\/demo\/task\/A" data-task-link>a<\/a>/);
+  assert.match(html, /<a href="https:\/\/example.com\/b\/demo\/task\/X1">b<\/a>/);
 });

@@ -1,5 +1,6 @@
 // Thin Lit wiring. Data, filtering and ordering live in the pure modules.
 import { LitElement, html, nothing } from "lit";
+import { keyed } from "lit/directives/keyed.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import "@taprootio/espalier/root";
 import "@taprootio/espalier/page";
@@ -16,7 +17,7 @@ import "@taprootio/espalier/button";
 import { createStore, connectEvents, backlogViews, attentionItems } from "./state.mjs";
 import {
   STATUSES, serializeQuery, listPath, taskPath, visibleRows, milestoneGroups,
-  priorityOptions, ownerOptions, normalizeOwner, toText, bodyLinkPath, taskFields, carryFiltersInLinks, taskProblems,
+  priorityOptions, ownerOptions, pickerEpoch, normalizeOwner, toText, bodyLinkPath, taskFields, carryFiltersInLinks, taskProblems,
 } from "./filters.mjs";
 import { effortView } from "./effort.mjs";
 
@@ -53,7 +54,12 @@ class TrellisViewer extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
-    this.onPop = () => this.store.applyUrl(location.pathname, location.search);
+    this.pickerKey = 0;
+    this.onPop = () => {
+      const before = this.store.state.filters;
+      this.store.applyUrl(location.pathname, location.search);
+      this.pickerKey = pickerEpoch(this.pickerKey, before, this.store.state.filters);
+    };
     window.addEventListener("popstate", this.onPop);
     this.onPop();
     this.store.loadAll();
@@ -63,7 +69,7 @@ class TrellisViewer extends LitElement {
   // The body's HTML is injected as a string, so its task links get the filters after each render.
   updated() {
     const body = this.querySelector(".body");
-    if (body) carryFiltersInLinks(body.querySelectorAll("a[href]"), location.origin, this.snapshot.filters);
+    if (body) carryFiltersInLinks(body.querySelectorAll("a[data-task-link]"), location.origin, this.snapshot.filters);
   }
 
   disconnectedCallback() {
@@ -94,7 +100,7 @@ class TrellisViewer extends LitElement {
   // A task link in the body navigates in-app with the current filters; others behave normally.
   onBodyClick(e) {
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
-    const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
+    const a = e.target instanceof Element ? e.target.closest("a[data-task-link]") : null;
     if (!a || (a.target && a.target !== "_self") || a.origin !== location.origin) return;
     const path = bodyLinkPath(a.pathname, this.snapshot.filters);
     if (!path) return;
@@ -118,11 +124,11 @@ class TrellisViewer extends LitElement {
         <esp-input input-type="search" placeholder="Search tasks" aria-label="Search tasks"
           .value=${filters.q}
           @esp-value-changed=${(e) => this.setFilters({ ...filters, q: e.detail })}></esp-input>
-        <esp-pick-some placeholder="Backlogs" .pickerItems=${backlogItems} @esp-value-changed=${some("backlogs")}></esp-pick-some>
-        <esp-pick-some placeholder="Status" .pickerItems=${statusItems} @esp-value-changed=${some("statuses")}></esp-pick-some>
-        <esp-pick-some placeholder="Milestones" .pickerItems=${milestoneItems} @esp-value-changed=${some("milestones")}></esp-pick-some>
-        <esp-pick-one placeholder="Priority" .pickerItems=${priorityItems} @esp-value-changed=${single("priority")}></esp-pick-one>
-        <esp-pick-one placeholder="Owner" .pickerItems=${ownerItems} @esp-value-changed=${single("owner")}></esp-pick-one>
+        ${keyed(this.pickerKey, html`<esp-pick-some placeholder="Backlogs" .pickerItems=${backlogItems} @esp-value-changed=${some("backlogs")}></esp-pick-some>`)}
+        ${keyed(this.pickerKey, html`<esp-pick-some placeholder="Status" .pickerItems=${statusItems} @esp-value-changed=${some("statuses")}></esp-pick-some>`)}
+        ${keyed(this.pickerKey, html`<esp-pick-some placeholder="Milestones" .pickerItems=${milestoneItems} @esp-value-changed=${some("milestones")}></esp-pick-some>`)}
+        ${keyed(this.pickerKey, html`<esp-pick-one placeholder="Priority" .pickerItems=${priorityItems} @esp-value-changed=${single("priority")}></esp-pick-one>`)}
+        ${keyed(this.pickerKey, html`<esp-pick-one placeholder="Owner" .pickerItems=${ownerItems} @esp-value-changed=${single("owner")}></esp-pick-one>`)}
       </div>`;
   }
 

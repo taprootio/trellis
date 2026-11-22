@@ -48,9 +48,18 @@ async function live(repos, fn) {
   const events = await openEvents(viewer.port);
   try {
     await warmUp(repos, events);
+    // Drop what the warm-up left queued, and skip any probe message that still arrives late,
+    // so a direct `next` or `until` can only be satisfied by the test's own edit.
+    events.drain();
     const warm = events.seen.length;
+    const next = async (id) => {
+      for (;;) {
+        const msg = await events.next(id);
+        if (events.seen.indexOf(msg) >= warm) return msg;
+      }
+    };
     // Tests read `seen` from here on, so the probe's messages never count.
-    const view = { ...events, get seen() { return events.seen.slice(warm); }, next: (id) => events.next(id), close: () => events.close() };
+    const view = { ...events, get seen() { return events.seen.slice(warm); }, next, close: () => events.close() };
     return await fn({ port: viewer.port, events: view, viewer });
   } finally { events.close(); await viewer.close(); }
 }
@@ -177,6 +186,9 @@ test("a subtree holding a symlinked task's target, replaced outside the task fol
     symlinkSync(target, link);
     await live({ demo: repo }, async (ctx) => {
       assert.equal(titles((await getJson(ctx.port, "/api/backlogs/demo")).json), "AAAAA");
+      // That first read armed the watchers on the target's folders, which sends its own message.
+      // Take it now, so it cannot satisfy the wait for the replacement below.
+      await ctx.events.next("demo");
       rmSync(join(repo.root, "docs", "pool"), { recursive: true });
       mkdirSync(join(repo.root, "docs", "pool", "deep"), { recursive: true });
       writeFileSync(target, original.replace("AAAAA", "ZZZZZ"));

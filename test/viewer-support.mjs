@@ -139,6 +139,8 @@ export function openEvents(port, { hostname = "127.0.0.1", host } = {}) {
             waiters.push(w);
           });
         },
+        // Forgets queued messages nobody read, e.g. a warm-up probe's.
+        drain() { pending.length = 0; },
         close() { req.destroy(); },
       });
     });

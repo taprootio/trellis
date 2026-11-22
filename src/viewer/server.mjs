@@ -7,7 +7,7 @@ import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { searchItems } from "../search.mjs";
 import { IMAGE_TYPES, createBacklog, recordOf, searchCorpus, summaryOf, taskDetailOf } from "./backlogs.mjs";
-import { normalizeHost } from "./config.mjs";
+import { canonicalV6, normalizeHost } from "./config.mjs";
 import { isInside } from "./reader.mjs";
 import { createWatchers } from "./watch.mjs";
 
@@ -16,16 +16,11 @@ export const DEFAULT_DIST_DIR = fileURLToPath(new URL("../../viewer/dist/", impo
 const HEARTBEAT_MS = 25_000;
 
 // ------------------------------------------------------------ host check
-// One spelling per IPv6 address, so `::ffff:127.0.0.1` and `::ffff:7f00:1` compare equal.
-function canonicalV6(literal) {
-  try { return new URL(`http://${literal}`).hostname; } catch { return null; }
-}
-
 export function parseHost(header) {
   const h = String(header).trim().toLowerCase();
-  const m = /^(\[[0-9a-f:.]+\])(?::(\d+))?$/.exec(h) || /^([a-z0-9._-]+)(?::(\d+))?$/.exec(h);
+  const m = /^(\[[0-9a-z:.%_-]+\])(?::(\d+))?$/.exec(h) || /^([a-z0-9._-]+)(?::(\d+))?$/.exec(h);
   if (!m) return null;
-  const host = m[1].startsWith("[") ? canonicalV6(m[1]) : m[1];
+  const host = m[1].startsWith("[") ? canonicalV6(m[1]) ?? m[1] : m[1];
   return host ? { host, port: m[2] === undefined ? null : Number(m[2]) } : null;
 }
 
@@ -38,7 +33,9 @@ export function hostAllowed(header, { port, printedHost, allowedHosts = [] }) {
   if (!h) return false;
   if (allowedHosts.includes(h.host)) return true;
   const printed = String(printedHost).toLowerCase();
-  if (!["127.0.0.1", "localhost", printed.startsWith("[") ? canonicalV6(printed) : printed].includes(h.host)) return false;
+  // A scoped address has no canonical form, so its printed spelling stands as it is.
+  const printedKey = printed.startsWith("[") ? canonicalV6(printed) ?? printed : printed;
+  if (!["127.0.0.1", "localhost", printedKey].includes(h.host)) return false;
   return h.port === null ? port === 80 : h.port === port;
 }
 
@@ -47,7 +44,8 @@ export function printedHostFor(bind, address) {
   if (String(bind).toLowerCase() === "localhost") return "localhost";
   if (address === "0.0.0.0") return "127.0.0.1";
   if (address === "::") return "[::1]";
-  return address.includes(":") ? canonicalV6(`[${address}]`) : address;
+  // A scoped address (fe80::1%lo0) does not parse as a URL host; print it bracketed as given.
+  return address.includes(":") ? canonicalV6(`[${address}]`) ?? `[${address}]` : address;
 }
 
 // ------------------------------------------------------------- responses
@@ -123,6 +121,14 @@ export async function startViewer({
     res.end(req.method === "HEAD" ? undefined : data);
   }
 
+  // The build's own list of what it emitted. A missing or unreadable one lists nothing.
+  function builtFiles() {
+    try {
+      const list = JSON.parse(readFileSync(join(distDir, "files.json"), "utf8"));
+      return new Set(Array.isArray(list) ? list.filter((f) => typeof f === "string" && f !== "files.json") : []);
+    } catch { return new Set(); }
+  }
+
   function shell(res, req) {
     const file = join(distDir, "index.html");
     if (!existsSync(file)) return send(res, 503, "viewer is not built", { "Content-Type": "text/plain; charset=utf-8" });
@@ -192,7 +198,10 @@ export async function startViewer({
         ...(type === "image/svg+xml" ? { "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox" } : {}),
       });
     }
-    if (a === "app" && segs.length >= 2) return serveFile(res, req, join(distDir, ...segs.slice(1)), distDir, { name: segs[segs.length - 1] });
+    if (a === "app" && segs.length >= 2) {
+      if (!builtFiles().has(segs.slice(1).join("/"))) return notFound(res);
+      return serveFile(res, req, join(distDir, ...segs.slice(1)), distDir, { name: segs[segs.length - 1] });
+    }
     return notFound(res);
   }
 

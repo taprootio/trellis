@@ -12,7 +12,8 @@ const SAFE_SCHEMES = new Set(["http", "https", "mailto"]);
 const SCHEME_RE = /^([A-Za-z][A-Za-z0-9+.-]*):/;
 const PUNCT_RE = /[!-/:-@[-`{-~]/;
 
-// Decide what a link target becomes: { href } for a link, or null for plain text.
+// Decide what a link target becomes: { href, repo } for a link (`repo` when the viewer
+// resolved a repository path), or null for plain text.
 // `resolveRepoPath(target)` maps a scheme-less repository path to an href (or null).
 function linkHref(target, resolveRepoPath) {
   // Whitespace and control characters can hide a scheme from a reader but not from a browser.
@@ -20,12 +21,13 @@ function linkHref(target, resolveRepoPath) {
   const scheme = SCHEME_RE.exec(target);
   if (scheme) {
     if (!SAFE_SCHEMES.has(scheme[1].toLowerCase())) return null;
-    return target;
+    return { href: target, repo: false };
   }
   // `//host` and `/\host` are network paths, not repository paths.
   if (/^[/\\]{2}/.test(target)) return null;
   if (target.startsWith("#")) return null;
-  return typeof resolveRepoPath === "function" ? resolveRepoPath(target) || null : null;
+  const href = typeof resolveRepoPath === "function" ? resolveRepoPath(target) : null;
+  return href ? { href, repo: true } : null;
 }
 
 // Pairs every `[` with its `]` in one pass (skipping escapes and code spans), so a long
@@ -140,8 +142,9 @@ function inline(text, ctx, allowLinks = true) {
         const dest = linkDestination(text, close + 1);
         if (dest) {
           const label = text.slice(i + 1, close);
-          const href = linkHref(dest.target, ctx.resolveRepoPath);
-          if (href) out += `<a href="${escapeHtml(href)}">${inline(label, ctx, false)}</a>`;
+          const link = linkHref(dest.target, ctx.resolveRepoPath);
+          // The mark tells the client which links the server built from repository paths.
+          if (link) out += `<a href="${escapeHtml(link.href)}"${link.repo ? " data-task-link" : ""}>${inline(label, ctx, false)}</a>`;
           else {
             const shown = inline(label, ctx, false);
             out += label === dest.target ? shown : `${shown} (${escapeHtml(dest.target)})`;
@@ -175,7 +178,16 @@ function inline(text, ctx, allowLinks = true) {
 }
 
 // ----------------------------------------------------------------- blocks
-const FENCE_RE = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)[^`]*$/;
+// The marker and the info string are matched apart: one regex with both overlapping
+// quantifiers backtracked quadratically on a long run of tildes ending in a backtick.
+const FENCE_MARKER_RE = /^ {0,3}(`{3,}|~{3,})/;
+function parseFence(line) {
+  const m = FENCE_MARKER_RE.exec(line);
+  if (!m) return null;
+  const info = line.slice(m[0].length);
+  if (info.includes("`")) return null;
+  return { marker: m[1], lang: info.trim().split(/\s/, 1)[0] };
+}
 const HEADING_RE = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
 const LIST_RE = /^( *)([-*+]|\d{1,9}[.)])[ \t]+(\S.*)$/;
 const TABLE_SEP_RE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
@@ -199,7 +211,7 @@ const startsTable = (lines, i) => lines[i].includes("|") && i + 1 < lines.length
 // Whether a line begins a block that may interrupt a paragraph.
 function interrupts(lines, i) {
   const line = lines[i];
-  if (FENCE_RE.test(line) || HEADING_RE.test(line)) return true;
+  if (parseFence(line) || HEADING_RE.test(line)) return true;
   const m = LIST_RE.exec(line);
   if (m && (/^[-*+]$/.test(m[2]) || m[2] === "1." || m[2] === "1)")) return true;
   return startsTable(lines, i);
@@ -264,9 +276,9 @@ function renderBlocks(lines, ctx) {
   while (i < lines.length) {
     const line = lines[i];
     if (!line.trim()) { i++; continue; }
-    const fence = FENCE_RE.exec(line);
+    const fence = parseFence(line);
     if (fence) {
-      const [, marker, lang] = fence;
+      const { marker, lang } = fence;
       const body = [];
       i++;
       while (i < lines.length && !new RegExp(`^ {0,3}${marker[0]}{${marker.length},}[ \\t]*$`).test(lines[i])) body.push(lines[i++]);

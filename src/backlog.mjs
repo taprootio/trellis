@@ -188,8 +188,11 @@ export function validateConfig(cfg) {
   if (Object.hasOwn(cfg, "generatedArtifacts") && cfg.generatedArtifacts !== "committed" && cfg.generatedArtifacts !== "local") {
     errors.push('config: `generatedArtifacts` must be "committed" or "local" when present');
   }
-  if (!Array.isArray(cfg.milestones) || cfg.milestones.length === 0) errors.push("config: `milestones` must be a non-empty array");
-  if (!Array.isArray(cfg.priorities) || cfg.priorities.length === 0) errors.push("config: `priorities` must be a non-empty array");
+  // Both lists are joined and compared as strings, so a non-string entry must not reach them.
+  for (const key of ["milestones", "priorities"]) {
+    if (!Array.isArray(cfg[key]) || cfg[key].length === 0) errors.push(`config: \`${key}\` must be a non-empty array`);
+    else if (!cfg[key].every((v) => typeof v === "string")) errors.push(`config: \`${key}\` entries must all be strings`);
+  }
   const effortValues = Array.isArray(cfg.effort) ? cfg.effort : cfg.effort && cfg.effort.values;
   if (!Array.isArray(effortValues) || effortValues.length === 0) {
     errors.push("config: `effort` must be an array of numbers (or an object with a `values` array)");

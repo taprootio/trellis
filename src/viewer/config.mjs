@@ -1,7 +1,7 @@
 // Viewer config (TRL0005): where the file lives, and the strict rules for its keys.
 // A typo is never ignored: an unknown key, a bad type or a duplicate id fails startup.
 
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, openSync, readFileSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { homedir as osHomedir } from "node:os";
 import { isIP } from "node:net";
@@ -97,15 +97,29 @@ export function parseViewerConfig(raw, { homedir = osHomedir() } = {}) {
   return { backlogs, port, bind, allowedHosts };
 }
 
-// A bare host name, lower-cased, or null when it is not one (a port, path or space).
+// One spelling per IPv6 address, so `::ffff:127.0.0.1` and `::ffff:7f00:1` compare equal.
+// Null when the literal does not parse. Request Host values and allowedHosts share this.
+export function canonicalV6(literal) {
+  try { return new URL(`http://${literal}`).hostname; } catch { return null; }
+}
+
+// A bare host name, lower-cased, or null when it is not one (a port, path or space). A
+// bracketed IPv6 literal comes back canonical, and null when it does not parse.
 export function normalizeHost(value) {
   const name = value.trim().toLowerCase();
-  return HOST_RE.test(name) ? name : null;
+  if (!HOST_RE.test(name)) return null;
+  return name.startsWith("[") ? canonicalV6(name) : name;
 }
 
 export function loadViewerConfig(file, { homedir = osHomedir() } = {}) {
   let text;
-  try { text = readFileSync(file, "utf8"); } catch (e) { throw new ViewerConfigError(`cannot read ${file}: ${e.message}`); }
+  let fd;
+  // Nonblocking open, then a regular-file check, so a FIFO given to --config fails instead of hanging.
+  try {
+    fd = openSync(file, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK || 0));
+    if (!fstatSync(fd).isFile()) throw new Error("not a regular file");
+    text = readFileSync(fd, "utf8");
+  } catch (e) { throw new ViewerConfigError(`cannot read ${file}: ${e.message}`); } finally { if (fd !== undefined) closeSync(fd); }
   let raw;
   try { raw = JSON.parse(text); } catch (e) { throw new ViewerConfigError(`${file} is not valid JSON (${e.message})`); }
   try { return parseViewerConfig(raw, { homedir }); } catch (e) {

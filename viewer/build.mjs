@@ -1,7 +1,7 @@
 // Bundles the viewer into one hashed JS file plus the license files.
 // Progress goes to stderr: stdout stays empty so callers can parse their own output.
 import { rolldown } from "rolldown";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -18,6 +18,17 @@ function packageRoot(entry, name) {
     dir = parent;
   }
   return dir;
+}
+
+// Every file under `dir` as a posix path relative to it, sorted.
+async function listFiles(dir, prefix = "") {
+  const found = [];
+  for (const e of await readdir(join(dir, prefix), { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${e.name}` : e.name;
+    if (e.isDirectory()) found.push(...await listFiles(dir, rel));
+    else if (e.isFile()) found.push(rel);
+  }
+  return found.sort();
 }
 
 // The only directory the build empties, fixed from this module's own location.
@@ -50,6 +61,9 @@ export async function build() {
   await cp(join(espalier, "LICENSE"), join(outDir, "ESPALIER-LICENSE.md"));
   await cp(join(espalier, "licenses"), join(outDir, "licenses"), { recursive: true });
   await cp(join(packageRoot("lit", "lit"), "LICENSE"), join(outDir, "licenses", "LIT-LICENSE"));
+
+  // The server serves /app/<file> only for names listed here, so a stray file is never exposed.
+  await writeFile(join(outDir, "files.json"), `${JSON.stringify(await listFiles(outDir), null, 2)}\n`);
 
   log(`wrote ${entry.fileName} to ${outDir}`);
   return { outDir, entry: entry.fileName };
