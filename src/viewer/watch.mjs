@@ -195,8 +195,12 @@ export function createWatchers(backlogs, onChange, { debounceMs = DEBOUNCE_MS, s
     s.timer = setTimeout(() => {
       s.timer = null;
       reconcile(backlog);
-      // This refresh covers every change so far; the sweep must not report them again.
-      s.signature = snapshotOf(s, isGenerated);
+      // This refresh covers every change so far; the sweep must not report them again. A
+      // change another file's native event never named (a same-size, same-mtime replacement
+      // whose event was dropped) must be invalidated before the snapshot moves past it.
+      const sig = snapshotOf(s, isGenerated);
+      if (s.signature) for (const path of changedPaths(s.signature, sig)) backlog.reader.invalidate(path);
+      s.signature = sig;
       if (!closed) onChange(backlog.id);
     }, debounceMs);
     s.timer.unref?.();

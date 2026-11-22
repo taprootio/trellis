@@ -1456,6 +1456,16 @@ test("front matter closes only on a standalone fence", () => {
   assert.ok(errors.some((e) => /unterminated/.test(e)));
 });
 
+test("check accepts any positive idWidth, and nextId never throws on a fractional suffix", () => {
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, idWidth: 100001 }), []);
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, idWidth: 1000000000 }), []);
+  // The scan prefix is an unescaped regex, so `A.*` matches ids of any length; the fixed-length
+  // slice then leaves a fractional suffix (5.0001), which BigInt rejects.
+  const cfg = { ...ARRAY_CFG, idPrefix: "A.*", idWidth: 4 };
+  assert.equal(nextId(["A1.5.0001"], cfg), "A.*6.0001");
+  assert.equal(nextId([], { ...cfg, nextIdFloor: 9 }), "A.*0009");
+});
+
 test("nextIdFloor accepts any integer that fits idWidth, even beyond the safe range", () => {
   withRepo({ ...ARRAY_CFG, idWidth: 17, nextIdFloor: 1e16 }, {}, (root) => {
     const { cfg, errors } = loadConfig(root);

@@ -382,6 +382,16 @@ test("a status directory swapped for an outside symlink while its items are read
   } finally { repo.cleanup(); rmSync(outside, { recursive: true, force: true }); }
 });
 
+test("the viewer caps idWidth while check accepts it", () => {
+  const wide = makeRepo({ cfg: { ...BASE_CFG, idWidth: 100001 } });
+  try {
+    assert.deepEqual(loadConfig(wide.root).errors, [], "the shared rule has no upper bound");
+    const b = open(wide, "wide").build();
+    assert.equal(b.status, "error");
+    assert.match(b.errors.join(), /idWidth/);
+  } finally { wide.cleanup(); }
+});
+
 test("an absurd idWidth is a config error for that backlog only", () => {
   const good = makeRepo({ items: [{ status: "active", id: "DEMO0001" }] });
   const wide = makeRepo({ cfg: { ...BASE_CFG, idWidth: 1000000000 } });

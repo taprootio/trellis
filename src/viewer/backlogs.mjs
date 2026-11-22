@@ -9,6 +9,9 @@ import { createReader } from "./reader.mjs";
 import { encodeSegment } from "./segment.mjs";
 import { LayoutError, resolveMainWorktree } from "./worktree.mjs";
 
+// Far above any real width, low enough that padding an id cannot exhaust memory. `trellis
+// check` accepts any width; only the viewer, which builds ids for every backlog, caps it.
+const MAX_ID_WIDTH = 100000;
 const STATUS_ORDER = ["removed", "completed", "active"]; // most closed first
 const KIND = { active: "active", completed: "completed", removed: "removed" };
 export const IMAGE_TYPES = {
@@ -87,6 +90,7 @@ export function createBacklog(entry, { hooks, git } = {}) {
     reader.begin();
     const { cfg, errors: cfgErrors } = loadConfig(root, { readText: reader.readText });
     if (cfgErrors.length) return errorBuild(cfgErrors);
+    if (cfg.idWidth > MAX_ID_WIDTH) return errorBuild([`config: \`idWidth\` must be at most ${MAX_ID_WIDTH} to be shown in the viewer`]);
 
     const p = paths(root, cfg);
     const dirs = [p.active, p.completedTasks, p.removed];

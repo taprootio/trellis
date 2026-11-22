@@ -159,8 +159,6 @@ export function loadConfig(repoRoot, { readText = defaultReadText } = {}) {
 
 // The config rules, on a parsed object. `loadConfig` reads the file and calls this; the
 // local-mode switch calls it on the config it would write, so both apply one rule set.
-// Far above any real width, low enough that padding an id cannot exhaust memory.
-const MAX_ID_WIDTH = 100000;
 export function validateConfig(cfg) {
   const warnings = [];
   const errors = [];
@@ -169,17 +167,13 @@ export function validateConfig(cfg) {
     return { cfg: null, warnings, errors: ["backlog.config.json must be a JSON object"] };
   }
   if (typeof cfg.idPrefix !== "string" || !cfg.idPrefix) errors.push("config: `idPrefix` must be a non-empty string");
-  // The upper bound keeps the scan regex and the zero-padding sane: an absurd width would
-  // throw or allocate gigabytes, and ids that long are never used.
-  if (!Number.isInteger(cfg.idWidth) || cfg.idWidth < 1 || cfg.idWidth > MAX_ID_WIDTH) {
-    errors.push(`config: \`idWidth\` must be an integer from 1 to ${MAX_ID_WIDTH}`);
-  }
+  if (!Number.isInteger(cfg.idWidth) || cfg.idWidth < 1) errors.push("config: `idWidth` must be a positive integer");
   // Optional (TRL0032): floors the *organic* next id (max(floor, max+1)) so freshly
   // created tasks begin above an imported band; must fit idWidth.
   if (cfg.nextIdFloor != null) {
     if (!Number.isInteger(cfg.nextIdFloor) || cfg.nextIdFloor < 0) {
       errors.push("config: `nextIdFloor` must be a non-negative integer when present");
-    } else if (Number.isInteger(cfg.idWidth) && cfg.idWidth >= 1 && cfg.idWidth <= MAX_ID_WIDTH && cfg.nextIdFloor >= 10 ** cfg.idWidth) {
+    } else if (Number.isInteger(cfg.idWidth) && cfg.idWidth >= 1 && cfg.nextIdFloor >= 10 ** cfg.idWidth) {
       errors.push(`config: \`nextIdFloor\` (${cfg.nextIdFloor}) must be < 10^idWidth (${10 ** cfg.idWidth}) to fit ${cfg.idWidth} digits`);
     }
   }
@@ -869,8 +863,11 @@ export function nextId(ids, cfg) {
   // `nextIdFloor` (TRL0032) reserves the low range for an imported band: the next
   // organically-created id is max(max+1, floor). Absent floor ⇒ the historical max+1.
   const floor = Number.isInteger(cfg.nextIdFloor) && cfg.nextIdFloor > 0 ? cfg.nextIdFloor : 0;
-  // BigInt prints a huge floor in full digits; String() would switch to `1e+21`.
-  return cfg.idPrefix + BigInt(Math.max(max + 1, floor)).toString().padStart(cfg.idWidth, "0");
+  const next = Math.max(max + 1, floor);
+  // BigInt prints a huge floor in full digits (String() would switch to `1e+21`), but it
+  // throws on a non-integer, which a variable-length scan prefix can leave behind.
+  const digits = Number.isInteger(next) && !Number.isSafeInteger(next) ? BigInt(next).toString() : String(next);
+  return cfg.idPrefix + digits.padStart(cfg.idWidth, "0");
 }
 
 // ------------------------------------------------------------- rendering

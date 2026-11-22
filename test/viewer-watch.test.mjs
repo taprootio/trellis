@@ -633,6 +633,33 @@ test("the sweep ignores generated files and names a handle does not accept", asy
   } finally { repo.cleanup(); }
 });
 
+test("a native event for one file also invalidates a same-size, same-mtime replacement of another whose event was dropped", async () => {
+  const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001", fm: { title: "AAAAA" } }, { status: "active", id: "DEMO0002", fm: { title: "CCCCC" } }] });
+  try {
+    for (const id of ["DEMO0001", "DEMO0002"]) stamp(repo.itemPath("active", id));
+    const b = createBacklog({ id: "demo", name: "Demo", path: repo.root });
+    const title = (id) => recordOf(b.build()).tasks.find((x) => x.id === id).title;
+    assert.equal(title("DEMO0002"), "CCCCC");
+    const fake = fakeWatch();
+    let done;
+    const fired = new Promise((r) => { done = r; });
+    // No sweep: only the debounce callback can invalidate the replaced file.
+    const watchers = createWatchers([b], () => done(), { watch: fake.watch, debounceMs: 5, sweepMs: 0 });
+    watchers.start();
+    const keepAlive = setTimeout(() => {}, 10_000);
+    try {
+      const file = repo.itemPath("active", "DEMO0002");
+      const next = `${file}.next`;
+      writeFileSync(next, readFileSync(file, "utf8").replace("CCCCC", "DDDDD"));
+      stamp(next);
+      renameSync(next, file); // a new inode, same size and mtime, and no event for it
+      fake.calls.find((c) => c.dir === repo.folder("active")).cb("change", "DEMO0001.md");
+      await fired;
+    } finally { clearTimeout(keepAlive); watchers.close(); }
+    assert.equal(title("DEMO0002"), "DDDDD");
+  } finally { repo.cleanup(); }
+});
+
 test("a change the native callback reported is not reported again by the sweep", async () => {
   const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001", fm: { title: "Before" } }] });
   try {
