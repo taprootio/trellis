@@ -6,11 +6,12 @@ import assert from "node:assert/strict";
 import {
   chmodSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, utimesSync, writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, parse } from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadConfig, readBacklog } from "../src/backlog.mjs";
 import { claim, seed } from "../src/ledger.mjs";
 import { assetRelOf, createBacklog, recordOf, summaryOf, taskDetailOf } from "../src/viewer/backlogs.mjs";
+import { isInside } from "../src/viewer/reader.mjs";
 import { ledgerTest } from "./git-support.mjs";
 import { BASE_CFG, FISH_CFG, TUNA_SVG, makeRepo, tmp } from "./viewer-support.mjs";
 
@@ -543,4 +544,13 @@ test("renaming a task directory away and back is read fresh each time", () => {
     renameSync(join(repo.dir, "parked"), repo.folder("active"));
     assert.equal(b.build().order.length, 1);
   } finally { repo.cleanup(); }
+});
+
+test("containment holds for a worktree at a filesystem root, and still rejects siblings", () => {
+  const top = parse(process.cwd()).root;
+  assert.ok(isInside(top, join(top, "child")), "a child of the root is inside it");
+  assert.ok(isInside(top, top), "the root contains itself");
+  const dir = join(top, "work");
+  assert.ok(isInside(dir, join(dir, "x", "y.md")));
+  assert.ok(!isInside(dir, `${dir}-other`), "a sibling sharing the name prefix is outside");
 });

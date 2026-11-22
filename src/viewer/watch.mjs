@@ -5,12 +5,32 @@
 // invalidates the reader's cache for the paths it names, re-arms missing or replaced
 // watchers, and, after a 250 ms debounce, tells the server which backlog changed.
 
-import { statSync, realpathSync, watch as fsWatch } from "node:fs";
+import { readdirSync, statSync, realpathSync, watch as fsWatch } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { DEFAULT_LEDGER_REF, DEFAULT_TASKS_DIR, artifactSet, loadConfig, paths } from "../backlog.mjs";
 import { isInside } from "./reader.mjs";
 
 export const DEBOUNCE_MS = 250;
+// fs.watch can drop events under load (seen on macOS): a new or replaced directory goes
+// unwatched, or an edit is never reported. A sweep re-arms new or replaced directories and
+// compares each watched directory's entries by size and mtime, refreshing once when anything
+// changed. It stats entries and reads no file contents.
+export const SWEEP_MS = 2000;
+
+// Entry name, size and mtime for each watched directory, as one comparable string.
+function signatureOf(dirs) {
+  const parts = [];
+  for (const dir of [...dirs].sort()) {
+    let names;
+    try { names = readdirSync(dir).sort(); } catch { parts.push(`${dir}\0-`); continue; }
+    for (const name of names) {
+      let st = null;
+      try { st = statSync(join(dir, name)); } catch { /* vanished between list and stat */ }
+      parts.push(`${dir}\0${name}\0${st ? `${st.size}:${st.mtimeMs}:${st.ino}` : "-"}`);
+    }
+  }
+  return parts.join("\n");
+}
 
 const realpath = (p) => { try { return realpathSync.native(p); } catch { return null; } };
 const isDir = (p) => { try { return statSync(p).isDirectory(); } catch { return false; } };
@@ -99,10 +119,11 @@ function planOf(backlog) {
 export const watchPlan = (backlog) => planOf(backlog).wanted;
 
 // `onChange(backlogId)` runs after the debounce. `watch` is injectable for tests.
-export function createWatchers(backlogs, onChange, { debounceMs = DEBOUNCE_MS, watch = fsWatch } = {}) {
+export function createWatchers(backlogs, onChange, { debounceMs = DEBOUNCE_MS, sweepMs = SWEEP_MS, watch = fsWatch } = {}) {
   const state = new Map(); // id -> { handles: Map(dir -> { watcher, dev, ino }), timer, soon }
   const byId = new Map(backlogs.map((b) => [b.id, b]));
   let closed = false;
+  let sweep = null;
   for (const b of backlogs) state.set(b.id, { handles: new Map(), timer: null, soon: false, generated: [] });
 
   function disarm(s, dir) {
@@ -166,12 +187,32 @@ export function createWatchers(backlogs, onChange, { debounceMs = DEBOUNCE_MS, w
   }
 
   return {
-    start() { for (const b of backlogs) reconcile(b, true); },
+    start() {
+      for (const b of backlogs) reconcile(b, true);
+      if (sweepMs > 0 && !sweep) {
+        sweep = setInterval(() => {
+          for (const b of backlogs) {
+            reconcile(b);
+            const s = state.get(b.id);
+            if (closed || !s) continue;
+            const sig = signatureOf(s.handles.keys());
+            if (s.signature !== undefined && sig !== s.signature) {
+              // Something changed that no event reported: drop the cache and refresh.
+              for (const dir of s.handles.keys()) b.reader.invalidate(dir);
+              schedule(b, s);
+            }
+            s.signature = sig;
+          }
+        }, sweepMs);
+        sweep.unref?.();
+      }
+    },
     reconcile(backlog) { reconcile(typeof backlog === "string" ? byId.get(backlog) : backlog); },
     // The directories currently watched for a backlog, for tests.
     watched(id) { return [...state.get(id).handles.keys()].sort(); },
     close() {
       closed = true;
+      if (sweep) clearInterval(sweep);
       for (const [, s] of state) {
         if (s.timer) clearTimeout(s.timer);
         for (const dir of [...s.handles.keys()]) disarm(s, dir);
@@ -179,3 +220,4 @@ export function createWatchers(backlogs, onChange, { debounceMs = DEBOUNCE_MS, w
     },
   };
 }
+

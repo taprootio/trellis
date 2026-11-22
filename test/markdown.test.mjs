@@ -109,3 +109,11 @@ test("an intraword underscore is skipped as a closer, so the next valid closer i
 test("a long blank run inside a list item keeps the continuation in the item", () => {
   assert.equal(render("- a\n\n\n\n  b\n- c"), "<ul>\n<li><p>a</p>\n<p>b</p></li>\n<li>c</li>\n</ul>\n");
 });
+
+test("a code span closes only on a backtick run of its own length, even past a longer run", () => {
+  assert.equal(render("``a ``` b``"), "<p><code>a ``` b</code></p>\n");
+  assert.equal(render("`a `` b`"), "<p><code>a `` b</code></p>\n");
+  // The longer run inside the span also hides the bracket and emphasis markers from pairing.
+  assert.equal(render("*x ``a ``` ]* b``*"), "<p><em>x <code>a ``` ]* b</code></em></p>\n");
+  assert.equal(render("``a` b"), "<p>``a` b</p>\n");
+});

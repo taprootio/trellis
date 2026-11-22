@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, u
 import { isAbsolute, join, relative, sep } from "node:path";
 import { loadConfig } from "../src/backlog.mjs";
 import { claim, seed } from "../src/ledger.mjs";
-import { createBacklog } from "../src/viewer/backlogs.mjs";
+import { createBacklog, recordOf } from "../src/viewer/backlogs.mjs";
 import { startViewer } from "../src/viewer/server.mjs";
 import { createWatchers, watchPlan } from "../src/viewer/watch.mjs";
 import { ledgerTest } from "./git-support.mjs";
@@ -80,17 +80,15 @@ async function until(ctx, id, ok) {
 }
 const titles = (json) => (json.tasks || []).map((t) => t.title).join();
 
-test("editing a task title in the main worktree sends a message naming only that backlog", async () => {
+test("editing a task title in the main worktree sends a message for that backlog while another is served", async () => {
   const a = makeRepo({ items: [{ status: "active", id: "DEMO0001", fm: { title: "Before" } }] });
   const b = makeRepo({ cfg: { ...BASE_CFG, idPrefix: "OTH" }, items: [{ status: "active", id: "OTH0001", fm: { title: "Other" } }] });
   try {
     await live({ a, b }, async (ctx) => {
       writeFileSync(a.itemPath("active", "DEMO0001"), readFileSync(a.itemPath("active", "DEMO0001"), "utf8").replace("Before", "After!"));
       await until(ctx, "a", (j) => titles(j) === "After!");
-      // Which backlog an event names is checked deterministically below with a fake watcher;
-      // here a late file event from b's warm-up probe could land at any time.
-      writeFileSync(b.itemPath("active", "OTH0001"), readFileSync(b.itemPath("active", "OTH0001"), "utf8").replace("Other", "Changed"));
-      await until(ctx, "b", (j) => titles(j) === "Changed");
+      // That a's edit names a alone is checked deterministically by "an event in one backlog's
+      // directory notifies that backlog only"; live timing cannot prove an absence.
     });
   } finally { a.cleanup(); b.cleanup(); }
 });
@@ -224,6 +222,30 @@ test("retargeting a middle link of a two-hop chain is reported, though its folde
       symlinkSync(second, middle);
       await until(ctx, "demo", (j) => titles(j) === "ZZZZZ");
     });
+  } finally { repo.cleanup(); }
+});
+
+test("a link target with .. after a symlinked directory is followed through that directory, so the real hop folders are planned", posixOnly, () => {
+  const repo = makeRepo();
+  try {
+    repo.add("active", "DEMO0001", { title: "AAAAA" });
+    const link = repo.itemPath("active", "DEMO0001");
+    const original = readFileSync(link, "utf8");
+    rmSync(link);
+    mkdirSync(join(repo.root, "a"));
+    mkdirSync(join(repo.root, "b", "c"), { recursive: true });
+    mkdirSync(join(repo.root, "docs"));
+    writeFileSync(join(repo.root, "docs", "x.md"), original);
+    symlinkSync(join(repo.root, "b", "c"), join(repo.root, "a", "alias"));
+    symlinkSync(join(repo.root, "docs", "x.md"), join(repo.root, "b", "middle.md"));
+    // OS resolution: a/alias -> b/c, then .. -> b, so middle.md is b/middle.md. Collapsing the
+    // text first would look for a/middle.md, which does not exist.
+    symlinkSync("../../a/alias/../middle.md", link);
+    const b = createBacklog({ id: "demo", name: "Demo", path: repo.root });
+    b.build();
+    const dirs = rel(repo, planOf(b));
+    assert.ok(dirs.includes("b"), `the real folder of the middle link is planned: ${dirs}`);
+    assert.ok(dirs.includes("a"), "the folder holding the alias is planned");
   } finally { repo.cleanup(); }
 });
 
@@ -525,4 +547,49 @@ test("an event in one backlog's directory notifies that backlog only", async () 
     assert.deepEqual(changed, ["a"]);
     watchers.close();
   } finally { a.cleanup(); b.cleanup(); }
+});
+
+test("the sweep re-arms a planned directory whose creation event was missed", async () => {
+  const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001" }] });
+  try {
+    const b = createBacklog({ id: "demo", name: "Demo", path: repo.root });
+    b.build();
+    const fake = fakeWatch();
+    let done;
+    const changed = new Promise((r) => { done = r; });
+    const watchers = createWatchers([b], () => done(), { watch: fake.watch, debounceMs: 5, sweepMs: 20 });
+    watchers.start();
+    // completed/tasks appears with no event reaching the watcher (the fake never fires one).
+    mkdirSync(repo.folder("completed"), { recursive: true });
+    const keepAlive = setTimeout(() => {}, 10_000);
+    try { await changed; } finally { clearTimeout(keepAlive); }
+    assert.ok(fake.live().includes(repo.folder("completed")), "the sweep armed the new directory");
+    watchers.close();
+  } finally { repo.cleanup(); }
+});
+
+test("the sweep reports an edit whose change event was missed", async () => {
+  const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001", fm: { title: "Before" } }] });
+  try {
+    const b = createBacklog({ id: "demo", name: "Demo", path: repo.root });
+    b.build();
+    const fake = fakeWatch();
+    const changed = [];
+    let done;
+    const got = new Promise((r) => { done = r; });
+    const watchers = createWatchers([b], (id) => { changed.push(id); done(); }, { watch: fake.watch, debounceMs: 5, sweepMs: 20 });
+    watchers.start();
+    // Let one sweep record the starting signature, then edit with no event delivered.
+    const first = new Promise((r) => setTimeout(r, 60));
+    const keepAlive = setTimeout(() => {}, 10_000);
+    try {
+      await first;
+      const file = repo.itemPath("active", "DEMO0001");
+      writeFileSync(file, readFileSync(file, "utf8").replace("Before", "After, longer"));
+      await got;
+    } finally { clearTimeout(keepAlive); }
+    assert.deepEqual(changed, ["demo"]);
+    assert.equal(recordOf(b.build()).tasks[0].title, "After, longer");
+    watchers.close();
+  } finally { repo.cleanup(); }
 });

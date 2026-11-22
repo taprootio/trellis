@@ -33,11 +33,17 @@ export function findConfigFile({ cwd = process.cwd(), env = process.env, homedir
   const candidates = [];
   if (env.XDG_CONFIG_HOME) candidates.push(resolve(cwd, env.XDG_CONFIG_HOME, "trellis", "viewer.json"));
   candidates.push(join(homedir, ".config", "trellis", "viewer.json"));
-  return candidates.find(isFile) ?? null;
+  // Fall through only when a candidate is absent; one that exists but is not a file is a startup
+  // error from the guarded loader, never a silent fallback to a lower-priority file.
+  return candidates.find(exists) ?? null;
 }
 
 function isFile(path) {
   try { return statSync(path).isFile(); } catch { return false; }
+}
+
+function exists(path) {
+  try { statSync(path); return true; } catch (e) { return e.code !== "ENOENT" && e.code !== "ENOTDIR"; }
 }
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);

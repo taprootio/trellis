@@ -1,4 +1,4 @@
-import { encodeSegment } from "../src/viewer/segment.mjs";
+import { decodeSegment, encodeSegment } from "../src/viewer/segment.mjs";
 
 // Pure list logic: filters in the query string, row building, sort and search order.
 
@@ -67,7 +67,7 @@ export function parseLocation(pathname = "/", search = "") {
   });
   if (parts[0] === "b" && parts[1]) {
     if (parts[2] === "task" && parts[3] && parts.length === 4) {
-      return { view: "task", filters, task: { backlog: parts[1], id: parts[3] } };
+      return { view: "task", filters, task: { backlog: parts[1], id: decodeSegment(parts[3]) } };
     }
     if (parts.length === 2) {
       if (!new URLSearchParams(search).has("backlog")) filters.backlogs = [parts[1]];

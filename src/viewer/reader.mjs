@@ -5,7 +5,7 @@
 // the server. Parsed items are cached by path, size and mtime.
 
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
-import { join, parse, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, parse, sep } from "node:path";
 import { parseFrontMatter, splitFrontMatter } from "../backlog.mjs";
 
 const OPEN_FLAGS = fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK || 0);
@@ -14,7 +14,8 @@ const GONE = new Set(["ENOENT", "ENOTDIR"]);
 const INTERNAL_KEYS = ["_file", "_effortLabel", "_effortEmoji", "_effortImage"];
 export const OUTSIDE = "resolves outside the main worktree";
 
-const within = (parent, child) => child === parent || child.startsWith(parent + sep);
+// A filesystem root (`/` or a drive root) already ends in a separator; adding another would match nothing.
+const within = (parent, child) => child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
 export const isInside = within;
 
 // `hooks.beforeOpen(path)` runs after the path check and before the open; `hooks.afterList(dir)`
@@ -45,23 +46,25 @@ export function createReader(root, hooks = {}) {
 
   // Walks `path` one component at a time and records the directory holding each symlink it
   // meets, so retargeting a link in the middle of a chain (not only the last one) is noticed.
+  // A `..` in a link target applies to the real directory reached so far, so `alias/../x` is
+  // followed through `alias` first, as the OS does (resolve() would collapse it textually).
   const noteHops = (path) => {
-    let pending = path;
-    for (let guard = 0; guard < 40; guard++) {
-      const { root: top } = parse(pending);
-      const parts = pending.slice(top.length).split(sep).filter(Boolean);
-      let cur = top;
-      let again = null;
-      for (let i = 0; i < parts.length && !again; i++) {
-        const next = join(cur, parts[i]);
-        let link = null;
-        try { if (lstatSync(next).isSymbolicLink()) link = readlinkSync(next); } catch { return; }
-        if (link === null) { cur = next; continue; }
-        if (within(root, cur)) hops.set(cur, (hops.get(cur) ?? new Set()).add(parts[i]));
-        again = resolve(cur, link, ...parts.slice(i + 1));
-      }
-      if (!again) return;
-      pending = again;
+    const { root: top } = parse(path);
+    let cur = top;
+    let queue = path.slice(top.length).split(sep).filter(Boolean);
+    for (let followed = 0; queue.length && followed < 40;) {
+      const [part, ...rest] = queue;
+      queue = rest;
+      if (part === ".") continue;
+      if (part === "..") { cur = dirname(cur); continue; }
+      const next = join(cur, part);
+      let link = null;
+      try { if (lstatSync(next).isSymbolicLink()) link = readlinkSync(next); } catch { return; }
+      if (link === null) { cur = next; continue; }
+      if (within(root, cur)) hops.set(cur, (hops.get(cur) ?? new Set()).add(part));
+      followed++;
+      if (isAbsolute(link)) cur = parse(link).root;
+      queue = [...link.slice(parse(link).root.length).split(sep).filter(Boolean), ...queue];
     }
   };
 

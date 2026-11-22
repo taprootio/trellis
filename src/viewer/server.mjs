@@ -6,6 +6,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { searchItems } from "../search.mjs";
+import { decodeSegment } from "./segment.mjs";
 import { IMAGE_TYPES, createBacklog, recordOf, searchCorpus, summaryOf, taskDetailOf } from "./backlogs.mjs";
 import { ViewerConfigError, canonicalV6, normalizeHost } from "./config.mjs";
 import { isInside } from "./reader.mjs";
@@ -196,7 +197,7 @@ export async function startViewer({
         if (!backlog) return notFound(res);
         const out = built(backlog);
         if (segs.length === 3) return sendJson(res, 200, recordOf(out));
-        const detail = taskDetailOf(out, e);
+        const detail = taskDetailOf(out, decodeSegment(e));
         return detail ? sendJson(res, 200, detail) : notFound(res);
       }
       if (b === "search" && segs.length === 2) return search(res, query);

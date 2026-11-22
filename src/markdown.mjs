@@ -30,20 +30,51 @@ function linkHref(target, resolveRepoPath) {
   return href ? { href, repo: true } : null;
 }
 
+// Length of the backtick run starting at `i`.
+function tickRun(text, i) {
+  let n = 1;
+  while (text[i + n] === "`") n++;
+  return n;
+}
+
+// Backtick runs of `text`, indexed by length, in one pass. The returned lookup(from, len) gives
+// the start of the first run of exactly `len` backticks at or after `from`, or -1. A code span
+// closes only on a run of its opener's length, never on part of a longer run, and the one
+// index serves inline rendering, bracket pairing and emphasis scanning in O(log n) a call.
+function tickIndex(text) {
+  const byLen = new Map();
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "`") continue;
+    const n = tickRun(text, i);
+    if (!byLen.has(n)) byLen.set(n, []);
+    byLen.get(n).push(i);
+    i += n - 1;
+  }
+  return (from, len) => {
+    const starts = byLen.get(len);
+    if (!starts) return -1;
+    let lo = 0;
+    let hi = starts.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (starts[mid] < from) lo = mid + 1; else hi = mid;
+    }
+    return lo < starts.length ? starts[lo] : -1;
+  };
+}
+
 // Pairs every `[` with its `]` in one pass (skipping escapes and code spans), so a long
 // paragraph of unmatched brackets stays linear instead of rescanning to the end for each one.
 // Returns Map(open index -> close index); an unmatched `[` has no entry.
-function bracketPairs(text) {
+function bracketPairs(text, closerOf) {
   const pairs = new Map();
   const open = [];
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (c === "\\") { i++; continue; }
     if (c === "`") {
-      let run = 1;
-      while (text[i + run] === "`") run++;
-      const ticks = "`".repeat(run);
-      const end = text.indexOf(ticks, i + run);
+      const run = tickRun(text, i);
+      const end = closerOf(i + run, run);
       i = end !== -1 ? end + run - 1 : i + run - 1;
       continue;
     }
@@ -92,15 +123,15 @@ function linkDestination(text, start) {
 
 // Closing delimiter search for emphasis: the run must not follow whitespace, and an `_` run
 // inside a word (`snake_case`) is not a closer, so the search goes on to the next one.
-function findClose(text, from, delim) {
+function findClose(text, from, delim, closerOf) {
   for (let i = from; i < text.length; i++) {
     if (text[i] === "\\") { i++; continue; }
     if (text[i] === "`") {
-      const run = /^`+/.exec(text.slice(i))[0];
-      const end = text.indexOf(run, i + run.length);
-      if (end !== -1) { i = end + run.length - 1; continue; }
+      const run = tickRun(text, i);
+      const end = closerOf(i + run, run);
       // No closer for this run: skip the whole run, or each backtick would rescan the text.
-      i += run.length - 1; continue;
+      i = end !== -1 ? end + run - 1 : i + run - 1;
+      continue;
     }
     if (text.startsWith(delim, i) && i > from && !/\s/.test(text[i - 1])) {
       // `*` must not be the start of a longer run when closing a single one.
@@ -115,17 +146,19 @@ function findClose(text, from, delim) {
 function inline(text, ctx, allowLinks = true) {
   let out = "";
   let i = 0;
+  const closerOf = tickIndex(text);
   let pairs = null; // built on the first `[`
-  const closeOf = (open) => (pairs ??= bracketPairs(text)).get(open) ?? -1;
+  const closeOf = (open) => (pairs ??= bracketPairs(text, closerOf)).get(open) ?? -1;
   // A delimiter with no closer from here has none from any later start either.
   const noCloseFrom = new Map();
   while (i < text.length) {
     const c = text[i];
     if (c === "\\" && i + 1 < text.length && PUNCT_RE.test(text[i + 1])) { out += escapeHtml(text[i + 1]); i += 2; continue; }
     if (c === "`") {
-      const run = /^`+/.exec(text.slice(i))[0];
-      const end = text.indexOf(run, i + run.length);
-      if (end !== -1 && text[end + run.length] !== "`") {
+      const n = tickRun(text, i);
+      const run = "`".repeat(n);
+      const end = closerOf(i + n, n);
+      if (end !== -1) {
         let code = text.slice(i + run.length, end).replace(/\n/g, " ");
         if (code.length > 2 && code.startsWith(" ") && code.endsWith(" ") && code.trim()) code = code.slice(1, -1);
         out += `<code>${escapeHtml(code)}</code>`;
@@ -164,7 +197,7 @@ function inline(text, ctx, allowLinks = true) {
       const next = text[i + delim.length];
       if (!intraword && next !== undefined && !/\s/.test(next)) {
         const from = i + delim.length;
-        const close = from >= (noCloseFrom.get(delim) ?? Infinity) ? -1 : findClose(text, from, delim);
+        const close = from >= (noCloseFrom.get(delim) ?? Infinity) ? -1 : findClose(text, from, delim, closerOf);
         if (close === -1 && !noCloseFrom.has(delim)) noCloseFrom.set(delim, from);
         if (close !== -1) {
           const tag = delim.length === 2 ? "strong" : "em";

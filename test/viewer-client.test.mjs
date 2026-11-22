@@ -302,10 +302,16 @@ test("the task view says Needs attention only for a flagged task (a legacy close
 });
 
 test("a task id of . or .. is encoded so a link or API call keeps it as one segment", () => {
-  assert.equal(taskPath("demo", "..", defaultFilters()), "/b/demo/task/%2E%2E");
-  assert.equal(taskPath("demo", ".", defaultFilters()), "/b/demo/task/%2E");
+  assert.equal(taskPath("demo", "..", defaultFilters()), "/b/demo/task/~..");
+  assert.equal(taskPath("demo", ".", defaultFilters()), "/b/demo/task/~.");
+  assert.equal(taskPath("demo", "~x", defaultFilters()), "/b/demo/task/~~x");
   assert.equal(taskPath("demo", "A B", defaultFilters()), "/b/demo/task/A%20B");
-  assert.deepEqual(parseLocation("/b/demo/task/%2E%2E").task, { backlog: "demo", id: ".." });
+  // A browser parses the URL before the app sees it, so round-trip through URL like a real navigation.
+  for (const id of [".", "..", "~x", "A B"]) {
+    const pathname = new URL(taskPath("demo", id, defaultFilters()), "http://h").pathname;
+    assert.equal(pathname.split("/").length, 5, `${id} stays one segment`);
+    assert.deepEqual(parseLocation(pathname).task, { backlog: "demo", id });
+  }
 });
 
 test("the task view lists the standard text fields, hiding empty ones and the authored id", () => {

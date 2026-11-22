@@ -210,7 +210,7 @@ test("an encoded backslash in a task id reaches the shell and detail routes but 
     await withViewer([entry(repo)], async (_v, port) => {
       assert.equal((await getJson(port, "/api/backlogs/demo/tasks/R%5C0001")).json.id, "R\\0001");
       assert.equal((await request(port, { path: "/b/demo/task/R%5C0001" })).status, 200);
-      for (const path of ["/assets/demo/a%5Cb", "/app/a%5Capp-test.js", "/assets/demo/a%2Fb", "/api/backlogs/demo/tasks/%2E%2E/x", "/b/%2E%2E"]) {
+      for (const path of ["/assets/demo/a%5Cb", "/app/a%5Capp-test.js", "/assets/demo/a%2Fb", "/api/backlogs/demo/tasks/~../x", "/b/%2E%2E"]) {
         assert.equal((await request(port, { path })).status, 404, path);
       }
     });
@@ -222,12 +222,12 @@ test("a task id of .. round-trips through the shell and detail routes but never 
   const repo = makeRepo({ cfg: { ...BASE_CFG, idPrefix: "\\.{2}|\\." }, items: [{ status: "active", id: "..", body: "See [itself](...md).\n" }] });
   try {
     await withViewer([entry(repo)], async (_v, port) => {
-      const detail = await getJson(port, "/api/backlogs/demo/tasks/%2E%2E");
+      const detail = await getJson(port, "/api/backlogs/demo/tasks/~..");
       assert.equal(detail.json.id, "..");
-      assert.equal((await request(port, { path: "/b/demo/task/%2E%2E" })).status, 200);
+      assert.equal((await request(port, { path: "/b/demo/task/~.." })).status, 200);
       assert.equal((await getJson(port, "/api/backlogs/demo")).json.tasks.length, 1);
-      assert.match(detail.json.bodyHtml, /href="\/b\/demo\/task\/%2E%2E"/, "a generated link keeps the dot id as one segment");
-      for (const path of ["/assets/demo/%2E%2E/x", "/app/%2E%2E/package.json", "/api/backlogs/demo/tasks/%2E"]) {
+      assert.match(detail.json.bodyHtml, /href="\/b\/demo\/task\/~\.\."/, "a generated link keeps the dot id as one segment");
+      for (const path of ["/assets/demo/%2E%2E/x", "/app/%2E%2E/package.json", "/api/backlogs/demo/tasks/%2E/x"]) {
         assert.equal((await request(port, { path })).status, 404, path);
       }
     });

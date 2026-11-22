@@ -19,6 +19,20 @@ const ABS_TAPROOT = resolve("/abs", "taproot");
 const ENTRY = { id: "taproot", name: "Taproot", path: ABS_TAPROOT };
 const parseError = (raw) => { try { parseViewerConfig(raw, { homedir: HOME }); } catch (e) { return e; } return null; };
 
+test("a lookup candidate that exists but is not a file is a startup error, not a fallback", () => {
+  const dir = tmp("cfg-dir");
+  try {
+    const home = join(dir, "home");
+    const xdg = join(dir, "xdg");
+    mkdirSync(join(home, ".config", "trellis"), { recursive: true });
+    writeFileSync(join(home, ".config", "trellis", "viewer.json"), "{}");
+    mkdirSync(join(xdg, "trellis", "viewer.json"), { recursive: true });
+    const found = findConfigFile({ cwd: dir, env: { XDG_CONFIG_HOME: xdg }, homedir: home });
+    assert.equal(found, join(xdg, "trellis", "viewer.json"), "the directory is chosen, not skipped");
+    assert.throws(() => loadViewerConfig(found, { homedir: home }), ViewerConfigError);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("config lookup order: TRELLIS_VIEWER_CONFIG, then XDG_CONFIG_HOME, then ~/.config", () => {
   const dir = tmp("cfg");
   try {
