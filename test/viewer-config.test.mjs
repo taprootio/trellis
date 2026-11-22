@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, parse, resolve } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   DEFAULT_PORT, ViewerConfigError, findConfigFile, isLoopbackBind, loadViewerConfig, parseViewerConfig, singleRepoConfig,
@@ -13,8 +13,11 @@ import { LayoutError, firstWorktree, resolveMainWorktree } from "../src/viewer/w
 import { git, makeRepo, tmp } from "./viewer-support.mjs";
 import { initRefFormat } from "./git-support.mjs";
 
-const ENTRY = { id: "taproot", name: "Taproot", path: "/abs/taproot" };
-const parseError = (raw) => { try { parseViewerConfig(raw, { homedir: "/home/me" }); } catch (e) { return e; } return null; };
+// Built with path helpers so the expectations hold with Windows drive letters and separators.
+const HOME = resolve("/home", "me");
+const ABS_TAPROOT = resolve("/abs", "taproot");
+const ENTRY = { id: "taproot", name: "Taproot", path: ABS_TAPROOT };
+const parseError = (raw) => { try { parseViewerConfig(raw, { homedir: HOME }); } catch (e) { return e; } return null; };
 
 test("config lookup order: TRELLIS_VIEWER_CONFIG, then XDG_CONFIG_HOME, then ~/.config", () => {
   const dir = tmp("cfg");
@@ -38,8 +41,8 @@ test("config lookup order: TRELLIS_VIEWER_CONFIG, then XDG_CONFIG_HOME, then ~/.
 test("a valid config keeps order, expands ~/, and lower-cases allowed hosts", () => {
   const cfg = parseViewerConfig({
     backlogs: [ENTRY, { id: "espalier", name: "Espalier", path: "~/code/espalier" }], port: 0, bind: "::1", allowedHosts: ["Trellis.TEST", "[::1]"],
-  }, { homedir: "/home/me" });
-  assert.deepEqual(cfg.backlogs.map((b) => [b.id, b.path]), [["taproot", "/abs/taproot"], ["espalier", "/home/me/code/espalier"]]);
+  }, { homedir: HOME });
+  assert.deepEqual(cfg.backlogs.map((b) => [b.id, b.path]), [["taproot", ABS_TAPROOT], ["espalier", join(HOME, "code", "espalier")]]);
   assert.deepEqual([cfg.port, cfg.bind, cfg.allowedHosts], [0, "::1", ["trellis.test", "[::1]"]]);
   assert.deepEqual([DEFAULT_PORT, parseViewerConfig({ backlogs: [ENTRY] }).port], [4747, null]);
 });
@@ -85,7 +88,7 @@ test("loadViewerConfig reports unreadable and invalid files with the file name",
 });
 
 test("allowedHosts canonicalizes bracketed IPv6 and rejects one that does not parse", () => {
-  const cfg = parseViewerConfig({ backlogs: [ENTRY], allowedHosts: ["[0:0:0:0:0:0:0:1]", "[::FFFF:127.0.0.1]", "[::1]"] }, { homedir: "/home/me" });
+  const cfg = parseViewerConfig({ backlogs: [ENTRY], allowedHosts: ["[0:0:0:0:0:0:0:1]", "[::FFFF:127.0.0.1]", "[::1]"] }, { homedir: HOME });
   assert.deepEqual(cfg.allowedHosts, ["[::1]", "[::ffff:7f00:1]", "[::1]"]);
   for (const bad of ["[1.2.3.4]", "[::1::2]", "[:::]"]) {
     assert.match(parseError({ backlogs: [ENTRY], allowedHosts: [bad] })?.message ?? "", /allowedHosts\[0\]/, bad);
@@ -103,9 +106,10 @@ test("a FIFO or directory given as the config file is a config error, not a hang
 });
 
 test("--repo becomes a one-entry config whose id obeys the id rule", () => {
-  const c = singleRepoConfig("My Repo_Name", { cwd: "/work" });
-  assert.deepEqual(c.backlogs, [{ id: "my-repo-name", name: "My Repo_Name", path: "/work/My Repo_Name" }]);
-  assert.equal(singleRepoConfig("/", { cwd: "/work" }).backlogs[0].id, "repo");
+  const WORK = resolve("/work");
+  const c = singleRepoConfig("My Repo_Name", { cwd: WORK });
+  assert.deepEqual(c.backlogs, [{ id: "my-repo-name", name: "My Repo_Name", path: join(WORK, "My Repo_Name") }]);
+  assert.equal(singleRepoConfig(parse(WORK).root, { cwd: WORK }).backlogs[0].id, "repo");
 });
 
 test("loopback binds are recognized", () => {

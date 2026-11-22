@@ -89,11 +89,12 @@ export function createBacklog(entry, { hooks, git } = {}) {
     const dirs = [p.active, p.completedTasks, p.removed];
     const seams = { readItem: reader.readItem, listDir: reader.listDir, readText: reader.readText };
     let data = readBacklog(root, cfg, seams);
-    // A directory listed for ids can vanish before its items are read; redo the pass without it.
+    // A directory listed for ids can vanish or be swapped before its items are read; redo the
+    // pass without it.
     for (let attempt = 0; attempt < 3; attempt++) {
-      const gone = dirs.filter((d) => reader.listedDirGone(d));
-      if (!gone.length) break;
-      for (const d of gone) reader.forceSkip(d, "directory vanished during the rebuild");
+      const bad = dirs.map((d) => [d, reader.listedDirProblem(d)]).filter(([, why]) => why);
+      if (!bad.length) break;
+      for (const [d, why] of bad) reader.forceSkip(d, why);
       reader.retry();
       data = readBacklog(root, cfg, seams);
     }

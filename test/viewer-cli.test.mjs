@@ -95,7 +95,7 @@ test("without flags or a config file, serve serves the current directory's repo"
       const { json } = await getJson(v.port, "/api/backlogs");
       assert.deepEqual(json.map((b) => [b.path, b.counts.active]), [[repo.root, 1]]);
       assert.match(sb.out(), new RegExp(`trellis viewer: http://127\\.0\\.0\\.1:${v.port}\\n`));
-      assert.match(sb.out(), new RegExp(`no config file; serving ${repo.root}\\n`));
+      assert.ok(sb.out().includes(`no config file; serving ${repo.root}\n`), sb.out());
       assert.equal(sb.err(), "");
     }, { cwd: repo.root });
   } finally { repo.cleanup(); sb.cleanup(); }
@@ -110,7 +110,7 @@ test("TRELLIS_VIEWER_CONFIG names the file to read, and XDG_CONFIG_HOME and ~/.c
     writeFileSync(file, JSON.stringify({ backlogs: [{ id: "b", name: "B", path: b.root }, { id: "a", name: "A", path: a.root }], port: 0 }));
     await serving(sb, [], async (v) => {
       assert.deepEqual((await getJson(v.port, "/api/backlogs")).json.map((x) => x.id), ["b", "a"]);
-      assert.match(sb.out(), new RegExp(`config: ${file}\\n`));
+      assert.ok(sb.out().includes(`config: ${file}\n`), sb.out());
     }, { env: { TRELLIS_VIEWER_CONFIG: file } });
     const xdg = join(sb.dir, "xdg");
     mkdirSync(join(xdg, "trellis"), { recursive: true });
@@ -207,6 +207,22 @@ test("a dist directory without a built viewer exits 1 naming the build command",
     mkdirSync(empty);
     assert.equal(await runServe(["--repo", repo.root, "--port", "0"], { ...sb.base, distDir: empty }), 1);
     assert.match(sb.err(), /npm run build:viewer/);
+  } finally { repo.cleanup(); sb.cleanup(); }
+});
+
+test("a half-built dist (no files.json, or a referenced script or stylesheet missing) exits 1 naming the build command", async () => {
+  const repo = makeRepo();
+  const sb = sandbox();
+  try {
+    for (const gone of ["files.json", "app-test.js", "esp-reset.css"]) {
+      const dist = join(sb.dir, `dist-${gone}`);
+      cpSync(FIXTURE_DIST, dist, { recursive: true });
+      rmSync(join(dist, gone));
+      const err0 = sb.err().length;
+      assert.equal(await runServe(["--repo", repo.root, "--port", "0"], { ...sb.base, distDir: dist }), 1, gone);
+      const msg = sb.err().slice(err0);
+      assert.ok(msg.includes(gone) && msg.includes("npm run build:viewer"), msg);
+    }
   } finally { repo.cleanup(); sb.cleanup(); }
 });
 

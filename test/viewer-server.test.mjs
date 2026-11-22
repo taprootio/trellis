@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { loadConfig } from "../src/backlog.mjs";
 import { claim, seed } from "../src/ledger.mjs";
 import { normalizeHost } from "../src/viewer/config.mjs";
-import { cacheControlFor, hostAllowed, parseHost, printedHostFor, startViewer } from "../src/viewer/server.mjs";
+import { MAX_STREAM_BUFFER, cacheControlFor, hostAllowed, parseHost, printedHostFor, pushEvent, startViewer } from "../src/viewer/server.mjs";
 import { ledgerTest } from "./git-support.mjs";
 import { BASE_CFG, FISH_CFG, FIXTURE_DIST, TUNA_SVG, getJson, loadVariant, makeRepo, openEvents, request, shapeProblems, tmp } from "./viewer-support.mjs";
 
@@ -414,4 +414,14 @@ test("a task directory made after startup is read on the next request", async ()
       assert.equal((await getJson(port, "/api/backlogs/demo")).json.tasks.length, 1);
     });
   } finally { repo.cleanup(); }
+});
+
+test("an event stream whose client stopped reading is closed instead of buffering without bound", () => {
+  const sent = [];
+  let destroyed = false;
+  const res = { writableLength: 0, write: (f) => sent.push(f), destroy: () => { destroyed = true; } };
+  assert.equal(pushEvent(res, "a"), true);
+  res.writableLength = MAX_STREAM_BUFFER + 1;
+  assert.equal(pushEvent(res, "b"), false);
+  assert.deepEqual([sent, destroyed], [["a"], true]);
 });

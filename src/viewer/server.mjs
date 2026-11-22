@@ -14,6 +14,16 @@ import { createWatchers } from "./watch.mjs";
 // The built app, resolved from this package, never from the working directory.
 export const DEFAULT_DIST_DIR = fileURLToPath(new URL("../../viewer/dist/", import.meta.url));
 const HEARTBEAT_MS = 25_000;
+// A stream whose client stops reading is closed past this many queued bytes; EventSource
+// reconnects on its own, and the queue never grows without bound.
+export const MAX_STREAM_BUFFER = 64 * 1024;
+
+// Writes one SSE frame. Returns false when the stream was closed for being backed up.
+export function pushEvent(res, frame, limit = MAX_STREAM_BUFFER) {
+  if (res.writableLength > limit) { res.destroy(); return false; }
+  res.write(frame);
+  return true;
+}
 
 // ------------------------------------------------------------ host check
 export function parseHost(header) {
@@ -101,7 +111,8 @@ export async function startViewer({
   const clients = new Set();
   const handle = { port: null, host: null };
 
-  const broadcast = (id) => { for (const res of clients) res.write(`data: ${JSON.stringify({ backlog: id })}\n\n`); };
+  const pushAll = (frame) => { for (const res of [...clients]) if (!pushEvent(res, frame)) clients.delete(res); };
+  const broadcast = (id) => pushAll(`data: ${JSON.stringify({ backlog: id })}\n\n`);
   const watchers = watch ? createWatchers(backlogs, broadcast, { debounceMs }) : null;
   const built = (b) => { const out = b.build(); if (watchers) watchers.reconcile(b); return out; };
 
@@ -231,7 +242,7 @@ export async function startViewer({
   handle.port = addr.port;
   handle.host = printedHostFor(bind, addr.address);
   if (watchers) watchers.start();
-  const heartbeat = setInterval(() => { for (const res of clients) res.write(": keepalive\n\n"); }, HEARTBEAT_MS);
+  const heartbeat = setInterval(() => pushAll(": keepalive\n\n"), HEARTBEAT_MS);
   heartbeat.unref();
 
   return {

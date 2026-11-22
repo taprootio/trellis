@@ -289,6 +289,41 @@ test("a status directory replaced after its listing is discarded with a diagnost
   } finally { repo.cleanup(); }
 });
 
+test("a status directory swapped for an outside symlink while its items are read is discarded whole", posixOnly, () => {
+  const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001" }, { status: "completed", id: "DEMO0009" }] });
+  const outside = tmp("swap-outside");
+  try {
+    const dir = repo.folder("completed");
+    const copy = readFileSync(repo.itemPath("completed", "DEMO0009"), "utf8");
+    let swapped = false;
+    const b = createBacklog({ id: "demo", name: "Demo", path: repo.root }, {
+      hooks: {
+        beforeOpen(p) {
+          if (swapped || dirname(p) !== dir) return;
+          swapped = true;
+          renameSync(dir, `${dir}-old`);
+          writeFileSync(join(outside, "DEMO0009.md"), copy);
+          symlinkSync(outside, dir);
+        },
+      },
+    });
+    const out = b.build();
+    assert.ok(swapped);
+    assert.deepEqual([out.status, out.order, out.nextId], ["ok", ["DEMO0001"], "DEMO0002"]);
+    assert.ok(out.diagnostics.some((d) => d.path === "completed/tasks" && /changed|outside/.test(d.message)));
+  } finally { repo.cleanup(); rmSync(outside, { recursive: true, force: true }); }
+});
+
+test("an absurd idWidth is a config error for that backlog only", () => {
+  const good = makeRepo({ items: [{ status: "active", id: "DEMO0001" }] });
+  const wide = makeRepo({ cfg: { ...BASE_CFG, idWidth: 1000000000 } });
+  try {
+    const builds = [open(wide, "wide"), open(good, "good")].map((e) => e.build());
+    assert.deepEqual(builds.map((x) => x.status), ["error", "ok"]);
+    assert.match(builds[0].errors.join(), /idWidth/);
+  } finally { good.cleanup(); wide.cleanup(); }
+});
+
 test("a task removed between listing and reading is skipped, and a task swapped for a FIFO after the path check does not block", posixOnly, () => {
   const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001" }, { status: "active", id: "DEMO0002" }, { status: "active", id: "DEMO0003" }] });
   try {

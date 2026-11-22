@@ -25,7 +25,7 @@ export function createReader(root, hooks = {}) {
   const read = hooks.read || readFileSync;
   const cache = new Map(); // task path -> { size, mtimeMs, real, fm, body, syntaxErrors }
   let lastRead = new Map(); // `where` -> { path, fm, body, syntaxErrors }, for the current rebuild
-  let listed = new Map(); // dir -> names, for the current rebuild
+  let listed = new Map(); // dir -> { names, real, dev, ino }, for the current rebuild
   let forced = new Map(); // dir -> reason, skipped for the rest of the rebuild
   let targets = new Set(); // resolved symlink targets accepted in the current rebuild
   const lastTargets = new Map(); // symlink path -> last accepted target, kept across rebuilds
@@ -138,16 +138,25 @@ export function createReader(root, hooks = {}) {
       try { after = statSync(again.real); } catch { return { skip: "directory vanished while it was read" }; }
       if (!after.isDirectory() || after.dev !== before.dev || after.ino !== before.ino) return { skip: "directory changed while it was read" };
       if (r.real !== dir) targets.add(r.real);
-      listed.set(dir, names);
+      listed.set(dir, { names, real: r.real, dev: after.dev, ino: after.ino });
       return names;
     },
     // Another pass of the same rebuild: forget the reads, keep forced skips and symlink targets.
     retry() {
       lastRead = new Map(); listed = new Map();
     },
-    // True when a directory this rebuild listed has since gone.
-    listedDirGone(dir) {
-      return listed.has(dir) && realOf(dir).absent === true;
+    // Why a directory listed this rebuild can no longer be trusted, or null. Run after the item
+    // reads: a directory swapped for an out-of-worktree symlink in between must not count.
+    listedDirProblem(dir) {
+      const was = listed.get(dir);
+      if (!was) return null;
+      const now = realOf(dir);
+      if (now.absent) return "directory vanished during the rebuild";
+      if (now.skip) return now.skip;
+      let st;
+      try { st = statSync(now.real); } catch { return "directory vanished during the rebuild"; }
+      if (now.real !== was.real || st.dev !== was.dev || st.ino !== was.ino) return "directory changed during the rebuild";
+      return null;
     },
     forceSkip(dir, reason) {
       forced.set(dir, reason);

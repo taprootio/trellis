@@ -61,7 +61,7 @@ test("an unterminated fence runs to the end and stays escaped", () => {
 
 test("a long malformed paragraph renders as escaped text in linear time", () => {
   const DEADLINE_MS = 10_000; // the shared test deadline; the unfixed renderer needs minutes at this size
-  const inputs = ["[".repeat(200_000), "![".repeat(100_000), "[a](".repeat(15_000), "*a ".repeat(70_000), "_a ".repeat(70_000), "[a](<".repeat(12_000), `${"~".repeat(100_000)}\``, `${"`".repeat(100_000)} a\``];
+  const inputs = ["[".repeat(200_000), "![".repeat(100_000), "[a](".repeat(15_000), "*a ".repeat(70_000), "_a ".repeat(70_000), "[a](<".repeat(12_000), `${"~".repeat(100_000)}\``, `${"`".repeat(100_000)} a\``, `|a|b\n|-${" ".repeat(100_000)}x`, `|a|b\n${" ".repeat(100_000)}|${" ".repeat(100_000)}-${" ".repeat(100_000)}!`];
   const started = Date.now();
   for (const md of inputs) {
     const html = render(md);
@@ -70,6 +70,14 @@ test("a long malformed paragraph renders as escaped text in linear time", () => 
   assert.equal(render("~~~js title\nx\n~~~"), '<pre><code class="language-js">x\n</code></pre>\n');
   assert.ok(Date.now() - started < DEADLINE_MS, "rendering should finish within the deadline");
   assert.match(render("[ok](https://example.com) and [open"), /<a href="https:\/\/example.com">ok<\/a> and \[open/);
+});
+
+test("a wide table header over many short rows renders only the cells present", () => {
+  const head = `|${Array.from({ length: 2000 }, (_, n) => `h${n}`).join("|")}|`;
+  const sep = `|${"-|".repeat(2000)}`;
+  const html = render(`${head}\n${sep}\n${"|x|\n".repeat(2000)}`);
+  assert.equal(html.match(/<td/g).length, 2000);
+  assert.ok(html.length < 400_000, "output stays proportional to the input");
 });
 
 test("only links resolved from repository paths carry the task-link mark", () => {

@@ -8,7 +8,7 @@
 // process.exit, so tests drive it in-process. Exit 2 is a usage error, 1 a config, build or
 // listen failure.
 
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir as osHomedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,6 +72,21 @@ function parseArgs(argv) {
   return opts;
 }
 
+// A half-built dist (a failed or interrupted build) must stop the start, not serve a blank page.
+// Returns what is missing, or null: files.json, index.html, and the script and stylesheet it uses.
+function missingBuildPart(distDir) {
+  if (!existsSync(join(distDir, "files.json"))) return "no files.json";
+  let html;
+  try { html = readFileSync(join(distDir, "index.html"), "utf8"); } catch { return "no index.html"; }
+  const used = (re) => [...html.matchAll(re)].map((m) => m[1]);
+  const scripts = used(/<script\b[^>]*\bsrc="\/app\/([^"]+)"/g);
+  const styles = used(/<link\b[^>]*\bhref="\/app\/([^"]+\.css)"/g);
+  if (!scripts.length) return "index.html references no script";
+  if (!styles.length) return "index.html references no stylesheet";
+  const gone = [...scripts, ...styles].find((f) => !existsSync(join(distDir, f)));
+  return gone ? `no ${gone}` : null;
+}
+
 export async function runServe(argv, {
   distDir = DEFAULT_DIST_DIR, stdout = process.stdout, stderr = process.stderr, cwd = process.cwd(), env = process.env,
   homedir = osHomedir(), watch = true,
@@ -114,8 +129,9 @@ export async function runServe(argv, {
   }
   configNote ??= `no config file; serving ${config.backlogs[0].path}`;
 
-  if (!existsSync(join(distDir, "index.html"))) {
-    err(`error: the viewer is not built (no index.html in ${distDir}); run \`npm run build:viewer\``);
+  const missing = missingBuildPart(distDir);
+  if (missing) {
+    err(`error: the viewer is not built (${missing} in ${distDir}); run \`npm run build:viewer\``);
     return 1;
   }
 

@@ -190,7 +190,9 @@ function parseFence(line) {
 }
 const HEADING_RE = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
 const LIST_RE = /^( *)([-*+]|\d{1,9}[.)])[ \t]+(\S.*)$/;
-const TABLE_SEP_RE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+const SEP_CELL_RE = /^:?-+:?$/;
+// Split and trim first, so a long run of whitespace cannot make a regex backtrack.
+const isTableSep = (line) => splitRow(line).every((c) => SEP_CELL_RE.test(c));
 
 function splitRow(line) {
   let s = line.trim();
@@ -205,7 +207,7 @@ function splitRow(line) {
   return cells;
 }
 
-const startsTable = (lines, i) => lines[i].includes("|") && i + 1 < lines.length && lines[i + 1].includes("-") && TABLE_SEP_RE.test(lines[i + 1])
+const startsTable = (lines, i) => lines[i].includes("|") && i + 1 < lines.length && lines[i + 1].includes("-") && isTableSep(lines[i + 1])
   && splitRow(lines[i]).length === splitRow(lines[i + 1]).length;
 
 // Whether a line begins a block that may interrupt a paragraph.
@@ -226,7 +228,9 @@ function renderTable(lines, i, ctx) {
   const rows = [];
   for (; j < lines.length && lines[j].trim() && lines[j].includes("|"); j++) {
     const cells = splitRow(lines[j]);
-    rows.push(`<tr>${head.map((_, n) => cell("td", cells[n] ?? "", n)).join("")}</tr>`);
+    // Only the cells present, up to the header width: padding short rows would cost
+    // header-width work per row for input that is not there.
+    rows.push(`<tr>${cells.slice(0, head.length).map((t, n) => cell("td", t, n)).join("")}</tr>`);
   }
   if (rows.length) html += `<tbody>\n${rows.join("\n")}\n</tbody>\n`;
   return { html: `${html}</table>\n`, next: j };

@@ -325,7 +325,7 @@ custom **effort scale** for display.
 | --- | --- |
 | `specVersion` | the Trellis spec version this repo targets (§9) |
 | `idPrefix` | id prefix (e.g. `AB`) |
-| `idWidth` | zero-padded digit count |
+| `idWidth` | zero-padded digit count, 1 to 100000 |
 | `milestones` | ordered milestone names (§7.1) |
 | `priorities` | ordered priority names, highest first |
 | `effort` | canonical values, or the effort-scale object (§6.1) |
