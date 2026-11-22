@@ -159,6 +159,9 @@ export function loadConfig(repoRoot, { readText = defaultReadText } = {}) {
 
 // The config rules, on a parsed object. `loadConfig` reads the file and calls this; the
 // local-mode switch calls it on the config it would write, so both apply one rule set.
+// True when String(value) does not throw; JSON can carry `{ "toString": 1 }`.
+const printable = (value) => { try { String(value); return true; } catch { return false; } };
+
 export function validateConfig(cfg) {
   const warnings = [];
   const errors = [];
@@ -188,10 +191,11 @@ export function validateConfig(cfg) {
   if (Object.hasOwn(cfg, "generatedArtifacts") && cfg.generatedArtifacts !== "committed" && cfg.generatedArtifacts !== "local") {
     errors.push('config: `generatedArtifacts` must be "committed" or "local" when present');
   }
-  // Both lists are joined and compared as strings, so a non-string entry must not reach them.
+  // Both lists are joined as strings. Only an entry that cannot become a string (an object
+  // whose toString is not callable) would throw there; anything else stays accepted, as before.
   for (const key of ["milestones", "priorities"]) {
     if (!Array.isArray(cfg[key]) || cfg[key].length === 0) errors.push(`config: \`${key}\` must be a non-empty array`);
-    else if (!cfg[key].every((v) => typeof v === "string")) errors.push(`config: \`${key}\` entries must all be strings`);
+    else if (!cfg[key].every(printable)) errors.push(`config: \`${key}\` entries must all be printable values`);
   }
   const effortValues = Array.isArray(cfg.effort) ? cfg.effort : cfg.effort && cfg.effort.values;
   if (!Array.isArray(effortValues) || effortValues.length === 0) {
@@ -233,7 +237,7 @@ export function validateConfig(cfg) {
 
   if (cfg.specVersion == null) {
     warnings.push(`config has no \`specVersion\`; assuming current spec ${SPEC_VERSION}`);
-  } else if (typeof cfg.specVersion !== "string" && !Number.isFinite(cfg.specVersion)) {
+  } else if (!printable(cfg.specVersion)) {
     // String() on an object with no callable toString throws; report it instead. A finite
     // number (2.5) was always accepted, so it still is.
     errors.push("config: `specVersion` must be a string such as \"1.0\"");

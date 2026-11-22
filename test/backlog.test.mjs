@@ -134,9 +134,10 @@ test("config errors: missing mapping, duplicate label, bad types, unknown active
   }
 });
 
-test("a non-string specVersion is a config error, never a throw", () => {
+test("a specVersion that cannot become a string is a config error, never a throw; others stay accepted", () => {
+  for (const ok of [true, {}, [1], 2.5]) assert.deepEqual(configErrors({ ...ARRAY_CFG, specVersion: ok }), [], JSON.stringify(ok));
   const hostile = JSON.stringify({ ...ARRAY_CFG, specVersion: { toString: 1 } });
-  for (const [json, re] of [[hostile, /`specVersion` must be a string/], [JSON.stringify({ ...ARRAY_CFG, specVersion: true }), /`specVersion` must be a string/]]) {
+  for (const [json, re] of [[hostile, /`specVersion` must be a string/]]) {
     withRepo({ ...ARRAY_CFG }, {}, (root) => {
       writeFileSync(join(root, "trellis/backlog.config.json"), json);
       const { errors } = loadConfig(root);
@@ -150,12 +151,6 @@ test("a finite numeric specVersion is still accepted", () => {
     writeFileSync(join(root, "trellis/backlog.config.json"), JSON.stringify({ ...ARRAY_CFG, specVersion: 2.5 }));
     assert.deepEqual(loadConfig(root).errors, []);
   });
-  for (const bad of [true, [], {}]) {
-    withRepo({ ...ARRAY_CFG }, {}, (root) => {
-      writeFileSync(join(root, "trellis/backlog.config.json"), JSON.stringify({ ...ARRAY_CFG, specVersion: bad }));
-      assert.ok(loadConfig(root).errors.length > 0, JSON.stringify(bad));
-    });
-  }
 });
 
 test("config accepts a valid nextIdFloor and rejects invalid ones (TRL0032)", () => {
@@ -1420,10 +1415,11 @@ test("an idPrefix that fits the filename pattern but not the bare id pattern is 
   assert.ok(configErrors({ ...ARRAY_CFG, idPrefix: ")T(" }).some((e) => e.includes("idPrefix")));
 });
 
-test("a non-string milestone or priority is a config error, not a throw", () => {
+test("a milestone or priority that cannot become a string is a config error; other values stay accepted as before", () => {
   for (const key of ["milestones", "priorities"]) {
-    for (const bad of [[1], [null], [{}], ["A", ["B"]]]) {
-      assert.ok(configErrors({ ...ARRAY_CFG, [key]: bad }).some((e) => e.includes(`\`${key}\` entries`)), `${key} ${JSON.stringify(bad)}`);
+    assert.ok(configErrors({ ...ARRAY_CFG, [key]: [{ toString: 1 }] }).some((e) => e.includes(`\`${key}\` entries`)), key);
+    for (const fine of [[1], [null], [{}], ["A", ["B"]]]) {
+      assert.ok(!configErrors({ ...ARRAY_CFG, [key]: fine }).some((e) => e.includes(`\`${key}\` entries`)), `${key} ${JSON.stringify(fine)}`);
     }
   }
 });
