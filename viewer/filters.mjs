@@ -1,3 +1,5 @@
+import { encodeSegment } from "../src/viewer/segment.mjs";
+
 // Pure list logic: filters in the query string, row building, sort and search order.
 
 export const STATUSES = ["active", "completed", "removed"];
@@ -80,7 +82,7 @@ export function listPath(filters) {
 }
 
 export function taskPath(backlogId, id, filters) {
-  return `/b/${encodeURIComponent(backlogId)}/task/${encodeURIComponent(id)}${serializeQuery(filters)}`;
+  return `/b/${encodeURIComponent(backlogId)}/task/${encodeSegment(id)}${serializeQuery(filters)}`;
 }
 
 // The in-app path for a task link in a rendered body (`/b/<id>/task/<ID>`), carrying the
@@ -104,6 +106,10 @@ export function carryFiltersInLinks(anchors, origin, filters) {
 // The task's own validation problems as text. They come from the shared validator, so a label
 // retired from the config stays quiet on a closed task.
 export const taskProblems = (record) => (Array.isArray(record.validationErrors) ? record.validationErrors.map(toText).filter(Boolean) : []);
+
+// The heading over the problems: only a task the list flags (needsAttention) says "Needs
+// attention"; a legacy closed task with an invalid field just lists its validation errors.
+export const taskProblemsHeading = (record) => (record.needsAttention ? "Needs attention" : "Validation errors");
 
 // The task view's text fields as [label, text] pairs, empty ones left out. The authored id is
 // not here (the heading shows the record id), and effort has its own rendering.

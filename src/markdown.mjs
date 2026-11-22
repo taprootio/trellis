@@ -99,6 +99,8 @@ function findClose(text, from, delim) {
       const run = /^`+/.exec(text.slice(i))[0];
       const end = text.indexOf(run, i + run.length);
       if (end !== -1) { i = end + run.length - 1; continue; }
+      // No closer for this run: skip the whole run, or each backtick would rescan the text.
+      i += run.length - 1; continue;
     }
     if (text.startsWith(delim, i) && i > from && !/\s/.test(text[i - 1])) {
       // `*` must not be the start of a longer run when closing a single one.

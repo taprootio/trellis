@@ -2,6 +2,7 @@
 // dropped in one place: each kind of request has a counter, and a response
 // applies only while its number is still the latest.
 import { defaultFilters, parseLocation } from "./filters.mjs";
+import { encodeSegment } from "../src/viewer/segment.mjs";
 
 export const SEARCH_DEBOUNCE_MS = 250;
 
@@ -83,7 +84,7 @@ export function createStore({
   function loadTask() {
     const open = state.task;
     if (!open) return Promise.resolve();
-    const url = `/api/backlogs/${encodeURIComponent(open.backlog)}/tasks/${encodeURIComponent(open.id)}`;
+    const url = `/api/backlogs/${encodeURIComponent(open.backlog)}/tasks/${encodeSegment(open.id)}`;
     return request("task", url, (res) => {
       if (res.status === 200) set({ task: { ...open, status: "ready", record: res.body } });
       else if (res.status === 404) set({ task: { ...open, status: "gone", record: null } });

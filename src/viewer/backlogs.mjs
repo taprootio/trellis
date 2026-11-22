@@ -6,6 +6,7 @@ import { buildBacklogJson, loadConfig, paths, readBacklog, resolveEffort } from 
 import { preview } from "../ledger.mjs";
 import { renderMarkdown } from "../markdown.mjs";
 import { createReader } from "./reader.mjs";
+import { encodeSegment } from "./segment.mjs";
 import { LayoutError, resolveMainWorktree } from "./worktree.mjs";
 
 const STATUS_ORDER = ["removed", "completed", "active"]; // most closed first
@@ -233,7 +234,7 @@ export function taskDetailOf(b, id) {
     try { path = decodeURIComponent(path); } catch { return null; }
     if (!path || path.startsWith("/")) return null;
     const known = b.taskPaths.get(normalize(resolve(t.dir, path)));
-    return known ? `/b/${encodeURIComponent(b.id)}/task/${encodeURIComponent(known)}` : null;
+    return known ? `/b/${encodeURIComponent(b.id)}/task/${encodeSegment(known)}` : null;
   };
   return { ...t.record, frontMatter: t.frontMatter, bodyHtml: renderMarkdown(t.body, { resolveRepoPath }) };
 }

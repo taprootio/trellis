@@ -4,8 +4,8 @@
 // opened without blocking and its descriptor must be a regular file, so a FIFO can never hang
 // the server. Parsed items are cached by path, size and mtime.
 
-import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { sep } from "node:path";
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { join, parse, resolve, sep } from "node:path";
 import { parseFrontMatter, splitFrontMatter } from "../backlog.mjs";
 
 const OPEN_FLAGS = fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK || 0);
@@ -28,6 +28,7 @@ export function createReader(root, hooks = {}) {
   let listed = new Map(); // dir -> { names, real, dev, ino }, for the current rebuild
   let forced = new Map(); // dir -> reason, skipped for the rest of the rebuild
   let targets = new Set(); // resolved symlink targets accepted in the current rebuild
+  let hops = new Map(); // directory -> names of the symlinks it holds on the way to an accepted target
   const lastTargets = new Map(); // symlink path -> last accepted target, kept across rebuilds
 
   // A symlink whose target went missing keeps its last target watched, so restoring the target
@@ -39,11 +40,38 @@ export function createReader(root, hooks = {}) {
     const last = lastTargets.get(path);
     if (!last) return;
     try { lstatSync(path); } catch { lastTargets.delete(path); return; }
-    if (within(root, last)) targets.add(last);
+    if (within(root, last)) { targets.add(last); noteHops(path); }
+  };
+
+  // Walks `path` one component at a time and records the directory holding each symlink it
+  // meets, so retargeting a link in the middle of a chain (not only the last one) is noticed.
+  const noteHops = (path) => {
+    let pending = path;
+    for (let guard = 0; guard < 40; guard++) {
+      const { root: top } = parse(pending);
+      const parts = pending.slice(top.length).split(sep).filter(Boolean);
+      let cur = top;
+      let again = null;
+      for (let i = 0; i < parts.length && !again; i++) {
+        const next = join(cur, parts[i]);
+        let link = null;
+        try { if (lstatSync(next).isSymbolicLink()) link = readlinkSync(next); } catch { return; }
+        if (link === null) { cur = next; continue; }
+        if (within(root, cur)) hops.set(cur, (hops.get(cur) ?? new Set()).add(parts[i]));
+        again = resolve(cur, link, ...parts.slice(i + 1));
+      }
+      if (!again) return;
+      pending = again;
+    }
   };
 
   const realOf = (path) => {
-    try { const real = realpathSync.native(path); trackTarget(path, real); return { real }; } catch (e) {
+    try {
+      const real = realpathSync.native(path);
+      trackTarget(path, real);
+      if (real !== path) noteHops(path);
+      return { real };
+    } catch (e) {
       if (!GONE.has(e.code)) return { skip: e.code || e.message };
       keepMissingTarget(path);
       return { absent: true };
@@ -81,7 +109,7 @@ export function createReader(root, hooks = {}) {
     root,
     // A new rebuild: forget what the last one read and listed.
     begin() {
-      lastRead = new Map(); listed = new Map(); forced = new Map(); targets = new Set();
+      lastRead = new Map(); listed = new Map(); forced = new Map(); targets = new Set(); hops = new Map();
     },
     // For the config and roster: text, `null` when absent, or { skip }.
     readText(path) {
@@ -168,6 +196,10 @@ export function createReader(root, hooks = {}) {
     // Symlink targets inside the worktree that this rebuild accepted.
     symlinkTargets() {
       return [...targets];
+    },
+    // [directory, link names] pairs inside the worktree for each symlink on the way to an accepted target.
+    symlinkHops() {
+      return [...hops].map(([dir, names]) => [dir, [...names]]);
     },
     // Drops every cached item whose own path or resolved target is `path` or beneath it.
     invalidate(path) {

@@ -17,7 +17,7 @@ import "@taprootio/espalier/button";
 import { createStore, connectEvents, backlogViews, attentionItems } from "./state.mjs";
 import {
   STATUSES, serializeQuery, listPath, taskPath, visibleRows, milestoneGroups,
-  priorityOptions, ownerOptions, pickerEpoch, normalizeOwner, toText, bodyLinkPath, taskFields, carryFiltersInLinks, taskProblems,
+  priorityOptions, ownerOptions, pickerEpoch, normalizeOwner, toText, bodyLinkPath, taskFields, carryFiltersInLinks, taskProblems, taskProblemsHeading,
 } from "./filters.mjs";
 import { effortView } from "./effort.mjs";
 
@@ -212,7 +212,7 @@ class TrellisViewer extends LitElement {
         ${r.effortDisplay && r.effortDisplay.text ? html`<dt>Effort</dt><dd>${this.renderEffort(r.effortDisplay)}</dd>` : nothing}
         ${(r.depends_on ?? []).length ? html`<dt>Depends on</dt><dd>${r.depends_on.join(", ")}</dd>` : nothing}
       </dl>
-      ${taskProblems(r).length ? html`<esp-info intent="warning"><strong>Needs attention</strong>
+      ${taskProblems(r).length ? html`<esp-info intent="warning"><strong>${taskProblemsHeading(r)}</strong>
         <ul>${taskProblems(r).map((e) => html`<li>${e}</li>`)}</ul></esp-info>` : nothing}
       <div class="body" @click=${(e) => this.onBodyClick(e)}>${unsafeHTML(r.bodyHtml ?? "")}</div>`;
   }

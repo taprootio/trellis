@@ -198,6 +198,35 @@ test("a subtree holding a symlinked task's target, replaced outside the task fol
   } finally { repo.cleanup(); }
 });
 
+test("retargeting a middle link of a two-hop chain is reported, though its folder is no ancestor of the final target", posixOnly, async () => {
+  const repo = makeRepo();
+  try {
+    repo.add("active", "DEMO0001", { title: "AAAAA" });
+    const link = repo.itemPath("active", "DEMO0001");
+    const original = readFileSync(link, "utf8");
+    const first = join(repo.root, "docs", "pool", "first.md");
+    const second = join(repo.root, "docs", "pool", "second.md");
+    const middle = join(repo.root, "hop", "middle.md");
+    rmSync(link);
+    mkdirSync(join(repo.root, "docs", "pool"), { recursive: true });
+    mkdirSync(join(repo.root, "hop"));
+    writeFileSync(first, original);
+    writeFileSync(second, original.replace("AAAAA", "ZZZZZ"));
+    symlinkSync(first, middle);
+    symlinkSync(middle, link);
+    const b = createBacklog({ id: "demo", name: "Demo", path: repo.root });
+    b.build();
+    assert.ok(rel(repo, planOf(b)).includes("hop"), "the middle link's folder is planned");
+    await live({ demo: repo }, async (ctx) => {
+      assert.equal(titles((await getJson(ctx.port, "/api/backlogs/demo")).json), "AAAAA");
+      await ctx.events.next("demo");
+      rmSync(middle);
+      symlinkSync(second, middle);
+      await until(ctx, "demo", (j) => titles(j) === "ZZZZZ");
+    });
+  } finally { repo.cleanup(); }
+});
+
 test("a symlinked task whose target is deleted, then restored, is picked up again", { ...posixOnly, timeout: 15000 }, async () => {
   const repo = makeRepo();
   try {

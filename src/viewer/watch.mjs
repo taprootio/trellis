@@ -90,6 +90,9 @@ function planOf(backlog) {
       if (d === root) break;
     }
   }
+  // Each directory holding a link on the way to a target: retargeting a middle link changes
+  // that directory (for those names), which need not be an ancestor of the final target.
+  for (const [hop, names] of backlog.reader.symlinkHops()) add(nearestExisting(hop, root), names);
   return { wanted, generated };
 }
 

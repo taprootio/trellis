@@ -239,8 +239,9 @@ export function validateConfig(cfg) {
 
   if (cfg.specVersion == null) {
     warnings.push(`config has no \`specVersion\`; assuming current spec ${SPEC_VERSION}`);
-  } else if (typeof cfg.specVersion !== "string") {
-    // String() on an object with no callable toString throws; report it instead.
+  } else if (typeof cfg.specVersion !== "string" && !Number.isFinite(cfg.specVersion)) {
+    // String() on an object with no callable toString throws; report it instead. A finite
+    // number (2.5) was always accepted, so it still is.
     errors.push("config: `specVersion` must be a string such as \"1.0\"");
   } else if (String(cfg.specVersion).split(".")[0] !== SPEC_VERSION.split(".")[0]) {
     warnings.push(`config \`specVersion\` ${cfg.specVersion} differs in major version from this tool's spec ${SPEC_VERSION}`);

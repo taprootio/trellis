@@ -66,7 +66,7 @@ const CONTENT_TYPES = {
 const contentTypeOf = (name) => CONTENT_TYPES[extname(name).toLowerCase()] || "application/octet-stream";
 
 // A bundler's hashed name (`app-3f9a2c1d.js`) never changes content, so it caches for a year.
-export const cacheControlFor = (name) => (/-[A-Za-z0-9_]{8,}\.[a-z0-9]+$/i.test(name) ? "public, max-age=31536000, immutable" : "no-cache");
+export const cacheControlFor = (name) => (/-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/i.test(name) ? "public, max-age=31536000, immutable" : "no-cache");
 
 const BASE_HEADERS = { "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer" };
 
@@ -77,8 +77,12 @@ function send(res, status, body, headers = {}) {
 const sendJson = (res, status, value) => send(res, status, JSON.stringify(value), { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
 const notFound = (res) => sendJson(res, 404, { error: "not found" });
 
+const isDot = (s) => s === "." || s === "..";
+
 // Splits the raw request target into decoded segments. Nothing is normalized, so `..` stays
-// visible and is refused. Returns null for a path that cannot name a route. A backslash passes
+// visible. Returns null for a path that cannot name a route. A dot segment passes here because
+// a task id can be `.` or `..` (a scan prefix may match them); the file routes refuse it with
+// `hasDot`. A backslash passes
 // here because a task id is only a map key on the shell and detail routes (a scan prefix may
 // match a filename holding one); the routes that build file paths refuse it with `hasBackslash`.
 function parseTarget(raw) {
@@ -92,7 +96,7 @@ function parseTarget(raw) {
   for (const part of parts) {
     let s;
     try { s = decodeURIComponent(part); } catch { return null; }
-    if (!s || s === "." || s === ".." || /[/\0]/.test(s)) return null;
+    if (!s || /[/\0]/.test(s)) return null;
     segs.push(s);
   }
   return { segs, query };
@@ -182,8 +186,9 @@ export async function startViewer({
     const { segs, query } = target;
     const [a, b, c, d, e] = segs;
     const hasBackslash = segs.some((s) => s.includes("\\"));
+    const hasDot = segs.some(isDot);
 
-    if (segs.length === 0 || (a === "b" && (segs.length === 2 || (segs.length === 4 && c === "task")))) return shell(res, req);
+    if (segs.length === 0 || (a === "b" && ((segs.length === 2 && !isDot(b)) || (segs.length === 4 && c === "task" && !isDot(b))))) return shell(res, req);
     if (a === "api") {
       if (b === "backlogs" && segs.length === 2) return sendJson(res, 200, backlogs.map((x) => summaryOf(built(x))));
       if (b === "backlogs" && (segs.length === 3 || (segs.length === 5 && d === "tasks"))) {
@@ -206,7 +211,7 @@ export async function startViewer({
       return undefined;
     }
     if (a === "assets" && segs.length >= 3) {
-      if (hasBackslash) return notFound(res);
+      if (hasBackslash || hasDot) return notFound(res);
       const backlog = byId.get(b);
       const out = backlog && built(backlog);
       const rest = segs.slice(2);
@@ -220,7 +225,7 @@ export async function startViewer({
       });
     }
     if (a === "app" && segs.length >= 2) {
-      if (hasBackslash) return notFound(res);
+      if (hasBackslash || hasDot) return notFound(res);
       if (!builtFiles().has(segs.slice(1).join("/"))) return notFound(res);
       return serveFile(res, req, join(distDir, ...segs.slice(1)), distDir, { name: segs[segs.length - 1] });
     }

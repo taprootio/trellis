@@ -135,11 +135,24 @@ test("config errors: missing mapping, duplicate label, bad types, unknown active
 
 test("a non-string specVersion is a config error, never a throw", () => {
   const hostile = JSON.stringify({ ...ARRAY_CFG, specVersion: { toString: 1 } });
-  for (const [json, re] of [[hostile, /`specVersion` must be a string/], [JSON.stringify({ ...ARRAY_CFG, specVersion: 1 }), /`specVersion` must be a string/]]) {
+  for (const [json, re] of [[hostile, /`specVersion` must be a string/], [JSON.stringify({ ...ARRAY_CFG, specVersion: true }), /`specVersion` must be a string/]]) {
     withRepo({ ...ARRAY_CFG }, {}, (root) => {
       writeFileSync(join(root, "trellis/backlog.config.json"), json);
       const { errors } = loadConfig(root);
       assert.ok(errors.some((e) => re.test(e)), JSON.stringify(errors));
+    });
+  }
+});
+
+test("a finite numeric specVersion is still accepted", () => {
+  withRepo({ ...ARRAY_CFG }, {}, (root) => {
+    writeFileSync(join(root, "trellis/backlog.config.json"), JSON.stringify({ ...ARRAY_CFG, specVersion: 2.5 }));
+    assert.deepEqual(loadConfig(root).errors, []);
+  });
+  for (const bad of [true, [], {}]) {
+    withRepo({ ...ARRAY_CFG }, {}, (root) => {
+      writeFileSync(join(root, "trellis/backlog.config.json"), JSON.stringify({ ...ARRAY_CFG, specVersion: bad }));
+      assert.ok(loadConfig(root).errors.length > 0, JSON.stringify(bad));
     });
   }
 });

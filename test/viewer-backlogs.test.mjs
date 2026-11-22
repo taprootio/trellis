@@ -251,6 +251,7 @@ const HOSTILE_CONFIGS = [
   ["tasksDir with a NUL character", { tasksDir: "a\u0000b" }, "error"],
   ["tasksDir with a null toString", { tasksDir: { toString: null } }, "error"],
   ["tasksDir that is a lone surrogate", { tasksDir: "\ud800" }, "any"],
+  ["a finite numeric specVersion", { specVersion: 2.5 }, "ok"],
   ["specVersion with a null toString", { specVersion: { toString: null } }, "error"],
   ["legacy with null-toString members", { legacy: { through: { toString: null }, closedBefore: { toString: null } } }, "error"],
   ["ledger ref that is a lone surrogate", { idAllocation: "ledger", idLedgerRef: "refs/trellis/\ud800" }, "any"],

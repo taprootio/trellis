@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { effortView } from "../viewer/effort.mjs";
 import {
   defaultFilters, parseQuery, serializeQuery, parseLocation, normalizeOwner,
-  visibleRows, filterRows, buildRows, taskPath, listPath, bodyLinkPath, taskFields, carryFiltersInLinks, taskProblems, pickerEpoch,
+  visibleRows, filterRows, buildRows, taskPath, listPath, bodyLinkPath, taskFields, carryFiltersInLinks, taskProblems, taskProblemsHeading, pickerEpoch,
 } from "../viewer/filters.mjs";
 import { createStore, connectEvents, backlogViews, attentionItems } from "../viewer/state.mjs";
 
@@ -293,6 +293,19 @@ test("the task view's problems are the record's validation errors as text", () =
   assert.deepEqual(taskProblems({ validationErrors: ["milestone must be one of: Alpha", ""] }), ["milestone must be one of: Alpha"]);
   assert.deepEqual(taskProblems({ validationErrors: [] }), []);
   assert.deepEqual(taskProblems({}), []);
+});
+
+test("the task view says Needs attention only for a flagged task (a legacy closed task with a bad owner does not)", () => {
+  assert.equal(taskProblemsHeading({ needsAttention: true, validationErrors: ["milestone must be one of: Alpha"] }), "Needs attention");
+  assert.equal(taskProblemsHeading({ status: "completed", needsAttention: false, validationErrors: ["owner must be a handle"] }), "Validation errors");
+  assert.equal(taskProblemsHeading({ validationErrors: ["x"] }), "Validation errors");
+});
+
+test("a task id of . or .. is encoded so a link or API call keeps it as one segment", () => {
+  assert.equal(taskPath("demo", "..", defaultFilters()), "/b/demo/task/%2E%2E");
+  assert.equal(taskPath("demo", ".", defaultFilters()), "/b/demo/task/%2E");
+  assert.equal(taskPath("demo", "A B", defaultFilters()), "/b/demo/task/A%20B");
+  assert.deepEqual(parseLocation("/b/demo/task/%2E%2E").task, { backlog: "demo", id: ".." });
 });
 
 test("the task view lists the standard text fields, hiding empty ones and the authored id", () => {
