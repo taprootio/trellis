@@ -177,7 +177,7 @@ export function validateConfig(cfg) {
   // Optional (TRL0032): floors the *organic* next id (max(floor, max+1)) so freshly
   // created tasks begin above an imported band; must fit idWidth.
   if (cfg.nextIdFloor != null) {
-    if (!Number.isSafeInteger(cfg.nextIdFloor) || cfg.nextIdFloor < 0) {
+    if (!Number.isInteger(cfg.nextIdFloor) || cfg.nextIdFloor < 0) {
       errors.push("config: `nextIdFloor` must be a non-negative integer when present");
     } else if (Number.isInteger(cfg.idWidth) && cfg.idWidth >= 1 && cfg.idWidth <= MAX_ID_WIDTH && cfg.nextIdFloor >= 10 ** cfg.idWidth) {
       errors.push(`config: \`nextIdFloor\` (${cfg.nextIdFloor}) must be < 10^idWidth (${10 ** cfg.idWidth}) to fit ${cfg.idWidth} digits`);
@@ -528,7 +528,8 @@ function unquote(s) {
 // there is no closed block) and `body` is what follows the closing fence, minus its newline.
 export function splitFrontMatter(text) {
   const norm = text.replace(/\r\n/g, "\n");
-  const m = norm.match(/^---\n([\s\S]*?)\n---/);
+  // The closing fence is `---` alone on its line (trailing blanks allowed), not a prefix.
+  const m = norm.match(/^---\n([\s\S]*?)\n---[ \t]*(?=\n|$)/);
   if (!m) return { block: null, body: norm };
   return { block: m[1], body: norm.slice(m[0].length).replace(/^\n/, "") };
 }
@@ -782,7 +783,8 @@ export function readBacklog(repoRoot, cfg, { readItem = defaultReadItem, listDir
   // config-class and surface here so `--check`/validate fail on a malformed team.json
   // (SPEC §7.2). An absent roster is empty — owner/collaborators stay optional.
   const { roster, errors: rosterErrors } = loadRoster(repoRoot, { readText });
-  errors.push(...rosterErrors);
+  // A loop, not a spread: a huge roster can yield more diagnostics than a call accepts.
+  for (const e of rosterErrors) errors.push(e);
 
   // One listing per status directory, shared by the id scan and the item read, so a directory
   // that vanishes between them cannot add ids without items.
@@ -867,7 +869,8 @@ export function nextId(ids, cfg) {
   // `nextIdFloor` (TRL0032) reserves the low range for an imported band: the next
   // organically-created id is max(max+1, floor). Absent floor ⇒ the historical max+1.
   const floor = Number.isInteger(cfg.nextIdFloor) && cfg.nextIdFloor > 0 ? cfg.nextIdFloor : 0;
-  return cfg.idPrefix + String(Math.max(max + 1, floor)).padStart(cfg.idWidth, "0");
+  // BigInt prints a huge floor in full digits; String() would switch to `1e+21`.
+  return cfg.idPrefix + BigInt(Math.max(max + 1, floor)).toString().padStart(cfg.idWidth, "0");
 }
 
 // ------------------------------------------------------------- rendering

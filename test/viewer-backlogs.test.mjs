@@ -248,7 +248,7 @@ const HOSTILE_CONFIGS = [
   ["id prefix that is a lone surrogate", { idPrefix: "\ud800" }, "any"],
   ["id prefix with a numeric backreference", { idPrefix: "(a)\\1" }, "any"],
   ["id width beyond the limit", { idWidth: 1e9 }, "error"],
-  ["next id floor beyond the safe integers", { nextIdFloor: 1e21, idWidth: 25 }, "error"],
+  ["next id floor beyond the safe integers", { nextIdFloor: 1e21, idWidth: 25 }, "ok"],
   ["tasksDir with a NUL character", { tasksDir: "a\u0000b" }, "error"],
   ["tasksDir with a null toString", { tasksDir: { toString: null } }, "error"],
   ["tasksDir that is a lone surrogate", { tasksDir: "\ud800" }, "any"],

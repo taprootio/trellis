@@ -15,6 +15,7 @@ import {
   loadRoster,
   findActiveMember,
   readBacklog,
+  nextId,
   resolveEffort,
   generateArtifacts,
   buildBacklogJson,
@@ -1434,5 +1435,36 @@ test("a task with ~200k malformed front-matter lines reports its diagnostics wit
     const data = readBacklog(root, cfg);
     assert.ok(data.errors.filter((e) => e.startsWith("active/DEMO0002.md: cannot parse")).length >= 200_000);
     assert.equal(data.active.some((i) => i.id === "DEMO0001"), true, "the other task still loads");
+  });
+});
+
+test("a team.json with a huge number of invalid members is reported, not thrown", () => {
+  withRepo(ARRAY_CFG, {}, (root) => {
+    const { cfg } = loadConfig(root);
+    const members = new Array(200_000).fill(1);
+    const readText = (p) => (p.endsWith("team.json") ? JSON.stringify({ members }) : readFileSync(p, "utf8"));
+    const data = readBacklog(root, cfg, { readText });
+    assert.ok(data.errors.length >= 200_000);
+  });
+});
+
+test("front matter closes only on a standalone fence", () => {
+  assert.equal(splitFrontMatter("---\nid: A\n---unfinished\nBody\n").block, null);
+  assert.equal(splitFrontMatter("---\nid: A\n--- \t\nBody\n").block, "id: A");
+  const errors = [];
+  parseFrontMatter("---\nid: A\n---unfinished\n", "x.md", errors);
+  assert.ok(errors.some((e) => /unterminated/.test(e)));
+});
+
+test("nextIdFloor accepts any integer that fits idWidth, even beyond the safe range", () => {
+  withRepo({ ...ARRAY_CFG, idWidth: 17, nextIdFloor: 1e16 }, {}, (root) => {
+    const { cfg, errors } = loadConfig(root);
+    assert.deepEqual(errors, []);
+    assert.equal(nextId([], cfg), "DEMO10000000000000000");
+  });
+  withRepo({ ...ARRAY_CFG, idWidth: 25, nextIdFloor: 1e21 }, {}, (root) => {
+    const { cfg, errors } = loadConfig(root);
+    assert.deepEqual(errors, []);
+    assert.equal(nextId([], cfg), "DEMO000" + "1" + "0".repeat(21));
   });
 });

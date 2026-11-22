@@ -1,7 +1,7 @@
 // Viewer config (TRL0005): where the file lives, and the strict rules for its keys.
 // A typo is never ignored: an unknown key, a bad type or a duplicate id fails startup.
 
-import { closeSync, constants as fsConstants, fstatSync, openSync, readFileSync, statSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { homedir as osHomedir } from "node:os";
 import { isIP } from "node:net";
@@ -43,7 +43,8 @@ function isFile(path) {
 }
 
 function exists(path) {
-  try { statSync(path); return true; } catch (e) { return e.code !== "ENOENT" && e.code !== "ENOTDIR"; }
+  // lstat: a dangling symlink exists, and must reach the loader's error rather than be skipped.
+  try { lstatSync(path); return true; } catch (e) { return e.code !== "ENOENT" && e.code !== "ENOTDIR"; }
 }
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);

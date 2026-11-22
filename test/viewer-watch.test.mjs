@@ -593,3 +593,55 @@ test("the sweep reports an edit whose change event was missed", async () => {
     watchers.close();
   } finally { repo.cleanup(); }
 });
+
+// Runs a started fake-watch backlog for `ms`, after `act`, and returns how many refreshes fired.
+async function refreshesAfter(repo, act, { before = 0, ms = 120 } = {}) {
+  const b = createBacklog({ id: "demo", name: "Demo", path: repo.root });
+  b.build();
+  const fake = fakeWatch();
+  let count = 0;
+  const watchers = createWatchers([b], () => { count++; }, { watch: fake.watch, debounceMs: 5, sweepMs: 20 });
+  watchers.start();
+  const keepAlive = setTimeout(() => {}, 10_000);
+  try {
+    if (before) await pause(before);
+    act(fake, b);
+    await pause(ms);
+  } finally { clearTimeout(keepAlive); watchers.close(); }
+  return count;
+}
+
+test("the sweep reports an edit made before its first pass, when the event was dropped", async () => {
+  const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001", fm: { title: "Before" } }] });
+  try {
+    const n = await refreshesAfter(repo, () => {
+      const file = repo.itemPath("active", "DEMO0001");
+      writeFileSync(file, readFileSync(file, "utf8").replace("Before", "After, longer"));
+    });
+    assert.equal(n, 1);
+  } finally { repo.cleanup(); }
+});
+
+test("the sweep ignores generated files and names a handle does not accept", async () => {
+  const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001" }] });
+  try {
+    const n = await refreshesAfter(repo, () => {
+      writeFileSync(join(repo.root, "trellis", "backlog.json"), "{}");
+      writeFileSync(join(repo.root, "unrelated.txt"), "x"); // the worktree root accepts only the tasks root
+    }, { before: 40 });
+    assert.equal(n, 0);
+  } finally { repo.cleanup(); }
+});
+
+test("a change the native callback reported is not reported again by the sweep", async () => {
+  const repo = makeRepo({ items: [{ status: "active", id: "DEMO0001", fm: { title: "Before" } }] });
+  try {
+    const n = await refreshesAfter(repo, (fake) => {
+      const file = repo.itemPath("active", "DEMO0001");
+      writeFileSync(file, readFileSync(file, "utf8").replace("Before", "After, longer"));
+      const call = fake.calls.find((c) => c.dir === repo.folder("active"));
+      call.cb("change", "DEMO0001.md");
+    }, { before: 40, ms: 200 });
+    assert.equal(n, 1);
+  } finally { repo.cleanup(); }
+});

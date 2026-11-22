@@ -13,23 +13,37 @@ import { isInside } from "./reader.mjs";
 export const DEBOUNCE_MS = 250;
 // fs.watch can drop events under load (seen on macOS): a new or replaced directory goes
 // unwatched, or an edit is never reported. A sweep re-arms new or replaced directories and
-// compares each watched directory's entries by size and mtime, refreshing once when anything
-// changed. It stats entries and reads no file contents.
+// compares each watched directory's accepted entries by size and mtime, refreshing once when
+// anything changed. It stats entries and reads no file contents.
 export const SWEEP_MS = 2000;
 
-// Entry name, size and mtime for each watched directory, as one comparable string.
-function signatureOf(dirs) {
-  const parts = [];
-  for (const dir of [...dirs].sort()) {
+// Size, mtime and inode of each entry the native callback would accept, keyed by path. A
+// directory that cannot be read is keyed by its own path, so its loss is a change too.
+function snapshotOf(s, isGenerated) {
+  const out = new Map();
+  for (const [dir, handle] of s.handles) {
     let names;
-    try { names = readdirSync(dir).sort(); } catch { parts.push(`${dir}\0-`); continue; }
+    try { names = readdirSync(dir); } catch { out.set(dir, "-"); continue; }
     for (const name of names) {
+      if (handle.accept && !handle.accept.has(name)) continue;
+      const path = join(dir, name);
+      if (isGenerated(s.generated, path)) continue;
       let st = null;
-      try { st = statSync(join(dir, name)); } catch { /* vanished between list and stat */ }
-      parts.push(`${dir}\0${name}\0${st ? `${st.size}:${st.mtimeMs}:${st.ino}` : "-"}`);
+      try { st = statSync(path); } catch { /* vanished between list and stat */ }
+      // A directory's size and mtime move when a file inside it is added; its own handle
+      // reports that, so here only its identity counts (a replaced directory has a new inode).
+      out.set(path, !st ? "-" : st.isDirectory() ? `d:${st.ino}` : `${st.size}:${st.mtimeMs}:${st.ino}`);
     }
   }
-  return parts.join("\n");
+  return out;
+}
+
+// Paths whose entry differs between two snapshots (added, removed or modified).
+function changedPaths(before, after) {
+  const out = [];
+  for (const [k, v] of after) if (before.get(k) !== v) out.push(k);
+  for (const k of before.keys()) if (!after.has(k)) out.push(k);
+  return out;
 }
 
 const realpath = (p) => { try { return realpathSync.native(p); } catch { return null; } };
@@ -181,6 +195,8 @@ export function createWatchers(backlogs, onChange, { debounceMs = DEBOUNCE_MS, s
     s.timer = setTimeout(() => {
       s.timer = null;
       reconcile(backlog);
+      // This refresh covers every change so far; the sweep must not report them again.
+      s.signature = snapshotOf(s, isGenerated);
       if (!closed) onChange(backlog.id);
     }, debounceMs);
     s.timer.unref?.();
@@ -188,17 +204,23 @@ export function createWatchers(backlogs, onChange, { debounceMs = DEBOUNCE_MS, s
 
   return {
     start() {
-      for (const b of backlogs) reconcile(b, true);
+      for (const b of backlogs) {
+        reconcile(b, true);
+        // An edit made before the first sweep, with its event dropped, is still a change.
+        const s = state.get(b.id);
+        if (s) s.signature = snapshotOf(s, isGenerated);
+      }
       if (sweepMs > 0 && !sweep) {
         sweep = setInterval(() => {
           for (const b of backlogs) {
             reconcile(b);
             const s = state.get(b.id);
             if (closed || !s) continue;
-            const sig = signatureOf(s.handles.keys());
-            if (s.signature !== undefined && sig !== s.signature) {
-              // Something changed that no event reported: drop the cache and refresh.
-              for (const dir of s.handles.keys()) b.reader.invalidate(dir);
+            const sig = snapshotOf(s, isGenerated);
+            const changed = s.signature ? changedPaths(s.signature, sig) : [];
+            if (changed.length) {
+              // Something changed that no event reported: drop just those entries and refresh.
+              for (const path of changed) b.reader.invalidate(path);
               schedule(b, s);
             }
             s.signature = sig;

@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, parse, resolve } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -29,6 +29,21 @@ test("a lookup candidate that exists but is not a file is a startup error, not a
     mkdirSync(join(xdg, "trellis", "viewer.json"), { recursive: true });
     const found = findConfigFile({ cwd: dir, env: { XDG_CONFIG_HOME: xdg }, homedir: home });
     assert.equal(found, join(xdg, "trellis", "viewer.json"), "the directory is chosen, not skipped");
+    assert.throws(() => loadViewerConfig(found, { homedir: home }), ViewerConfigError);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a dangling symlink at a lookup candidate is a startup error, not a fallback", { skip: process.platform === "win32" }, () => {
+  const dir = tmp("cfg-dangling");
+  try {
+    const home = join(dir, "home");
+    const xdg = join(dir, "xdg");
+    mkdirSync(join(home, ".config", "trellis"), { recursive: true });
+    writeFileSync(join(home, ".config", "trellis", "viewer.json"), "{}");
+    mkdirSync(join(xdg, "trellis"), { recursive: true });
+    symlinkSync(join(dir, "nowhere.json"), join(xdg, "trellis", "viewer.json"));
+    const found = findConfigFile({ cwd: dir, env: { XDG_CONFIG_HOME: xdg }, homedir: home });
+    assert.equal(found, join(xdg, "trellis", "viewer.json"));
     assert.throws(() => loadViewerConfig(found, { homedir: home }), ViewerConfigError);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
