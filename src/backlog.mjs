@@ -157,11 +157,11 @@ export function loadConfig(repoRoot, { readText = defaultReadText } = {}) {
   return validateConfig(cfg);
 }
 
-// The config rules, on a parsed object. `loadConfig` reads the file and calls this; the
-// local-mode switch calls it on the config it would write, so both apply one rule set.
 // True when String(value) does not throw; JSON can carry `{ "toString": 1 }`.
 const printable = (value) => { try { String(value); return true; } catch { return false; } };
 
+// The config rules, on a parsed object. `loadConfig` reads the file and calls this; the
+// local-mode switch calls it on the config it would write, so both apply one rule set.
 export function validateConfig(cfg) {
   const warnings = [];
   const errors = [];
