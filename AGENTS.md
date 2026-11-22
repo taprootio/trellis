@@ -87,8 +87,9 @@ is the task branch's starting commit, or for a PR-time re-review after a
 merge or rebase, the freshly fetched PR base commit. A commit
 that only updates a task's review record needs no further review round.
 `npm run check:agent` is one of the `gates`; contributor tooling needs
-Node 22 or later (good-agent's floor), while the published package still
-supports Node 18.
+Node 22.12.0 or later (the stricter of good-agent's floor and the viewer
+build's rolldown floor), while the published package still supports
+Node 18.
 
 Releases: merging a `package.json` `version` change to `main` publishes
 (`.github/workflows/release.yml`), and the GitHub release uses generated

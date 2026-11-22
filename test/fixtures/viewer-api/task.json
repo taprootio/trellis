@@ -1,0 +1,110 @@
+{
+  "variants": {
+    "active-with-body": {
+      "description": "One task's record plus its front matter (raw authored values, free-form) and bodyHtml.",
+      "optional": [
+        "dependsOnMissing",
+        "effortLabel",
+        "effortEmoji",
+        "effortImage",
+        "completed_on",
+        "removed_on",
+        "removed_reason"
+      ],
+      "nullable": [
+        "effortDisplay.emoji",
+        "effortDisplay.imageUrl"
+      ],
+      "freeForm": [
+        "frontMatter"
+      ],
+      "response": {
+        "id": "DEMO0003",
+        "title": "With body",
+        "status": "active",
+        "milestone": "Alpha",
+        "priority": "High",
+        "effort": 3,
+        "depends_on": [],
+        "owner": null,
+        "collaborators": [],
+        "summary": "S.",
+        "effortDisplay": {
+          "label": "Trout",
+          "value": 3,
+          "emoji": "🐡",
+          "imageUrl": null,
+          "text": "Trout · 3"
+        },
+        "needsAttention": false,
+        "validationErrors": [],
+        "effortLabel": "Trout",
+        "effortEmoji": "🐡",
+        "frontMatter": {
+          "id": "DEMO0003",
+          "title": "With body",
+          "status": "active",
+          "milestone": "Alpha",
+          "priority": "High",
+          "effort": 3,
+          "depends_on": [],
+          "summary": "S."
+        },
+        "bodyHtml": "<h1>DEMO0003 — With body</h1>\n<p>Text.</p>\n"
+      }
+    },
+    "authored-id-differs": {
+      "description": "The record id is the filename id; frontMatter keeps the authored id.",
+      "optional": [
+        "dependsOnMissing",
+        "effortLabel",
+        "effortEmoji",
+        "effortImage",
+        "completed_on",
+        "removed_on",
+        "removed_reason"
+      ],
+      "nullable": [
+        "effortDisplay.emoji",
+        "effortDisplay.imageUrl"
+      ],
+      "freeForm": [
+        "frontMatter"
+      ],
+      "response": {
+        "id": "DEMO0006",
+        "title": "With body",
+        "status": "active",
+        "milestone": "Alpha",
+        "priority": "High",
+        "effort": 3,
+        "depends_on": [],
+        "owner": null,
+        "collaborators": [],
+        "summary": "S.",
+        "effortDisplay": {
+          "label": "Trout",
+          "value": 3,
+          "emoji": "🐡",
+          "imageUrl": null,
+          "text": "Trout · 3"
+        },
+        "needsAttention": false,
+        "validationErrors": [],
+        "effortLabel": "Trout",
+        "effortEmoji": "🐡",
+        "frontMatter": {
+          "id": "DEMO0099",
+          "title": "With body",
+          "status": "active",
+          "milestone": "Alpha",
+          "priority": "High",
+          "effort": 3,
+          "depends_on": [],
+          "summary": "S."
+        },
+        "bodyHtml": "<h1>DEMO0003 — With body</h1>\n<p>Text.</p>\n"
+      }
+    }
+  }
+}

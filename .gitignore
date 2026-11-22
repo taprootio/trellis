@@ -4,3 +4,6 @@ node_modules/
 # Derived, non-gated report (SPEC §8.4): materialized from git by `trellis history
 # --write`, regenerable at build time, never authoritative. Not committed.
 trellis/history.json
+
+# Built by `npm run build:viewer` (and prepack); published, never committed (TRL0005).
+viewer/dist/

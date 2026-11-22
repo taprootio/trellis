@@ -15,7 +15,7 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { loadConfig, paths, scanIdPattern } from "./backlog.mjs";
+import { ID_PATTERN_ERROR, loadConfig, paths, scanIdPattern } from "./backlog.mjs";
 import { TrellisError } from "./mcp.mjs";
 import { ledgerIdMatcher } from "./ledger.mjs";
 import { detectGoodAgent } from "./init.mjs";
@@ -183,7 +183,8 @@ function requireId(repoRoot, raw, cfg, cfgErrors) {
   if (typeof raw !== "string" || !raw.trim()) throw new TrellisError("`id` is required", "invalid_request");
   const id = raw.trim();
   if (/[\r\n]/.test(id)) throw new TrellisError("`id` must be a single line", "invalid_request");
-  if (!cfgErrors.length) {
+  // A prefix that only fails to compile as a scan pattern still has a usable literal id format.
+  if (cfgErrors.every((e) => e === ID_PATTERN_ERROR)) {
     // One rule for every mode: the literal (escaped) id format, or an id `check` reads from
     // an existing task file (a prefix with a regex character can name such a file).
     if (!ledgerIdMatcher(cfg).test(id) && !isScannedTaskFile(repoRoot, id, cfg)) throw new TrellisError(`invalid task id: ${id} (expected ${cfg.idPrefix} + ${cfg.idWidth} digits)`, "invalid_request");

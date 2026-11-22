@@ -92,6 +92,8 @@ jobs:
       # Trusted publishing (OIDC) needs npm >= 11.5.1; LTS Node bundles an older npm.
       - run: npm install -g npm@latest
       - run: npm ci
+      # The viewer bundle is git-ignored, so build it before the gates and the pack (TRL0005).
+      - run: npm run build:viewer
       # Gates — never publish or release a red tree.
       - run: node --test
       - run: node scripts/backlog-readme.mjs --check

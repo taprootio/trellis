@@ -134,24 +134,41 @@ export function artifactSet(repoRoot, cfg) {
 }
 
 // ----------------------------------------------------------------- config
-export function loadConfig(repoRoot) {
+// `readText(path)` returns the text, `null` when the file is absent, or `{ skip: reason }`
+// when a caller (the viewer) refused it. The default is today's plain read.
+// A directory or unreadable file is a skip, so the loaders report it instead of throwing.
+export function defaultReadText(path) {
+  if (!existsSync(path)) return null;
+  try { return readFileSync(path, "utf8"); } catch (e) { return { skip: e.code || e.message }; }
+}
+
+export function loadConfig(repoRoot, { readText = defaultReadText } = {}) {
   const warnings = [];
   const configPath = paths(repoRoot).config;
-  if (!existsSync(configPath)) return { cfg: null, warnings, errors: ["missing backlog.config.json"] };
+  const text = readText(configPath);
+  if (text === null) return { cfg: null, warnings, errors: ["missing backlog.config.json"] };
+  if (typeof text !== "string") return { cfg: null, warnings, errors: [`backlog.config.json was skipped (${text.skip})`] };
   let cfg;
   try {
-    cfg = JSON.parse(readFileSync(configPath, "utf8"));
+    cfg = JSON.parse(text);
   } catch (e) {
     return { cfg: null, warnings, errors: [`backlog.config.json is not valid JSON (${e.message})`] };
   }
   return validateConfig(cfg);
 }
 
+// True when String(value) does not throw; JSON can carry `{ "toString": 1 }`.
+const printable = (value) => { try { String(value); return true; } catch { return false; } };
+
 // The config rules, on a parsed object. `loadConfig` reads the file and calls this; the
 // local-mode switch calls it on the config it would write, so both apply one rule set.
 export function validateConfig(cfg) {
   const warnings = [];
   const errors = [];
+  // JSON.parse accepts `null`, arrays and scalars; none of them is a config.
+  if (cfg === null || typeof cfg !== "object" || Array.isArray(cfg)) {
+    return { cfg: null, warnings, errors: ["backlog.config.json must be a JSON object"] };
+  }
   if (typeof cfg.idPrefix !== "string" || !cfg.idPrefix) errors.push("config: `idPrefix` must be a non-empty string");
   if (!Number.isInteger(cfg.idWidth) || cfg.idWidth < 1) errors.push("config: `idWidth` must be a positive integer");
   // Optional (TRL0032): floors the *organic* next id (max(floor, max+1)) so freshly
@@ -163,14 +180,23 @@ export function validateConfig(cfg) {
       errors.push(`config: \`nextIdFloor\` (${cfg.nextIdFloor}) must be < 10^idWidth (${10 ** cfg.idWidth}) to fit ${cfg.idWidth} digits`);
     }
   }
+  // Scan mode interpolates the prefix unescaped into a RegExp, so one that does not compile
+  // (such as `[`) is a config error here instead of a throw in readBacklog.
+  if (typeof cfg.idPrefix === "string" && cfg.idPrefix && !scanPatternCompiles(cfg)) {
+    errors.push(ID_PATTERN_ERROR);
+  }
   validateIdAllocation(cfg, errors);
   validateLegacy(cfg, errors);
   // A present key must be valid, so an explicit null is an error, not a default (TRL0038).
   if (Object.hasOwn(cfg, "generatedArtifacts") && cfg.generatedArtifacts !== "committed" && cfg.generatedArtifacts !== "local") {
     errors.push('config: `generatedArtifacts` must be "committed" or "local" when present');
   }
-  if (!Array.isArray(cfg.milestones) || cfg.milestones.length === 0) errors.push("config: `milestones` must be a non-empty array");
-  if (!Array.isArray(cfg.priorities) || cfg.priorities.length === 0) errors.push("config: `priorities` must be a non-empty array");
+  // Both lists are joined as strings. Only an entry that cannot become a string (an object
+  // whose toString is not callable) would throw there; anything else stays accepted, as before.
+  for (const key of ["milestones", "priorities"]) {
+    if (!Array.isArray(cfg[key]) || cfg[key].length === 0) errors.push(`config: \`${key}\` must be a non-empty array`);
+    else if (!cfg[key].every(printable)) errors.push(`config: \`${key}\` entries must all be printable values`);
+  }
   const effortValues = Array.isArray(cfg.effort) ? cfg.effort : cfg.effort && cfg.effort.values;
   if (!Array.isArray(effortValues) || effortValues.length === 0) {
     errors.push("config: `effort` must be an array of numbers (or an object with a `values` array)");
@@ -191,6 +217,8 @@ export function validateConfig(cfg) {
   if (cfg.tasksDir != null) {
     if (typeof cfg.tasksDir !== "string" || !cfg.tasksDir.trim()) {
       errors.push("config: `tasksDir` must be a non-empty string when present");
+    } else if (cfg.tasksDir.includes("\0")) {
+      errors.push("config: `tasksDir` must not contain a NUL character");
     } else if (isAbsolute(cfg.tasksDir) || cfg.tasksDir.split(/[/\\]/).includes("..")) {
       errors.push("config: `tasksDir` must be a repo-relative path within the repo (no absolute path or `..` segments)");
     } else {
@@ -209,6 +237,10 @@ export function validateConfig(cfg) {
 
   if (cfg.specVersion == null) {
     warnings.push(`config has no \`specVersion\`; assuming current spec ${SPEC_VERSION}`);
+  } else if (!printable(cfg.specVersion)) {
+    // String() on an object with no callable toString throws; report it instead. A finite
+    // number (2.5) was always accepted, so it still is.
+    errors.push("config: `specVersion` must be a string such as \"1.0\"");
   } else if (String(cfg.specVersion).split(".")[0] !== SPEC_VERSION.split(".")[0]) {
     warnings.push(`config \`specVersion\` ${cfg.specVersion} differs in major version from this tool's spec ${SPEC_VERSION}`);
   }
@@ -317,13 +349,15 @@ export function findActiveMember(roster, handle) {
 // result-object idiom. Absent file → empty roster, no errors. Never throws; the
 // caller surfaces errors. Top-level extra keys are tolerated (room for the future
 // cross-repo direction); member keys are validated strictly.
-export function loadRoster(repoRoot) {
+export function loadRoster(repoRoot, { readText = defaultReadText } = {}) {
   const warnings = [];
   const teamPath = paths(repoRoot).team;
-  if (!existsSync(teamPath)) return { roster: emptyRoster(), warnings, errors: [] };
+  const text = readText(teamPath);
+  if (text === null) return { roster: emptyRoster(), warnings, errors: [] };
+  if (typeof text !== "string") return { roster: emptyRoster(), warnings, errors: [`team.json was skipped (${text.skip})`] };
   let raw;
   try {
-    raw = JSON.parse(readFileSync(teamPath, "utf8"));
+    raw = JSON.parse(text);
   } catch (e) {
     return { roster: emptyRoster(), warnings, errors: [`team.json is not valid JSON (${e.message})`] };
   }
@@ -379,11 +413,13 @@ export function attachEffortScale(cfg, errors = []) {
   return cfg.effortScale;
 }
 
+// Only real numbers are labeled: a malformed entry is already a config error, and String() on
+// an object with no callable toString would throw before that error could be reported.
 function identityScale(values) {
   return {
     isIdentity: true,
     name: "fibonacci",
-    byNumber: new Map(values.map((v) => [v, { label: String(v) }])),
+    byNumber: new Map(values.filter((v) => typeof v === "number" && Number.isFinite(v)).map((v) => [v, { label: String(v) }])),
     byLabel: new Map(),
   };
 }
@@ -486,14 +522,24 @@ function unquote(s) {
   return m ? m[1] : s;
 }
 
+// The one rule for where front matter ends: `block` is the text between the fences (null when
+// there is no closed block) and `body` is what follows the closing fence, minus its newline.
+export function splitFrontMatter(text) {
+  const norm = text.replace(/\r\n/g, "\n");
+  // The closing fence is `---` alone on its line (trailing blanks allowed), not a prefix.
+  const m = norm.match(/^---\n([\s\S]*?)\n---[ \t]*(?=\n|$)/);
+  if (!m) return { block: null, body: norm };
+  return { block: m[1], body: norm.slice(m[0].length).replace(/^\n/, "") };
+}
+
 // Parse the YAML-subset front-matter block. Tolerates CRLF, `#` comments, and
 // colons inside values; flags malformed lines and duplicate keys via `errors`.
 export function parseFrontMatter(text, where, errors = []) {
-  const block = text.replace(/\r\n/g, "\n").match(/^---\n([\s\S]*?)\n---/);
-  if (!block) { errors.push(`${where}: missing or unterminated YAML front-matter`); return null; }
+  const { block } = splitFrontMatter(text);
+  if (block === null) { errors.push(`${where}: missing or unterminated YAML front-matter`); return null; }
   const fm = {};
   const seen = new Set();
-  const lines = block[1].split("\n");
+  const lines = block.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line.trim() || line.trim().startsWith("#")) continue;
@@ -580,14 +626,33 @@ export function composeFile(fm, body) {
 }
 
 // --------------------------------------------------------------- reading
-function idsFromDir(dir, fileRe) {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).map((f) => f.match(fileRe)).filter(Boolean).map((m) => m[1]);
+function idsFromNames(names, fileRe) {
+  return names.map((f) => f.match(fileRe)).filter(Boolean).map((m) => m[1]);
+}
+
+// Default seams for readBacklog. `listDir` returns names, `[]` for an absent directory, or
+// `{ skip: reason }`; `readItem` returns `{ fm, body, syntaxErrors }` or `{ skip: reason }`.
+const defaultListDir = (dir) => (existsSync(dir) ? readdirSync(dir) : []);
+function defaultReadItem(path, where) {
+  const text = readFileSync(path, "utf8");
+  const syntaxErrors = [];
+  const fm = parseFrontMatter(text, where, syntaxErrors);
+  return { fm, body: splitFrontMatter(text).body, syntaxErrors };
 }
 
 // The scan-mode id pattern, as readBacklog reads it from the config (the prefix is not
 // escaped). The one owner for item checks, filenames and the MCP prompts (TRL0040).
 export const scanIdPattern = (cfg) => `${cfg.idPrefix}\\d{${cfg.idWidth}}`;
+// Both regexes built from the prefix must compile: a prefix like `)T(` fits the filename one
+// (inside its capture group) but not the bare id one.
+function scanPatternCompiles(cfg) {
+  try {
+    new RegExp(`^(${scanIdPattern(cfg)})\\.md$`);
+    new RegExp(`^${scanIdPattern(cfg)}$`);
+    return true;
+  } catch { return false; }
+}
+export const ID_PATTERN_ERROR = "config: `idPrefix` does not form a valid id pattern";
 
 // The per-item checks, shared by readBacklog and the ledger create preflight (TRL0037).
 function makeValidators(cfg, roster, ids) {
@@ -706,20 +771,31 @@ export function activeItemErrors(cfg, data, it) {
   return errors;
 }
 
-export function readBacklog(repoRoot, cfg) {
+export function readBacklog(repoRoot, cfg, { readItem = defaultReadItem, listDir = defaultListDir, readText = defaultReadText } = {}) {
   const p = paths(repoRoot, cfg);
   const fileRe = new RegExp(`^(${scanIdPattern(cfg)})\\.md$`);
   const errors = [];
+  const skipped = []; // { path, reason }: a directory label or `kind/file`, left out by a seam
 
   // The roster lives at the fixed config home; its load/validation errors are
   // config-class and surface here so `--check`/validate fail on a malformed team.json
   // (SPEC §7.2). An absent roster is empty — owner/collaborators stay optional.
-  const { roster, errors: rosterErrors } = loadRoster(repoRoot);
-  errors.push(...rosterErrors);
+  const { roster, errors: rosterErrors } = loadRoster(repoRoot, { readText });
+  // A loop, not a spread: a huge roster can yield more diagnostics than a call accepts.
+  for (const e of rosterErrors) errors.push(e);
+
+  // One listing per status directory, shared by the id scan and the item read, so a directory
+  // that vanishes between them cannot add ids without items.
+  const listings = new Map();
+  for (const [label, dir] of [["active", p.active], ["completed/tasks", p.completedTasks], ["removed", p.removed]]) {
+    const names = listDir(dir);
+    if (Array.isArray(names)) listings.set(dir, names);
+    else { skipped.push({ path: label, reason: names.skip }); listings.set(dir, []); }
+  }
 
   const byId = new Map();
   for (const [label, dir] of [["active", p.active], ["completed/tasks", p.completedTasks], ["removed", p.removed]]) {
-    for (const id of idsFromDir(dir, fileRe)) {
+    for (const id of idsFromNames(listings.get(dir), fileRe)) {
       const at = byId.get(id) || []; at.push(label); byId.set(id, at);
     }
   }
@@ -728,14 +804,16 @@ export function readBacklog(repoRoot, cfg) {
 
   const readDir = (dir, kind, isActive) => {
     const out = [];
-    if (!existsSync(dir)) return out;
-    for (const f of readdirSync(dir).sort()) {
+    for (const f of [...listings.get(dir)].sort()) {
       if (!fileRe.test(f)) {
         if (isActive && /\.md$/.test(f)) errors.push(`active/${f}: filename must be ${cfg.idPrefix} + ${cfg.idWidth} digits`);
         continue;
       }
-      const fm = parseFrontMatter(readFileSync(join(dir, f), "utf8"), `${kind}/${f}`, errors);
-      if (fm) out.push({ ...fm, _file: f });
+      const item = readItem(join(dir, f), `${kind}/${f}`);
+      if (item.skip !== undefined) { skipped.push({ path: `${kind}/${f}`, reason: item.skip }); continue; }
+      // A loop, not a spread: a spread of ~100k diagnostics overflows the call stack.
+      for (const e of item.syntaxErrors) errors.push(e);
+      if (item.fm) out.push({ ...item.fm, _file: f });
     }
     return out;
   };
@@ -776,7 +854,7 @@ export function readBacklog(repoRoot, cfg) {
     validateAssignees(it, err, false);
   }
 
-  return { active, completed, removed, ids, errors, roster };
+  return { active, completed, removed, ids, errors, roster, skipped, configErrors: rosterErrors };
 }
 
 // ------------------------------------------------------------------ ids
@@ -789,7 +867,11 @@ export function nextId(ids, cfg) {
   // `nextIdFloor` (TRL0032) reserves the low range for an imported band: the next
   // organically-created id is max(max+1, floor). Absent floor ⇒ the historical max+1.
   const floor = Number.isInteger(cfg.nextIdFloor) && cfg.nextIdFloor > 0 ? cfg.nextIdFloor : 0;
-  return cfg.idPrefix + String(Math.max(max + 1, floor)).padStart(cfg.idWidth, "0");
+  const next = Math.max(max + 1, floor);
+  // BigInt prints a huge floor in full digits (String() would switch to `1e+21`), but it
+  // throws on a non-integer, which a variable-length scan prefix can leave behind.
+  const digits = Number.isInteger(next) && !Number.isSafeInteger(next) ? BigInt(next).toString() : String(next);
+  return cfg.idPrefix + digits.padStart(cfg.idWidth, "0");
 }
 
 // ------------------------------------------------------------- rendering

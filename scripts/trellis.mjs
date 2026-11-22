@@ -25,6 +25,7 @@ Commands:
   claim      claim task ids from the local id ledger
   history    derive per-task history from git
   mcp        serve Trellis operations over MCP stdio
+  serve      serve a local, read-only viewer for one or more backlogs
   pr-title   lint a PR title from PR_TITLE
 
 Run "trellis <command> --help" for command-specific options.
@@ -38,6 +39,7 @@ const COMMANDS = {
   claim: ["trellis-claim.mjs"],
   history: ["trellis-history.mjs"],
   mcp: ["trellis-mcp.mjs"],
+  serve: ["trellis-serve.mjs"],
   "pr-title": ["pr-title-lint.mjs"],
 };
 

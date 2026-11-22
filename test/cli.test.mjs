@@ -5,13 +5,14 @@
 import { test } from "node:test";
 import { ledgerTest, initRefFormat } from "./git-support.mjs";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, realpathSync, symlinkSync, renameSync, lstatSync, readdirSync } from "node:fs";
+import { cpSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, realpathSync, symlinkSync, renameSync, lstatSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { applyScaffold } from "../src/init.mjs";
 import { loadConfig, readBacklog, generateArtifacts } from "../src/backlog.mjs";
+import { startViewer } from "../src/viewer/server.mjs";
 
 const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cliScript = join(sourceRoot, "scripts", "trellis.mjs");
@@ -123,26 +124,90 @@ test("packaged scaffold templates match the live scaffold sources", () => {
   }
 });
 
-test("package ships scaffold templates without the live backlog index", () => {
+// npm 11 prints an array; npm 12 prints an object keyed by package name.
+function packedPaths(cwd, cache) {
+  // --ignore-scripts: the build ran once already, and prepack must not rebuild or print first.
+  const out = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, npm_config_cache: cache },
+  });
+  const parsed = JSON.parse(out);
+  const [{ files }] = Array.isArray(parsed) ? parsed : Object.values(parsed);
+  return files.map((f) => f.path);
+}
+
+// The Espalier bundle ships only with its license, notices and the owner's grant (TRL0005).
+function viewerPackProblems(paths, filesField) {
+  const listed = filesField.some((f) => f.replace(/\/$/, "") === "viewer/dist");
+  const packed = paths.some((p) => p.startsWith("viewer/dist/"));
+  const problems = [];
+  if (packed !== listed) problems.push(`viewer/dist packed=${packed} but files lists it=${listed}`);
+  if (packed) {
+    for (const need of ["viewer/dist/ESPALIER-LICENSE.md", "viewer/dist/licenses/THIRD_PARTY_NOTICES.md", "viewer/dist/licenses/LIT-LICENSE", "viewer/ESPALIER-GRANT.md"]) {
+      if (!paths.includes(need)) problems.push(`${need} is not packed`);
+    }
+  }
+  return problems;
+}
+
+// The only test that runs the real viewer build; every other test uses a fixture dist.
+test("package ships scaffold templates and the viewer only with its grant", async () => {
   const cache = mkdtempSync(join(tmpdir(), "trellis-npm-cache-"));
+  const copy = mkdtempSync(join(tmpdir(), "trellis-pack-copy-"));
   try {
-    const out = execFileSync("npm", ["pack", "--dry-run", "--json"], {
-      cwd: sourceRoot,
-      encoding: "utf8",
-      env: { ...process.env, npm_config_cache: cache },
-    });
-    // npm 11 prints an array; npm 12 prints an object keyed by package name.
-    const parsed = JSON.parse(out);
-    const [{ files }] = Array.isArray(parsed) ? parsed : Object.values(parsed);
-    const paths = files.map((f) => f.path);
+    execFileSync("npm", ["run", "-s", "build:viewer"], { cwd: sourceRoot, stdio: ["ignore", "ignore", "pipe"] });
+    const dist = join(sourceRoot, "viewer", "dist");
+    for (const f of ["index.html", "esp-reset.css", "ESPALIER-LICENSE.md", "licenses/THIRD_PARTY_NOTICES.md", "licenses/LIT-LICENSE"]) {
+      assert.ok(existsSync(join(dist, f)), `the build should write viewer/dist/${f}`);
+    }
+    const shell = readFileSync(join(dist, "index.html"), "utf8");
+    const js = shell.match(/src="\/app\/(app-[^"]+\.js)"/);
+    assert.ok(js && existsSync(join(dist, js[1])), "index.html should reference the built bundle by a root-relative /app/ URL");
+    assert.match(shell, /href="\/app\/esp-reset\.css"/);
+
+    // A deep link gets the shell, and the shell's root-relative assets load from there.
+    const viewer = await startViewer({ entries: [{ id: "trellis", name: "Trellis", path: sourceRoot }], port: 0, distDir: dist, watch: false });
+    try {
+      const page = await fetch(`${viewer.url}/b/trellis/task/TRL0005`);
+      assert.equal(page.status, 200);
+      const html = await page.text();
+      for (const asset of [...html.matchAll(/(?:src|href)="(\/app\/[^"]+)"/g)].map((m) => m[1])) {
+        assert.equal((await fetch(`${viewer.url}${asset}`)).status, 200, `${asset} should load`);
+      }
+    } finally {
+      await viewer.close();
+    }
+
+    const pkg = JSON.parse(readFileSync(join(sourceRoot, "package.json"), "utf8"));
+    const paths = packedPaths(sourceRoot, cache);
     assert.ok(paths.includes("docs/import.md"), "the README-linked import guide should ship");
     assert.ok(paths.includes("templates/trellis/playbooks/work-task.md"), "playbook templates should ship");
     assert.ok(paths.includes("templates/trellis/branch-protection.md"), "branch-protection template should ship");
     assert.ok(paths.includes("templates/.github/pull_request_template.md"), "PR template should ship");
     assert.equal(paths.includes("trellis/README.md"), false, "the live generated backlog index should not ship");
     assert.equal(paths.some((p) => p.startsWith("trellis/active/")), false, "live backlog items should not ship");
+    assert.deepEqual(viewerPackProblems(paths, pkg.files), []);
+
+    // In a copy with viewer/dist listed, the rule fails until the grant is listed and present.
+    // The real grant may already be listed and present; the negative check starts without it.
+    const GRANT = "viewer/ESPALIER-GRANT.md";
+    const baseFiles = pkg.files.filter((f) => f !== GRANT);
+    for (const entry of [...baseFiles, "viewer/dist"]) {
+      const rel = entry.replace(/\/$/, "");
+      if (existsSync(join(sourceRoot, rel))) cpSync(join(sourceRoot, rel), join(copy, rel), { recursive: true });
+    }
+    rmSync(join(copy, GRANT), { force: true });
+    const withDist = { ...pkg, files: [...baseFiles, "viewer/dist/"] };
+    writeFileSync(join(copy, "package.json"), JSON.stringify(withDist, null, 2));
+    assert.ok(viewerPackProblems(packedPaths(copy, cache), withDist.files).includes("viewer/ESPALIER-GRANT.md is not packed"));
+    writeFileSync(join(copy, "viewer", "ESPALIER-GRANT.md"), "grant\n");
+    const withGrant = { ...withDist, files: [...withDist.files, "viewer/ESPALIER-GRANT.md"] };
+    writeFileSync(join(copy, "package.json"), JSON.stringify(withGrant, null, 2));
+    assert.deepEqual(viewerPackProblems(packedPaths(copy, cache), withGrant.files), []);
   } finally {
     rmSync(cache, { recursive: true, force: true });
+    rmSync(copy, { recursive: true, force: true });
   }
 });
 

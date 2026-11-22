@@ -1568,6 +1568,15 @@ test("a bad --skip value is a usage error and nothing is written", () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("a scaffold config that check would reject fails before anything is written", () => {
+  const root = tempRepo();
+  try {
+    const r = runInit(root, ["--prefix", "[", "--id-width", "4"]);
+    assert.notEqual(r.status, 0);
+    assert.deepEqual(readdirSync(root), [], "nothing written");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("--skip agents writes no AGENTS.md and leaves an existing one out of the reconciliation scan", () => {
   const fresh = tempRepo();
   try {
@@ -2227,5 +2236,21 @@ test("--skip agents renders no block, so a huge id width still dry-runs", () => 
   try {
     const r = cliRun(root, ["--prefix", "DEMO", "--id-width", "1000000000", "--skip", "agents", "--dry-run"]);
     assert.equal(r.status, 0, r.stderr.slice(0, 300));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("init --force rewrites a config whose JSON root is null; without --force it reports a config error", () => {
+  const root = tempRepo();
+  try {
+    mkdirSync(join(root, "trellis"), { recursive: true });
+    const cfgPath = join(root, "trellis", "backlog.config.json");
+    writeFileSync(cfgPath, "null\n");
+    const plain = spawnSync(process.execPath, [join(sourceRoot, "scripts", "trellis-init.mjs"), root, "--prefix", "DEMO", "--skip", "agents"], { encoding: "utf8" });
+    assert.equal(plain.status, 1, plain.stderr);
+    assert.match(plain.stderr, /JSON object/);
+    assert.doesNotMatch(plain.stderr, /TypeError/);
+    const { summary } = applyScaffold(root, { prefix: "DEMO", force: true }, {}, sourceRoot);
+    assert.deepEqual(summary.errors, []);
+    assert.equal(JSON.parse(readFileSync(cfgPath, "utf8")).idPrefix, "DEMO");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

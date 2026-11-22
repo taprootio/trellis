@@ -1,0 +1,9 @@
+{
+  "backlogs": [
+    { "id": "taproot", "name": "Taproot", "path": "~/Documents/GitHub/taproot" },
+    { "id": "espalier", "name": "Espalier", "path": "~/Documents/GitHub/taproot-controls" }
+  ],
+  "port": 4747,
+  "bind": "127.0.0.1",
+  "allowedHosts": ["trellis.test"]
+}

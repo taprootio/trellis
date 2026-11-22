@@ -15,11 +15,14 @@ import {
   loadRoster,
   findActiveMember,
   readBacklog,
+  nextId,
   resolveEffort,
   generateArtifacts,
   buildBacklogJson,
   composeFile,
   parseFrontMatter,
+  splitFrontMatter,
+  validateConfig,
   paths,
   branchNameProblem,
   artifactSet,
@@ -129,6 +132,25 @@ test("config errors: missing mapping, duplicate label, bad types, unknown active
       assert.ok(errors.some((e) => re.test(e)), `expected ${re} in ${JSON.stringify(errors)}`);
     });
   }
+});
+
+test("a specVersion that cannot become a string is a config error, never a throw; others stay accepted", () => {
+  for (const ok of [true, {}, [1], 2.5]) assert.deepEqual(configErrors({ ...ARRAY_CFG, specVersion: ok }), [], JSON.stringify(ok));
+  const hostile = JSON.stringify({ ...ARRAY_CFG, specVersion: { toString: 1 } });
+  for (const [json, re] of [[hostile, /`specVersion` must be a string/]]) {
+    withRepo({ ...ARRAY_CFG }, {}, (root) => {
+      writeFileSync(join(root, "trellis/backlog.config.json"), json);
+      const { errors } = loadConfig(root);
+      assert.ok(errors.some((e) => re.test(e)), JSON.stringify(errors));
+    });
+  }
+});
+
+test("a finite numeric specVersion is still accepted", () => {
+  withRepo({ ...ARRAY_CFG }, {}, (root) => {
+    writeFileSync(join(root, "trellis/backlog.config.json"), JSON.stringify({ ...ARRAY_CFG, specVersion: 2.5 }));
+    assert.deepEqual(loadConfig(root).errors, []);
+  });
 });
 
 test("config accepts a valid nextIdFloor and rejects invalid ones (TRL0032)", () => {
@@ -1283,4 +1305,172 @@ test("summary: 0 still fails on a qualifying item and on a non-qualifying one in
       assert.ok(legacyErrors(root).some((e) => e.includes("missing `summary`")), id);
     } finally { cleanup(root); }
   }
+});
+
+// ------------------------------------------- reading seams (TRL0005)
+
+test("a config whose JSON root is not an object is a config error, not a throw", () => {
+  for (const raw of [null, [], 3, "x"]) {
+    const root = mkdtempSync(join(tmpdir(), "trellis-backlog-"));
+    try {
+      mkdirSync(join(root, "trellis"), { recursive: true });
+      writeFileSync(join(root, "trellis", "backlog.config.json"), JSON.stringify(raw));
+      const { cfg, errors } = loadConfig(root);
+      assert.equal(cfg, null);
+      assert.ok(errors.some((e) => e.includes("JSON object")), JSON.stringify(raw));
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+  assert.ok(validateConfig(null).errors.length > 0);
+});
+
+test("a scan idPrefix that does not compile is a config error, while R+ still loads", () => {
+  for (const idPrefix of ["[", "R[", "(", "*"]) {
+    assert.ok(configErrors({ ...ARRAY_CFG, idPrefix }).some((e) => e.includes("idPrefix")), idPrefix);
+  }
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, idPrefix: "R+" }), []);
+});
+
+test("the default seams read the files as before and add skipped and configErrors", () => {
+  withRepo(ARRAY_CFG, { active: [{ id: "DEMO0001", title: "T", effort: 3 }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    assert.deepEqual(data.errors, []);
+    assert.deepEqual(data.skipped, []);
+    assert.deepEqual(data.configErrors, []);
+    assert.deepEqual(data.active.map((a) => a._file), ["DEMO0001.md"]);
+    assert.deepEqual([...data.ids], ["DEMO0001"]);
+  });
+});
+
+test("an absent team.json is an empty roster, a skipped one is a roster error; same for the config", () => {
+  withRepo(ARRAY_CFG, {}, (root) => {
+    assert.deepEqual(loadRoster(root).errors, []);
+    assert.deepEqual(loadRoster(root, { readText: () => null }).errors, []);
+    const skippedRoster = loadRoster(root, { readText: () => ({ skip: "not a regular file" }) });
+    assert.deepEqual(skippedRoster.errors, ["team.json was skipped (not a regular file)"]);
+    assert.equal(skippedRoster.roster.members.length, 0);
+
+    assert.deepEqual(loadConfig(root, { readText: () => null }).errors, ["missing backlog.config.json"]);
+    const skippedCfg = loadConfig(root, { readText: () => ({ skip: "leaves the worktree" }) });
+    assert.equal(skippedCfg.cfg, null);
+    assert.deepEqual(skippedCfg.errors, ["backlog.config.json was skipped (leaves the worktree)"]);
+  });
+});
+
+test("readBacklog reports a skipped roster as configErrors beside errors", () => {
+  withRepo(ARRAY_CFG, {}, (root) => {
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg, { readText: (p) => (p.endsWith("team.json") ? { skip: "fifo" } : null) });
+    assert.deepEqual(data.configErrors, ["team.json was skipped (fifo)"]);
+    assert.ok(data.errors.includes(data.configErrors[0]));
+  });
+});
+
+test("readItem and listDir seams: skips are recorded, a skipped directory adds no ids, syntax errors flow into errors", () => {
+  withRepo(ARRAY_CFG, { active: [{ id: "DEMO0001", title: "A", effort: 3 }, { id: "DEMO0002", title: "B", effort: 3 }], completed: [{ id: "DEMO0009", title: "C" }] }, (root) => {
+    const { cfg } = loadConfig(root);
+    const calls = [];
+    const data = readBacklog(root, cfg, {
+      listDir: (dir) => (dir === join(root, "trellis", "completed", "tasks") ? { skip: "outside the worktree" } : ["DEMO0001.md", "DEMO0002.md"].filter(() => dir === join(root, "trellis", "active"))),
+      readItem: (path, where) => {
+        calls.push(where);
+        if (where === "active/DEMO0002.md") return { skip: "unreadable" };
+        return { fm: { id: "DEMO0001", title: "A", status: "active", milestone: "Alpha", priority: "High", effort: 3, depends_on: [], summary: "S." }, body: "b", syntaxErrors: ["active/DEMO0001.md: odd line"] };
+      },
+    });
+    assert.deepEqual(calls, ["active/DEMO0001.md", "active/DEMO0002.md"]);
+    assert.deepEqual(data.skipped, [{ path: "completed/tasks", reason: "outside the worktree" }, { path: "active/DEMO0002.md", reason: "unreadable" }]);
+    assert.ok(data.errors.includes("active/DEMO0001.md: odd line"));
+    assert.deepEqual([...data.ids].sort(), ["DEMO0001", "DEMO0002"], "the skipped directory contributed no ids");
+    assert.equal(data.completed.length, 0);
+  });
+});
+
+test("splitFrontMatter splits on the rule parseFrontMatter uses", () => {
+  assert.deepEqual(splitFrontMatter("---\na: 1\n---\n\n# Body\n"), { block: "a: 1", body: "\n# Body\n" });
+  assert.deepEqual(splitFrontMatter("---\r\na: 1\r\n---\r\nx\r\n"), { block: "a: 1", body: "x\n" });
+  assert.deepEqual(splitFrontMatter("---\na: 1\n"), { block: null, body: "---\na: 1\n" });
+  assert.deepEqual(splitFrontMatter("no fences"), { block: null, body: "no fences" });
+  const errors = [];
+  assert.equal(parseFrontMatter("---\na: 1\n", "x", errors), null);
+  assert.equal(errors.length, 1);
+});
+
+test("a directory at backlog.config.json or team.json is a structured error with the default reader", () => {
+  withRepo(ARRAY_CFG, {}, (root) => {
+    const dirs = join(root, "trellis", "team.json");
+    mkdirSync(dirs);
+    const roster = loadRoster(root);
+    assert.equal(roster.errors.length, 1);
+    assert.match(roster.errors[0], /^team\.json was skipped \(/);
+    rmSync(join(root, "trellis", "backlog.config.json"));
+    mkdirSync(join(root, "trellis", "backlog.config.json"));
+    const cfg = loadConfig(root);
+    assert.equal(cfg.cfg, null);
+    assert.match(cfg.errors[0], /^backlog\.config\.json was skipped \(/);
+  });
+});
+
+test("an idPrefix that fits the filename pattern but not the bare id pattern is a config error", () => {
+  assert.ok(configErrors({ ...ARRAY_CFG, idPrefix: ")T(" }).some((e) => e.includes("idPrefix")));
+});
+
+test("a milestone or priority that cannot become a string is a config error; other values stay accepted as before", () => {
+  for (const key of ["milestones", "priorities"]) {
+    assert.ok(configErrors({ ...ARRAY_CFG, [key]: [{ toString: 1 }] }).some((e) => e.includes(`\`${key}\` entries`)), key);
+    for (const fine of [[1], [null], [{}], ["A", ["B"]]]) {
+      assert.ok(!configErrors({ ...ARRAY_CFG, [key]: fine }).some((e) => e.includes(`\`${key}\` entries`)), `${key} ${JSON.stringify(fine)}`);
+    }
+  }
+});
+
+test("a task with ~200k malformed front-matter lines reports its diagnostics without overflowing the stack", () => {
+  withRepo(ARRAY_CFG, { active: [{ id: "DEMO0001", title: "A", effort: 3 }] }, (root) => {
+    writeFileSync(join(root, "trellis", "active", "DEMO0002.md"), `---\nid: DEMO0002\n${"???\n".repeat(200_000)}---\nb\n`);
+    const { cfg } = loadConfig(root);
+    const data = readBacklog(root, cfg);
+    assert.ok(data.errors.filter((e) => e.startsWith("active/DEMO0002.md: cannot parse")).length >= 200_000);
+    assert.equal(data.active.some((i) => i.id === "DEMO0001"), true, "the other task still loads");
+  });
+});
+
+test("a team.json with a huge number of invalid members is reported, not thrown", () => {
+  withRepo(ARRAY_CFG, {}, (root) => {
+    const { cfg } = loadConfig(root);
+    const members = new Array(200_000).fill(1);
+    const readText = (p) => (p.endsWith("team.json") ? JSON.stringify({ members }) : readFileSync(p, "utf8"));
+    const data = readBacklog(root, cfg, { readText });
+    assert.ok(data.errors.length >= 200_000);
+  });
+});
+
+test("front matter closes only on a standalone fence", () => {
+  assert.equal(splitFrontMatter("---\nid: A\n---unfinished\nBody\n").block, null);
+  assert.equal(splitFrontMatter("---\nid: A\n--- \t\nBody\n").block, "id: A");
+  const errors = [];
+  parseFrontMatter("---\nid: A\n---unfinished\n", "x.md", errors);
+  assert.ok(errors.some((e) => /unterminated/.test(e)));
+});
+
+test("check accepts any positive idWidth, and nextId never throws on a fractional suffix", () => {
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, idWidth: 100001 }), []);
+  assert.deepEqual(configErrors({ ...ARRAY_CFG, idWidth: 1000000000 }), []);
+  // The scan prefix is an unescaped regex, so `A.*` matches ids of any length; the fixed-length
+  // slice then leaves a fractional suffix (5.0001), which BigInt rejects.
+  const cfg = { ...ARRAY_CFG, idPrefix: "A.*", idWidth: 4 };
+  assert.equal(nextId(["A1.5.0001"], cfg), "A.*6.0001");
+  assert.equal(nextId([], { ...cfg, nextIdFloor: 9 }), "A.*0009");
+});
+
+test("nextIdFloor accepts any integer that fits idWidth, even beyond the safe range", () => {
+  withRepo({ ...ARRAY_CFG, idWidth: 17, nextIdFloor: 1e16 }, {}, (root) => {
+    const { cfg, errors } = loadConfig(root);
+    assert.deepEqual(errors, []);
+    assert.equal(nextId([], cfg), "DEMO10000000000000000");
+  });
+  withRepo({ ...ARRAY_CFG, idWidth: 25, nextIdFloor: 1e21 }, {}, (root) => {
+    const { cfg, errors } = loadConfig(root);
+    assert.deepEqual(errors, []);
+    assert.equal(nextId([], cfg), "DEMO000" + "1" + "0".repeat(21));
+  });
 });
